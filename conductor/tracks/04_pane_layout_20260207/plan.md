@@ -28,7 +28,7 @@
 
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Focus Navigation & Zoom' (Protocol in workflow.md)
 
-## Phase 3: Pane-Aware Rendering
+## Phase 3: Pane-Aware Rendering [checkpoint: 9512e13]
 
 - [x] Task 1: Add per-pane grid dimensions and instance data generation <!-- a3eaa03 -->
   - [x] Write tests: pane grid dimensions computed from pane rect and cell size, per-pane instances have correct positions within pane bounds, two panes produce separate instance vecs with correct counts
@@ -46,16 +46,16 @@
 
 ## Phase 4: Integration — Wire PaneTree into App Event Loop
 
-- [ ] Task 1: Refactor App to hold PaneTree instead of single terminal/pty
-  - [ ] Write tests: App creates single-pane tree on startup, each pane has its own Terminal and PtySession, pane count matches tree leaf count
-  - [ ] Replace App's `terminal`/`pty` fields with PaneTree, spawn PTY+Terminal per pane leaf
+- [x] Task 1: Refactor App to hold PaneTree instead of single terminal/pty <!-- 28bfb42 -->
+  - [x] Write tests: App creates single-pane tree on startup, each pane has its own Terminal and PtySession, pane count matches tree leaf count
+  - [x] Replace App's `terminal`/`pty` fields with PaneTree, spawn PTY+Terminal per pane leaf
 
-- [ ] Task 2: Wire keyboard input routing and pane commands
-  - [ ] Write tests: normal keys route to focused pane PTY, pane-split keybinding triggers split, pane-close keybinding triggers close, focus-direction keybinding switches focus, zoom keybinding toggles zoom
-  - [ ] Intercept pane command keys before PTY dispatch, route remaining input to focused pane
+- [x] Task 2: Wire keyboard input routing and pane commands <!-- 28bfb42 -->
+  - [x] Write tests: normal keys route to focused pane PTY, pane-split keybinding triggers split, pane-close keybinding triggers close, focus-direction keybinding switches focus, zoom keybinding toggles zoom
+  - [x] Intercept pane command keys before PTY dispatch, route remaining input to focused pane
 
-- [ ] Task 3: Wire resize and multi-pane render frame
-  - [ ] Write tests: window resize recalculates all pane rects, window resize triggers PTY resize on all panes, render loop processes all visible panes
-  - [ ] Integrate pane layout recalculation into App::resize, update render_frame to iterate visible panes
+- [x] Task 3: Wire resize and multi-pane render frame <!-- 28bfb42 -->
+  - [x] Write tests: window resize recalculates all pane rects, window resize triggers PTY resize on all panes, render loop processes all visible panes
+  - [x] Integrate pane layout recalculation into App::resize, update render_frame to iterate visible panes
 
-- [ ] Task: Conductor - User Manual Verification 'Phase 4: Integration — Wire PaneTree into App Event Loop' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 4: Integration — Wire PaneTree into App Event Loop' (Protocol in workflow.md)
