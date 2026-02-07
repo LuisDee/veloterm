@@ -1,4 +1,5 @@
 use crate::renderer::grid_renderer::GridCell;
+use std::time::Duration;
 
 /// Compare two grid cell buffers row-by-row and return per-row dirty flags.
 ///
@@ -137,6 +138,81 @@ impl DamageState {
     pub fn resize(&mut self, cols: usize) {
         self.cols = cols;
         self.prev_cells = None;
+    }
+}
+
+/// Tracks per-frame timing metrics for the render loop.
+///
+/// Records diff time (damage detection), update time (GPU buffer writes),
+/// and total frame time. Computes rolling averages over a configurable
+/// summary interval and logs them periodically.
+pub struct FrameMetrics {
+    diff_times: Vec<Duration>,
+    update_times: Vec<Duration>,
+    total_times: Vec<Duration>,
+    summary_interval: usize,
+    frame_count: usize,
+}
+
+impl FrameMetrics {
+    /// Create a new FrameMetrics that logs a summary every `summary_interval` frames.
+    pub fn new(summary_interval: usize) -> Self {
+        Self {
+            diff_times: Vec::new(),
+            update_times: Vec::new(),
+            total_times: Vec::new(),
+            summary_interval,
+            frame_count: 0,
+        }
+    }
+
+    /// Record timing for one frame. Logs at debug level per-frame
+    /// and info level summary every `summary_interval` frames.
+    pub fn record(&mut self, diff_time: Duration, update_time: Duration, total_time: Duration) {
+        self.diff_times.push(diff_time);
+        self.update_times.push(update_time);
+        self.total_times.push(total_time);
+        self.frame_count += 1;
+
+        log::debug!(
+            "Frame {}: diff={:?} update={:?} total={:?}",
+            self.frame_count,
+            diff_time,
+            update_time,
+            total_time,
+        );
+
+        if self.frame_count.is_multiple_of(self.summary_interval) {
+            let (avg_diff, avg_update, avg_total) = self.averages();
+            log::info!(
+                "Frame metrics ({} frames): avg diff={:?} update={:?} total={:?}",
+                self.diff_times.len(),
+                avg_diff,
+                avg_update,
+                avg_total,
+            );
+            self.diff_times.clear();
+            self.update_times.clear();
+            self.total_times.clear();
+        }
+    }
+
+    /// Returns the number of frames recorded since the last summary (or since creation).
+    pub fn frame_count(&self) -> usize {
+        self.diff_times.len()
+    }
+
+    /// Compute average durations over accumulated frames.
+    /// Returns (avg_diff, avg_update, avg_total). Returns zero durations if no frames recorded.
+    pub fn averages(&self) -> (Duration, Duration, Duration) {
+        let n = self.diff_times.len();
+        if n == 0 {
+            return (Duration::ZERO, Duration::ZERO, Duration::ZERO);
+        }
+        let avg = |times: &[Duration]| {
+            times.iter().sum::<Duration>() / n as u32
+        };
+        (avg(&self.diff_times), avg(&self.update_times), avg(&self.total_times))
     }
 }
 
@@ -460,5 +536,73 @@ mod tests {
         // Next frame with same data should be clean
         let dirty = state.process_frame(&cells);
         assert!(dirty.iter().all(|&d| !d), "force flag should reset after one frame");
+    }
+
+    // ── FrameMetrics tests ───────────────────────────────────────────
+
+    use std::time::Duration;
+
+    #[test]
+    fn frame_metrics_starts_at_zero_frames() {
+        let metrics = FrameMetrics::new(60);
+        assert_eq!(metrics.frame_count(), 0);
+    }
+
+    #[test]
+    fn frame_metrics_records_frame_count() {
+        let mut metrics = FrameMetrics::new(60);
+        metrics.record(
+            Duration::from_micros(100),
+            Duration::from_micros(200),
+            Duration::from_micros(400),
+        );
+        metrics.record(
+            Duration::from_micros(150),
+            Duration::from_micros(250),
+            Duration::from_micros(500),
+        );
+        assert_eq!(metrics.frame_count(), 2);
+    }
+
+    #[test]
+    fn frame_metrics_averages_single_frame() {
+        let mut metrics = FrameMetrics::new(60);
+        metrics.record(
+            Duration::from_micros(100),
+            Duration::from_micros(200),
+            Duration::from_micros(400),
+        );
+        let (avg_diff, avg_update, avg_total) = metrics.averages();
+        assert_eq!(avg_diff, Duration::from_micros(100));
+        assert_eq!(avg_update, Duration::from_micros(200));
+        assert_eq!(avg_total, Duration::from_micros(400));
+    }
+
+    #[test]
+    fn frame_metrics_averages_multiple_frames() {
+        let mut metrics = FrameMetrics::new(60);
+        metrics.record(
+            Duration::from_micros(100),
+            Duration::from_micros(200),
+            Duration::from_micros(400),
+        );
+        metrics.record(
+            Duration::from_micros(300),
+            Duration::from_micros(400),
+            Duration::from_micros(800),
+        );
+        let (avg_diff, avg_update, avg_total) = metrics.averages();
+        assert_eq!(avg_diff, Duration::from_micros(200));
+        assert_eq!(avg_update, Duration::from_micros(300));
+        assert_eq!(avg_total, Duration::from_micros(600));
+    }
+
+    #[test]
+    fn frame_metrics_averages_zero_when_empty() {
+        let metrics = FrameMetrics::new(60);
+        let (avg_diff, avg_update, avg_total) = metrics.averages();
+        assert_eq!(avg_diff, Duration::ZERO);
+        assert_eq!(avg_update, Duration::ZERO);
+        assert_eq!(avg_total, Duration::ZERO);
     }
 }
