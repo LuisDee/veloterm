@@ -25,7 +25,7 @@
 
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Grid Diff & Previous Frame Cache' (Protocol in workflow.md)
 
-## Phase 3: Renderer Integration
+## Phase 3: Renderer Integration [checkpoint: 2df9097]
 
 - [x] Task 1: Convert to persistent instance buffer with partial row writes <!-- 51eb067 -->
   - [x] Write tests: verify byte offset calculation for row N is `row * cols * 72`, verify generate_row_instances produces correct instance data for a single row, verify full-frame generates instances for all rows
@@ -41,4 +41,4 @@
   - [x] Implement FrameMetrics struct with `std::time::Instant` measurements
   - [x] Log at debug level per-frame, info level summary every 60 frames
 
-- [ ] Task: Conductor - User Manual Verification 'Phase 3: Renderer Integration' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 3: Renderer Integration' (Protocol in workflow.md)

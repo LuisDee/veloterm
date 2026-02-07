@@ -19,7 +19,7 @@ _Link: [./conductor/tracks/core_terminal_emulation_20260207/](./conductor/tracks
 ### [x] Track 03: Configuration & Theming (M)
 _Link: [./conductor/tracks/03_config_20260207/](./conductor/tracks/03_config_20260207/)_
 
-### [ ] Track 07: Performance & Damage Tracking (M)
+### [x] Track 07: Performance & Damage Tracking (M)
 _Link: [./conductor/tracks/07_perf_damage_20260207/](./conductor/tracks/07_perf_damage_20260207/)_
 
 ---
