@@ -168,7 +168,7 @@
 
 - [x] Task: Conductor - User Manual Verification 'Text Selection' (Protocol in workflow.md) <!-- e0cbbf9 -->
 
-## Phase 9: Clipboard Integration
+## Phase 9: Clipboard Integration [checkpoint: 272b1e8]
 
 - [x] Task: Write tests for clipboard operations <!-- 144a2c6 -->
   - Write tests for copy-selected-text-to-clipboard (Cmd+C / Ctrl+Shift+C)
@@ -185,7 +185,7 @@
   - Use Cmd+C/V on macOS, Ctrl+Shift+C/V on Linux
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Conductor - User Manual Verification 'Clipboard Integration' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Clipboard Integration' (Protocol in workflow.md) <!-- 272b1e8 -->
 
 ## Phase 10: Window Resize, Shell Exit, and Integration Polish
 
