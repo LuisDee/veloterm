@@ -47,7 +47,7 @@
 
 - [x] Task: Conductor - User Manual Verification 'Config Diffing and Default Generation' (Protocol in workflow.md) <!-- 993b50b -->
 
-## Phase 3: Hot-Reload via File Watcher
+## Phase 3: Hot-Reload via File Watcher [checkpoint: 81d1b2d]
 
 - [x] Task: Write tests for config file watching and hot-reload <!-- 47e31ac -->
   - Write tests for `ConfigWatcher::new(path)` initialization
@@ -68,7 +68,7 @@
   - Ensure watcher thread shuts down cleanly on drop
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Conductor - User Manual Verification 'Hot-Reload via File Watcher' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Hot-Reload via File Watcher' (Protocol in workflow.md) <!-- 81d1b2d -->
 
 ## Phase 4: Integration — Wire Config into Renderer and Input
 
