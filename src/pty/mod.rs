@@ -1,0 +1,235 @@
+// PTY management: spawning shells, reading output, writing input.
+
+use crossbeam_channel::{Receiver, Sender};
+use portable_pty::{CommandBuilder, MasterPty, PtySize};
+use std::io::{Read, Write};
+use std::thread;
+
+/// Errors that can occur during PTY operations.
+#[derive(Debug)]
+pub enum PtyError {
+    /// Failed to open a PTY pair.
+    OpenPtyFailed(String),
+    /// Failed to spawn the shell process.
+    SpawnFailed(String),
+    /// Failed to clone the PTY reader.
+    ReaderCloneFailed(String),
+    /// Failed to take the PTY writer.
+    WriterTakeFailed(String),
+}
+
+impl std::fmt::Display for PtyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PtyError::OpenPtyFailed(e) => write!(f, "failed to open PTY: {e}"),
+            PtyError::SpawnFailed(e) => write!(f, "failed to spawn shell: {e}"),
+            PtyError::ReaderCloneFailed(e) => write!(f, "failed to clone PTY reader: {e}"),
+            PtyError::WriterTakeFailed(e) => write!(f, "failed to take PTY writer: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for PtyError {}
+
+/// Determine the shell to spawn: `$SHELL` or `/bin/sh` fallback.
+pub fn default_shell() -> String {
+    std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
+}
+
+/// Managed PTY session with a reader thread and writer handle.
+pub struct PtySession {
+    /// Receive raw bytes from the PTY reader thread.
+    pub reader_rx: Receiver<Vec<u8>>,
+    /// Writer handle for sending input to the PTY.
+    writer: Box<dyn Write + Send>,
+    /// The child process handle.
+    _child: Box<dyn portable_pty::Child + Send + Sync>,
+    /// The master PTY handle (kept alive for resize).
+    master: Box<dyn MasterPty + Send>,
+    /// Reader thread join handle.
+    _reader_thread: thread::JoinHandle<()>,
+}
+
+impl PtySession {
+    const READ_BUFFER_SIZE: usize = 64 * 1024;
+
+    /// Spawn a new PTY session with the given shell and size.
+    pub fn new(shell: &str, cols: u16, rows: u16) -> Result<Self, PtyError> {
+        let pty_system = portable_pty::native_pty_system();
+
+        let pair = pty_system
+            .openpty(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| PtyError::OpenPtyFailed(e.to_string()))?;
+
+        let cmd = CommandBuilder::new(shell);
+        let child = pair
+            .slave
+            .spawn_command(cmd)
+            .map_err(|e| PtyError::SpawnFailed(e.to_string()))?;
+
+        // Drop slave — we only need the master side
+        drop(pair.slave);
+
+        let mut reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|e| PtyError::ReaderCloneFailed(e.to_string()))?;
+
+        let writer = pair
+            .master
+            .take_writer()
+            .map_err(|e| PtyError::WriterTakeFailed(e.to_string()))?;
+
+        let (tx, rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = crossbeam_channel::unbounded();
+
+        let reader_thread = thread::spawn(move || {
+            let mut buf = vec![0u8; Self::READ_BUFFER_SIZE];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break, // EOF — shell exited
+                    Ok(n) => {
+                        if tx.send(buf[..n].to_vec()).is_err() {
+                            break; // Receiver dropped
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        Ok(Self {
+            reader_rx: rx,
+            writer,
+            _child: child,
+            master: pair.master,
+            _reader_thread: reader_thread,
+        })
+    }
+
+    /// Write bytes to the PTY (keyboard input).
+    pub fn write(&mut self, data: &[u8]) -> std::io::Result<()> {
+        self.writer.write_all(data)?;
+        self.writer.flush()
+    }
+
+    /// Resize the PTY.
+    pub fn resize(&self, cols: u16, rows: u16) -> Result<(), PtyError> {
+        self.master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| PtyError::OpenPtyFailed(e.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Shell detection ─────────────────────────────────────────────
+
+    #[test]
+    fn default_shell_returns_nonempty_string() {
+        let shell = default_shell();
+        assert!(
+            !shell.is_empty(),
+            "default_shell() should return a non-empty path"
+        );
+    }
+
+    #[test]
+    fn default_shell_returns_valid_path() {
+        let shell = default_shell();
+        assert!(
+            std::path::Path::new(&shell).exists(),
+            "default_shell() returned '{}' which does not exist",
+            shell
+        );
+    }
+
+    // ── PTY creation ────────────────────────────────────────────────
+
+    #[test]
+    fn pty_session_spawns_successfully() {
+        let session = PtySession::new("/bin/sh", 80, 24);
+        assert!(
+            session.is_ok(),
+            "PtySession::new should succeed with /bin/sh"
+        );
+    }
+
+    #[test]
+    fn pty_session_sets_initial_size() {
+        let session = PtySession::new("/bin/sh", 120, 40).expect("spawn failed");
+        // The master PTY should report the size we set
+        let size = session.master.get_size().expect("get_size failed");
+        assert_eq!(size.cols, 120);
+        assert_eq!(size.rows, 40);
+    }
+
+    // ── PTY read/write ──────────────────────────────────────────────
+
+    #[test]
+    fn pty_session_receives_output() {
+        let mut session = PtySession::new("/bin/sh", 80, 24).expect("spawn failed");
+        // Write a command that produces output
+        session
+            .write(b"echo hello_pty_test\n")
+            .expect("write failed");
+        // Wait for output (with timeout)
+        let output = session
+            .reader_rx
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .expect("should receive output from PTY");
+        assert!(!output.is_empty(), "PTY output should not be empty");
+    }
+
+    #[test]
+    fn pty_session_write_sends_to_shell() {
+        let mut session = PtySession::new("/bin/sh", 80, 24).expect("spawn failed");
+        // Write a command and check we get recognizable output back
+        session.write(b"echo MARKER_12345\n").expect("write failed");
+
+        let mut all_output = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while std::time::Instant::now() < deadline {
+            match session
+                .reader_rx
+                .recv_timeout(std::time::Duration::from_millis(200))
+            {
+                Ok(chunk) => all_output.extend_from_slice(&chunk),
+                Err(_) => {
+                    if !all_output.is_empty() {
+                        break;
+                    }
+                }
+            }
+        }
+
+        let output_str = String::from_utf8_lossy(&all_output);
+        assert!(
+            output_str.contains("MARKER_12345"),
+            "PTY output should contain the echoed marker, got: '{}'",
+            output_str
+        );
+    }
+
+    // ── PTY resize ──────────────────────────────────────────────────
+
+    #[test]
+    fn pty_session_resize_updates_size() {
+        let session = PtySession::new("/bin/sh", 80, 24).expect("spawn failed");
+        session.resize(132, 50).expect("resize failed");
+        let size = session.master.get_size().expect("get_size failed");
+        assert_eq!(size.cols, 132);
+        assert_eq!(size.rows, 50);
+    }
+}

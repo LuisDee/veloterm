@@ -20,3 +20,9 @@ env_logger = "0.11"
 unicode-width = "0.2"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
+
+# PTY Management
+portable-pty = "0.9"
+
+# Threading
+crossbeam-channel = "0.5"
