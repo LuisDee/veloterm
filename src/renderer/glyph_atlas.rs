@@ -67,8 +67,8 @@ impl GlyphAtlas {
         let glyph_count = 95u32;
         let cols = 16u32;
         let rows = glyph_count.div_ceil(cols);
-        let atlas_width = (cols * slot_w).next_power_of_two();
-        let atlas_height = (rows * slot_h).next_power_of_two();
+        let atlas_width = (cols * slot_w).next_power_of_two().max(512);
+        let atlas_height = (rows * slot_h).next_power_of_two().max(512);
 
         let mut atlas_data = vec![0u8; (atlas_width * atlas_height) as usize];
         let mut glyphs = HashMap::with_capacity(glyph_count as usize);
