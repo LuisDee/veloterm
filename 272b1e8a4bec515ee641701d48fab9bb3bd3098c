@@ -1,0 +1,27 @@
+Phase 9 Checkpoint Verification: Clipboard Integration
+
+Scope: git diff --name-only e0cbbf9..272b1e8
+  - conductor/tracks/core_terminal_emulation_20260207/plan.md
+  - src/input/clipboard.rs (new: keybinding detection, bracketed paste)
+  - src/input/mod.rs (pub mod clipboard)
+  - Cargo.toml (arboard = "3")
+
+Quality Gates:
+  - 283 tests pass (cargo test --lib)
+  - clippy: clean (cargo clippy --lib)
+  - fmt: clean (cargo fmt --check)
+
+Verification:
+  1. is_copy_keybinding: Cmd+C (Super) detected on macOS
+  2. is_copy_keybinding: Ctrl+Shift+C detected on Linux
+  3. is_copy_keybinding: Ctrl+C alone rejected (terminal interrupt)
+  4. is_copy_keybinding: wrong key rejected
+  5. is_paste_keybinding: Cmd+V (Super) detected on macOS
+  6. is_paste_keybinding: Ctrl+Shift+V detected on Linux
+  7. is_paste_keybinding: Ctrl+V alone rejected
+  8. wrap_bracketed_paste: wraps in \x1b[200~ ... \x1b[201~
+  9. wrap_bracketed_paste: handles empty string
+  10. paste_bytes: raw text when bracketed mode disabled
+  11. paste_bytes: wrapped text when bracketed mode enabled
+  12. paste_bytes: UTF-8 content preserved
+  13. 12 new tests covering all clipboard paths
