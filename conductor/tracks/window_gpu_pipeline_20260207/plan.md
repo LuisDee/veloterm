@@ -87,12 +87,12 @@
   - Calculate cell dimensions from font metrics (width = advance, height = font_size * 1.6)
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Write tests for atlas GPU texture upload
+- [x] Task: Write tests for atlas GPU texture upload <!-- 541b27d -->
   - Write tests for texture creation with correct dimensions and format
   - Write tests for texture view and sampler configuration
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement atlas GPU texture upload
+- [x] Task: Implement atlas GPU texture upload <!-- 541b27d -->
   - Upload rasterized atlas data to a wgpu texture
   - Create texture view and sampler with linear filtering
   - Bind atlas texture to the render pipeline's bind group
