@@ -100,7 +100,7 @@
 
 - [x] Task: Conductor - User Manual Verification 'Glyph Atlas' (Protocol in workflow.md) <!-- c33725b -->
 
-## Phase 4: Grid Renderer and Static Display
+## Phase 4: Grid Renderer and Static Display [checkpoint: 961ab4e]
 
 - [x] Task: Write tests for grid dimension calculation <!-- 7fa33d2 -->
   - Write tests for column/row calculation from window size and cell dimensions
@@ -145,7 +145,7 @@
   - Verify rendering on window resize (grid recalculates and re-renders)
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Conductor - User Manual Verification 'Grid Renderer and Static Display' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Grid Renderer and Static Display' (Protocol in workflow.md) <!-- 961ab4e -->
 
 ## Phase 5: Render Orchestration and Polish
 
