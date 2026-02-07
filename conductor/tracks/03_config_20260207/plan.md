@@ -27,7 +27,7 @@
 
 ## Phase 2: Config Diffing and Default Generation
 
-- [ ] Task: Write tests for config diffing and default generation
+- [x] Task: Write tests for config diffing and default generation <!-- f5bcc50 -->
   - Write tests for `Config::diff(old, new)` detecting font changes
   - Write tests for `Config::diff(old, new)` detecting theme changes
   - Write tests for `Config::diff(old, new)` detecting keybinding changes
@@ -37,7 +37,7 @@
   - Write tests for the generated default config round-tripping (serialize → parse → equals default)
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement config diffing and default generation
+- [x] Task: Implement config diffing and default generation <!-- f5bcc50 -->
   - Create `ConfigDelta` struct with boolean flags for each changed section (`font_changed`, `colors_changed`, `keys_changed`, `cursor_changed`, `scrollback_changed`, `performance_changed`)
   - Implement `Config::diff(old, new) -> ConfigDelta` comparing each section
   - Derive `PartialEq` on all config sub-structs for diffing
