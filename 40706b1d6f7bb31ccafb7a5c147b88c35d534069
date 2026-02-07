@@ -1,0 +1,22 @@
+Phase 10 Tasks 1-2: Window Resize and Resize Debouncer
+
+Files changed:
+  - src/terminal/mod.rs: Terminal::resize() and ResizeDebouncer
+
+Implementation:
+  - Terminal::resize(): creates TermSize, delegates to alacritty_terminal Term::resize() for content reflow
+  - ResizeDebouncer: #[derive(Default)] struct coalescing rapid resize events
+  - ResizeDebouncer::new(): returns default (no pending)
+  - ResizeDebouncer::request(): stores latest (cols, rows) overwriting any previous
+  - ResizeDebouncer::pending(): returns Option<(usize, usize)>
+  - ResizeDebouncer::clear(): sets pending to None
+
+Tests (6 new, 289 total):
+  - resize_changes_columns: 80→120 columns
+  - resize_changes_rows: 24→40 rows
+  - resize_preserves_content: "Hello" survives resize
+  - debouncer_no_pending_initially: starts as None
+  - debouncer_stores_latest_request: second request overwrites first
+  - debouncer_clear_removes_pending: clear sets to None
+
+Quality gates: 289 tests pass, clippy clean, fmt clean
