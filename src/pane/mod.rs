@@ -1,6 +1,7 @@
 // Pane layout engine: binary tree data structure for terminal pane management.
 
 pub mod divider;
+pub mod interaction;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
