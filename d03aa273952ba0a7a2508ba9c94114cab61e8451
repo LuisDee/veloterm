@@ -1,0 +1,16 @@
+Tasks 2 & 3: Write tests for theme color definitions + Implement theme color definitions
+
+Summary: Implemented Color struct (RGBA f32) with from_hex() conversion and three
+Claude theme constructors (Dark, Light, Warm) with exact hex codes from the UI guide.
+39 unit tests cover all 11 color fields across all 3 themes plus hex conversion edge cases.
+
+Also restructured project from binary-only to lib.rs + main.rs to enable cargo test --lib.
+
+Files created/modified:
+- src/config/theme.rs (Color struct, Theme struct, 3 constructors, 39 tests)
+- src/lib.rs (new library root exporting config and renderer modules)
+- src/main.rs (removed mod declarations, now uses lib.rs)
+
+Why: Theme colors are the foundation for all rendering. Every GPU draw call
+references these colors. Having them tested against the UI guide hex values
+ensures visual fidelity across the Claude Dark, Light, and Warm themes.
