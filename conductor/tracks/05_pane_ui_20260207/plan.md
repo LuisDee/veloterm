@@ -11,9 +11,9 @@
 - [x] Write tests for point-in-divider detection with configurable hit zone (8px)
 - [x] Implement `hit_test_divider(point: (f32, f32), dividers: &[DividerInfo], margin: f32) -> Option<usize>`
 
-### Task 1.3: PaneInteraction State Machine
-- [ ] Write tests for state transitions: Idle ↔ Hovering ↔ Dragging
-- [ ] Implement `PaneInteraction` struct with `on_cursor_moved()`, `on_mouse_press()`, `on_mouse_release()` in `src/pane/interaction.rs`
+### Task 1.3: PaneInteraction State Machine <!-- 78d5d17 -->
+- [x] Write tests for state transitions: Idle ↔ Hovering ↔ Dragging
+- [x] Implement `PaneInteraction` struct with `on_cursor_moved()`, `on_mouse_press()`, `on_mouse_release()` in `src/pane/interaction.rs`
 - Returns `InteractionEffect` enum (SetCursor, StartDrag, UpdateRatio, FocusPane, None)
 
 ### Phase 1 Completion
