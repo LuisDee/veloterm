@@ -79,7 +79,7 @@
 
 - [x] Task: Conductor - User Manual Verification 'Keyboard Input Pipeline' (Protocol in workflow.md) <!-- 7b9e49b -->
 
-## Phase 5: Cursor Rendering
+## Phase 5: Cursor Rendering [checkpoint: b05b19c]
 
 - [x] Task: Write tests for cursor rendering <!-- 2413561 -->
   - Write tests for cursor position extraction from terminal state
@@ -99,7 +99,7 @@
   - Integrate cursor instances into the render pipeline
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Conductor - User Manual Verification 'Cursor Rendering' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Cursor Rendering' (Protocol in workflow.md) <!-- b05b19c -->
 
 ## Phase 6: ANSI Color and SGR Attribute Support
 
