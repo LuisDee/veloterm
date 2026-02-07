@@ -9,13 +9,13 @@
   - Create module directories: `src/renderer/`, `src/config/`, `shaders/`
   - Verify `cargo build` succeeds
 
-- [ ] Task: Write tests for theme color definitions
+- [x] Task: Write tests for theme color definitions <!-- d03aa27 -->
   - Create `src/config/theme.rs` with test module
   - Write tests validating Claude Dark, Light, and Warm theme color values match UI guide hex codes
   - Write tests for color conversion (hex string to RGBA float)
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement theme color definitions
+- [x] Task: Implement theme color definitions <!-- d03aa27 -->
   - Define `Theme` struct with all color fields (background, pane_background, border, text_primary, text_muted, accent, accent_hover, prompt, success, error, selection)
   - Implement `claude_dark()`, `claude_light()`, `claude_warm()` constructors with exact hex values from UI guide
   - Implement hex-to-RGBA conversion utility
