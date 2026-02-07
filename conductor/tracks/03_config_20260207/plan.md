@@ -49,7 +49,7 @@
 
 ## Phase 3: Hot-Reload via File Watcher
 
-- [ ] Task: Write tests for config file watching and hot-reload
+- [x] Task: Write tests for config file watching and hot-reload <!-- 47e31ac -->
   - Write tests for `ConfigWatcher::new(path)` initialization
   - Write tests for file modification triggering a reload callback
   - Write tests for reload callback receiving the new valid `Config`
@@ -58,7 +58,7 @@
   - Write tests for watcher integration with `EventLoopProxy` custom event
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement config file watching and hot-reload
+- [x] Task: Implement config file watching and hot-reload <!-- 47e31ac -->
   - Add `notify` dependency to `Cargo.toml`
   - Create `src/config/watcher.rs` with `ConfigWatcher` struct
   - Spawn a background thread running `notify::recommended_watcher` on the config file
