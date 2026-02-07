@@ -101,7 +101,7 @@
 
 - [x] Task: Conductor - User Manual Verification 'Cursor Rendering' (Protocol in workflow.md) <!-- b05b19c -->
 
-## Phase 6: ANSI Color and SGR Attribute Support
+## Phase 6: ANSI Color and SGR Attribute Support [checkpoint: 161b1b8]
 
 - [x] Task: Write tests for full color palette and SGR attributes <!-- baad03f -->
   - Write tests for 16 named ANSI colors mapped to Claude Dark theme values
@@ -121,7 +121,7 @@
   - Pass underline and strikethrough flags through to the shader/renderer
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Conductor - User Manual Verification 'ANSI Color and SGR Attribute Support' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'ANSI Color and SGR Attribute Support' (Protocol in workflow.md) <!-- 161b1b8 -->
 
 ## Phase 7: Scrollback Buffer and Scroll Navigation
 
