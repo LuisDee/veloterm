@@ -103,7 +103,7 @@
 
 ## Phase 6: ANSI Color and SGR Attribute Support
 
-- [ ] Task: Write tests for full color palette and SGR attributes
+- [x] Task: Write tests for full color palette and SGR attributes <!-- baad03f -->
   - Write tests for 16 named ANSI colors mapped to Claude Dark theme values
   - Write tests for 256-color xterm palette generation
   - Write tests for bold attribute brightening colors
@@ -112,7 +112,7 @@
   - Write tests for underline and strikethrough flag propagation
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement color palette and SGR attribute rendering
+- [x] Task: Implement color palette and SGR attribute rendering <!-- baad03f -->
   - Define the full 16-color Claude Dark theme ANSI palette
   - Generate the standard xterm-256 color lookup table
   - Apply bold → bright color mapping (or bold font weight)
