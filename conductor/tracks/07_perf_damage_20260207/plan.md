@@ -7,9 +7,9 @@
   - [x] Implement DamageTracker in new module `src/renderer/damage.rs`
   - [x] Export from `src/renderer/mod.rs`
 
-- [ ] Task 2: Derive PartialEq on GridCell and Color
-  - [ ] Write tests: GridCell equality when all fields match, inequality when char differs, inequality when fg differs, inequality when bg differs, inequality when flags differ
-  - [ ] Add `PartialEq` derive to GridCell and Color structs
+- [x] Task 2: Derive PartialEq on GridCell and Color <!-- b9d13a3 -->
+  - [x] Write tests: GridCell equality when all fields match, inequality when char differs, inequality when fg differs, inequality when bg differs, inequality when flags differ
+  - [x] Add `PartialEq` derive to GridCell and Color structs
 
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: DamageTracker Core' (Protocol in workflow.md)
 
