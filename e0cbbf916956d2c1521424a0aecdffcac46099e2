@@ -1,0 +1,27 @@
+Phase 8 Checkpoint Verification: Text Selection
+
+Scope: git diff --name-only c58a6a6..e0cbbf9
+  - conductor/tracks/core_terminal_emulation_20260207/plan.md
+  - src/input/selection.rs (new: selection state management)
+  - src/input/mod.rs (pub mod selection)
+  - src/renderer/grid_renderer.rs (CELL_FLAG_SELECTED constant)
+
+Quality Gates:
+  - 271 tests pass (cargo test --lib)
+  - clippy: clean (cargo clippy --lib)
+  - fmt: clean (cargo fmt --check)
+
+Verification:
+  1. pixel_to_cell: converts pixel coords to (row, col) clamped to grid bounds
+  2. pixel_to_cell: negative coords clamped to (0, 0)
+  3. Selection containment: start/end cells included, outside excluded
+  4. Selection containment: multiline middle rows fully selected
+  5. Selection containment: reversed start/end (drag right-to-left) normalized
+  6. Word boundaries: alphanumeric/_ groups, punctuation breaks, space isolated
+  7. Line selection: spans full row width
+  8. Selected text: single line extraction correct
+  9. Selected text: multiline with trailing space trimming and \n join
+  10. apply_selection_flags: sets CELL_FLAG_SELECTED (bit 6) on selected cells
+  11. apply_selection_flags: does not set flag outside selection
+  12. Selection flag clearing: bitwise AND with complement resets flag
+  13. 18 new tests covering all selection paths
