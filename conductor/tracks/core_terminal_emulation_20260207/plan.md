@@ -61,7 +61,7 @@
 
 ## Phase 4: Keyboard Input Pipeline
 
-- [ ] Task: Write tests for keyboard input translation
+- [x] Task: Write tests for keyboard input translation <!-- 4b91c0b -->
   - Write tests for printable character encoding (ASCII and UTF-8)
   - Write tests for special key translation (Enter → `\r`, Backspace → `\x7f`, Tab → `\t`, Escape → `\x1b`)
   - Write tests for arrow keys → ANSI escape sequences (`\x1b[A`, `\x1b[B`, etc.)
@@ -69,7 +69,7 @@
   - Write tests for function keys and Home/End/Delete/Insert/PageUp/PageDown
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement keyboard input handling
+- [x] Task: Implement keyboard input handling <!-- 4b91c0b -->
   - Create `src/input/mod.rs` for keyboard event translation
   - Translate winit `KeyEvent` to terminal byte sequences
   - Handle modifier keys (Ctrl, Shift, Alt/Option) correctly
