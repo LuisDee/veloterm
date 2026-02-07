@@ -105,6 +105,56 @@ impl GridDimensions {
     }
 }
 
+/// Byte offset into the instance buffer for a given row.
+/// Each cell is one CellInstance (72 bytes), and each row has `cols` cells.
+pub fn row_byte_offset(row: usize, cols: usize) -> u64 {
+    (row * cols * std::mem::size_of::<CellInstance>()) as u64
+}
+
+/// Generate CellInstance data for a single row of the grid.
+///
+/// `cells` should have `grid.columns * grid.rows` entries, in row-major order.
+/// Returns a Vec of CellInstance for the specified row only.
+pub fn generate_row_instances(
+    grid: &GridDimensions,
+    cells: &[GridCell],
+    atlas: &GlyphAtlas,
+    row: u32,
+) -> Vec<CellInstance> {
+    let cols = grid.columns as usize;
+    let start = row as usize * cols;
+    let mut instances = Vec::with_capacity(cols);
+
+    for col in 0..cols {
+        let i = start + col;
+        let cell = cells
+            .get(i)
+            .copied()
+            .unwrap_or(GridCell::empty(Color::new(0.0, 0.0, 0.0, 1.0)));
+
+        let (atlas_uv, has_glyph) = if cell.ch != ' ' {
+            if let Some(info) = atlas.glyph_info(cell.ch) {
+                (info.uv, true)
+            } else {
+                ([0.0, 0.0, 0.0, 0.0], false)
+            }
+        } else {
+            ([0.0, 0.0, 0.0, 0.0], false)
+        };
+
+        instances.push(CellInstance {
+            position: [col as f32, row as f32],
+            atlas_uv,
+            fg_color: [cell.fg.r, cell.fg.g, cell.fg.b, cell.fg.a],
+            bg_color: [cell.bg.r, cell.bg.g, cell.bg.b, cell.bg.a],
+            flags: (if has_glyph { 1 } else { 0 }) | cell.flags,
+            _padding: [0; 3],
+        });
+    }
+
+    instances
+}
+
 /// Generate CellInstance data from a grid of cells and a glyph atlas.
 ///
 /// `cells` should have `grid.columns * grid.rows` entries, in row-major order.
@@ -572,5 +622,79 @@ mod tests {
         let cells = generate_test_pattern(&grid, &theme);
         let row4_start = 4 * 80;
         assert_eq!(cells[row4_start].fg, theme.text_muted);
+    }
+
+    // ── Row byte offset and partial instance generation ──────────────
+
+    #[test]
+    fn row_byte_offset_for_row_zero_is_zero() {
+        assert_eq!(row_byte_offset(0, 80), 0);
+    }
+
+    #[test]
+    fn row_byte_offset_for_row_n_is_n_times_cols_times_72() {
+        // row 5, 80 columns: 5 * 80 * 72 = 28800
+        assert_eq!(row_byte_offset(5, 80), 28800);
+    }
+
+    #[test]
+    fn row_byte_offset_with_different_cols() {
+        // row 1, 4 columns: 1 * 4 * 72 = 288
+        assert_eq!(row_byte_offset(1, 4), 288);
+    }
+
+    #[test]
+    fn generate_row_instances_returns_cols_instances() {
+        let atlas = test_atlas();
+        let grid = test_grid(4, 3);
+        let cells: Vec<GridCell> = (0..grid.total_cells())
+            .map(|_| GridCell::empty(test_bg()))
+            .collect();
+        let row_instances = generate_row_instances(&grid, &cells, &atlas, 0);
+        assert_eq!(row_instances.len(), 4);
+    }
+
+    #[test]
+    fn generate_row_instances_has_correct_positions() {
+        let atlas = test_atlas();
+        let grid = test_grid(3, 2);
+        let cells: Vec<GridCell> = (0..grid.total_cells())
+            .map(|_| GridCell::empty(test_bg()))
+            .collect();
+        let row1 = generate_row_instances(&grid, &cells, &atlas, 1);
+        assert_eq!(row1[0].position, [0.0, 1.0]);
+        assert_eq!(row1[1].position, [1.0, 1.0]);
+        assert_eq!(row1[2].position, [2.0, 1.0]);
+    }
+
+    #[test]
+    fn generate_row_instances_matches_full_generate() {
+        let atlas = test_atlas();
+        let grid = test_grid(4, 3);
+        let cells = vec![
+            GridCell::new('A', test_fg(), test_bg()),
+            GridCell::new('B', test_fg(), test_bg()),
+            GridCell::new('C', test_fg(), test_bg()),
+            GridCell::new('D', test_fg(), test_bg()),
+            GridCell::new('E', test_fg(), test_bg()),
+            GridCell::new('F', test_fg(), test_bg()),
+            GridCell::new('G', test_fg(), test_bg()),
+            GridCell::new('H', test_fg(), test_bg()),
+            GridCell::new('I', test_fg(), test_bg()),
+            GridCell::new('J', test_fg(), test_bg()),
+            GridCell::new('K', test_fg(), test_bg()),
+            GridCell::new('L', test_fg(), test_bg()),
+        ];
+        let full = generate_instances(&grid, &cells, &atlas);
+        for row in 0..3 {
+            let row_insts = generate_row_instances(&grid, &cells, &atlas, row as u32);
+            let start = row * 4;
+            assert_eq!(
+                row_insts,
+                &full[start..start + 4],
+                "row {} instances should match full generate",
+                row
+            );
+        }
     }
 }
