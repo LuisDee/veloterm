@@ -24,6 +24,9 @@ pollster = "0.4"
 # Terminal Emulation
 alacritty_terminal = "0.25"
 
+# Clipboard
+arboard = "3"
+
 # PTY Management
 portable-pty = "0.9"
 
