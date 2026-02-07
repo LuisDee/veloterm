@@ -1,0 +1,17 @@
+Task: Write tests for terminal-to-renderer grid bridge + Implement grid bridge and color mapping
+Phase: 3 - Grid Bridge — Terminal State to GPU Renderer
+
+Summary:
+Created grid_bridge.rs bridging alacritty_terminal cells to renderer GridCell data.
+Red phase: 19 tests (17 failing, 2 passing for constants).
+Green phase: Implemented 16 named ANSI colors, xterm-256 palette, RGB passthrough, grid extraction.
+
+Files created/modified:
+- src/terminal/grid_bridge.rs (NEW): Color mapping, grid extraction, 19 tests
+- src/terminal/mod.rs: Added grid_bridge submodule, Terminal::inner() accessor
+
+Key design decisions:
+- 16 named ANSI colors use Claude Dark theme-appropriate warm tones
+- xterm-256 uses standard 6x6x6 RGB cube (indices 16-231) + 24 grayscale (232-255)
+- Named Foreground/Background variants map to theme defaults
+- Grid extraction iterates row-major, producing GridCell with converted fg/bg colors
