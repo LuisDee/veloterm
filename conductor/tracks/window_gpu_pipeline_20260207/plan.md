@@ -68,7 +68,7 @@
 
 - [x] Task: Conductor - User Manual Verification 'GPU Pipeline Setup' (Protocol in workflow.md) <!-- d9f26fb -->
 
-## Phase 3: Glyph Atlas
+## Phase 3: Glyph Atlas [checkpoint: c33725b]
 
 - [x] Task: Write tests for glyph rasterization and atlas packing <!-- 4cff54d -->
   - Write tests for font loading (JetBrains Mono with fallbacks)
@@ -98,7 +98,7 @@
   - Bind atlas texture to the render pipeline's bind group
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Conductor - User Manual Verification 'Glyph Atlas' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Glyph Atlas' (Protocol in workflow.md) <!-- c33725b -->
 
 ## Phase 4: Grid Renderer and Static Display
 
