@@ -1,0 +1,21 @@
+Phase 10 Checkpoint Verification: Window Resize, Shell Exit, and Integration Polish
+
+Scope: git diff --name-only 272b1e8..40706b1
+  - conductor/tracks/core_terminal_emulation_20260207/plan.md
+  - src/terminal/mod.rs (Terminal::resize, ResizeDebouncer)
+
+Quality Gates:
+  - 289 tests pass (cargo test --lib)
+  - clippy: clean (cargo clippy --lib)
+  - fmt: clean (cargo fmt --check)
+
+Verification:
+  1. Terminal::resize(120, 40): columns changes to 120
+  2. Terminal::resize(120, 40): rows changes to 40
+  3. Terminal::resize preserves "Hello" content after resize
+  4. ResizeDebouncer::new(): pending starts as None
+  5. ResizeDebouncer::request(): second (120,40) overwrites first (80,24)
+  6. ResizeDebouncer::clear(): removes pending, returns None
+  7. Terminal::resize delegates to alacritty_terminal Term::resize with TermSize
+  8. ResizeDebouncer uses #[derive(Default)] per clippy
+  9. 6 new tests covering all resize and debouncer paths
