@@ -123,7 +123,7 @@
 
 - [x] Task: Conductor - User Manual Verification 'ANSI Color and SGR Attribute Support' (Protocol in workflow.md) <!-- 161b1b8 -->
 
-## Phase 7: Scrollback Buffer and Scroll Navigation
+## Phase 7: Scrollback Buffer and Scroll Navigation [checkpoint: c58a6a6]
 
 - [x] Task: Write tests for scrollback and scroll navigation <!-- 94b50ce -->
   - Write tests for scrollback history accumulation (lines scrolled off-screen are preserved)
@@ -144,7 +144,7 @@
   - Update the grid bridge to render from the correct viewport offset
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Conductor - User Manual Verification 'Scrollback Buffer and Scroll Navigation' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Scrollback Buffer and Scroll Navigation' (Protocol in workflow.md) <!-- c58a6a6 -->
 
 ## Phase 8: Text Selection
 
