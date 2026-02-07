@@ -1,0 +1,19 @@
+Phase 3 Checkpoint Verification: Grid Bridge — Terminal State to GPU Renderer
+
+Scope: git diff --name-only a6dd41a..79a38ce
+  - conductor/tracks/core_terminal_emulation_20260207/plan.md
+  - src/terminal/grid_bridge.rs (NEW)
+  - src/terminal/mod.rs (added grid_bridge submodule + inner() accessor)
+
+Quality Gates:
+  - 163 tests pass (cargo test --lib)
+  - clippy: clean (cargo clippy --lib)
+  - fmt: clean (cargo fmt --check)
+
+Verification:
+  1. 16 named ANSI colors mapped to Claude Dark theme-appropriate warm tones
+  2. xterm-256 palette: 0-7 standard, 8-15 bright, 16-231 6x6x6 RGB cube, 232-255 24-step grayscale
+  3. RGB passthrough for 24-bit true color
+  4. Foreground/Background named variants correctly use theme defaults
+  5. Grid extraction iterates row-major, producing GridCell with character + converted fg/bg colors
+  6. 19 new tests covering all color conversion paths and grid extraction
