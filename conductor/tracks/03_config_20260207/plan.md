@@ -25,7 +25,7 @@
 
 - [x] Task: Conductor - User Manual Verification 'Config Struct and TOML Parsing' (Protocol in workflow.md) <!-- a9a4326 -->
 
-## Phase 2: Config Diffing and Default Generation
+## Phase 2: Config Diffing and Default Generation [checkpoint: 993b50b]
 
 - [x] Task: Write tests for config diffing and default generation <!-- f5bcc50 -->
   - Write tests for `Config::diff(old, new)` detecting font changes
@@ -45,7 +45,7 @@
   - Wire `--print-default-config` CLI flag via `std::env::args()` in `main.rs`
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Conductor - User Manual Verification 'Config Diffing and Default Generation' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Config Diffing and Default Generation' (Protocol in workflow.md) <!-- 993b50b -->
 
 ## Phase 3: Hot-Reload via File Watcher
 
