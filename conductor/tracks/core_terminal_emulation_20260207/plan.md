@@ -148,7 +148,7 @@
 
 ## Phase 8: Text Selection
 
-- [ ] Task: Write tests for text selection
+- [x] Task: Write tests for text selection <!-- 8adba6c -->
   - Write tests for click-and-drag rectangular selection (start cell → end cell)
   - Write tests for double-click word selection (word boundaries at whitespace/punctuation)
   - Write tests for triple-click line selection
@@ -156,7 +156,7 @@
   - Write tests for selection cleared on click-elsewhere or keypress
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement text selection
+- [x] Task: Implement text selection <!-- 8adba6c -->
   - Create `src/input/selection.rs` for selection state management
   - Track mouse press/drag/release events from winit to define selection region
   - Implement word boundary detection for double-click
