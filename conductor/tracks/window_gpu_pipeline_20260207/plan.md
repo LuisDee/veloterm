@@ -149,13 +149,13 @@
 
 ## Phase 5: Render Orchestration and Polish
 
-- [ ] Task: Write tests for render orchestration module
+- [x] Task: Write tests for render orchestration module <!-- c156b52 -->
   - Write tests for renderer initialization (creates GPU state, atlas, grid renderer)
   - Write tests for render frame lifecycle (acquire surface → encode commands → present)
   - Write tests for window resize handling (reconfigure surface, recalculate grid)
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement render orchestration
+- [x] Task: Implement render orchestration <!-- c156b52 -->
   - Create `src/renderer/mod.rs` as the top-level render coordinator
   - Initialize GPU state, glyph atlas, and grid renderer
   - Implement `render_frame()`: acquire surface texture → create command encoder → render passes → submit → present
