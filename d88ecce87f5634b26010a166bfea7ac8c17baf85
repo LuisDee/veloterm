@@ -1,0 +1,19 @@
+Task: Write tests for alacritty_terminal integration + Implement terminal state machine wrapper
+Phase: 2 - Terminal State Machine Integration
+
+Summary:
+Created the Terminal wrapper module (src/terminal/mod.rs) with TDD workflow.
+Red phase: 9 tests written covering Term creation, byte feeding, grid state, cursor tracking.
+Green phase: Implemented Terminal struct wrapping alacritty_terminal::Term with VTE Processor.
+
+Files created/modified:
+- src/terminal/mod.rs (NEW): Terminal struct, TermSize, 9 tests
+- src/lib.rs: Added `pub mod terminal`
+- Cargo.toml: Added alacritty_terminal 0.25
+
+Key design decisions:
+- Thin wrapper around alacritty_terminal::Term<VoidListener>
+- VTE Processor for feeding raw bytes (no PTY event loop dependency)
+- TermSize implements Dimensions trait for grid sizing
+- 10,000 line scrollback configured via Config
+- Grid access via Point indexing, cursor via renderable_content()
