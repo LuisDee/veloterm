@@ -16,7 +16,7 @@ _Link: [./conductor/tracks/core_terminal_emulation_20260207/](./conductor/tracks
 
 ## Wave 1 — Configuration & Optimization
 
-### [ ] Track 03: Configuration & Theming (M)
+### [x] Track 03: Configuration & Theming (M)
 _Link: [./conductor/tracks/03_config_20260207/](./conductor/tracks/03_config_20260207/)_
 
 ### [ ] Track 07: Performance & Damage Tracking (M)
