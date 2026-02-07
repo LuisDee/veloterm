@@ -1,0 +1,17 @@
+Tasks 4 & 5: Write tests for window creation + Implement window creation with winit
+
+Summary: Created src/window.rs with WindowConfig, DPI utilities, and App struct
+implementing winit ApplicationHandler. 14 tests cover default config values,
+WindowAttributes construction (inner_size, title, resizable), logical-to-physical
+size conversion at various scale factors, and DPI-scaled font size calculation.
+
+Files created/modified:
+- src/window.rs (WindowConfig, App, DPI utilities, 14 tests)
+- src/lib.rs (added window module)
+- src/main.rs (updated to use veloterm::window::App)
+
+Key decisions:
+- winit 0.30.12 uses resumed() not can_create_surfaces()
+- Window is a concrete struct, not Box<dyn Window>
+- WindowConfig is separate testable struct from App
+- DPI conversion uses simple multiplication (no rounding bias)
