@@ -396,4 +396,69 @@ mod tests {
         assert_eq!(dirty.len(), 3);
         assert!(dirty.iter().all(|&d| d), "forced full damage should be all dirty");
     }
+
+    // ── Full-damage event trigger tests ──────────────────────────────
+
+    #[test]
+    fn resize_triggers_full_damage_and_cache_clear() {
+        let mut state = DamageState::new(4);
+        let cells = make_grid(4, 3, 'A');
+        let _ = state.process_frame(&cells);
+        // Simulate resize event
+        state.resize(6);
+        state.force_full_damage();
+        let new_cells = make_grid(6, 2, 'A');
+        let dirty = state.process_frame(&new_cells);
+        assert_eq!(dirty.len(), 2);
+        assert!(dirty.iter().all(|&d| d), "resize should trigger full damage");
+    }
+
+    #[test]
+    fn theme_change_triggers_full_damage() {
+        let mut state = DamageState::new(4);
+        let cells = make_grid(4, 3, 'A');
+        let _ = state.process_frame(&cells);
+        // Simulate theme change: same grid but force full repaint
+        state.force_full_damage();
+        let dirty = state.process_frame(&cells);
+        assert!(dirty.iter().all(|&d| d), "theme change should trigger full damage");
+    }
+
+    #[test]
+    fn font_size_change_triggers_full_damage() {
+        let mut state = DamageState::new(4);
+        let cells = make_grid(4, 3, 'A');
+        let _ = state.process_frame(&cells);
+        // Simulate font size change: resize + force full damage
+        state.resize(5);
+        state.force_full_damage();
+        let new_cells = make_grid(5, 4, 'A');
+        let dirty = state.process_frame(&new_cells);
+        assert_eq!(dirty.len(), 4);
+        assert!(dirty.iter().all(|&d| d), "font size change should trigger full damage");
+    }
+
+    #[test]
+    fn scroll_triggers_full_damage() {
+        let mut state = DamageState::new(4);
+        let cells_a = make_grid(4, 3, 'A');
+        let _ = state.process_frame(&cells_a);
+        // Simulate scroll: content changes + force full damage
+        state.force_full_damage();
+        let cells_b = make_grid(4, 3, 'B');
+        let dirty = state.process_frame(&cells_b);
+        assert!(dirty.iter().all(|&d| d), "scroll should trigger full damage");
+    }
+
+    #[test]
+    fn force_full_damage_resets_after_one_frame() {
+        let mut state = DamageState::new(4);
+        let cells = make_grid(4, 3, 'A');
+        let _ = state.process_frame(&cells);
+        state.force_full_damage();
+        let _ = state.process_frame(&cells); // consumes the force flag
+        // Next frame with same data should be clean
+        let dirty = state.process_frame(&cells);
+        assert!(dirty.iter().all(|&d| !d), "force flag should reset after one frame");
+    }
 }

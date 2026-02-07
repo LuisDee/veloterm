@@ -10,7 +10,11 @@ use gpu::{
     clear_color, create_atlas_sampler, create_atlas_texture, create_bind_group_layout,
     create_grid_bind_group, create_render_pipeline, GpuError, GridUniforms, SurfaceConfig,
 };
-use grid_renderer::{generate_instances, generate_test_pattern, GridCell, GridDimensions};
+use damage::DamageState;
+use grid_renderer::{
+    generate_instances, generate_row_instances, generate_test_pattern, row_byte_offset, GridCell,
+    GridDimensions,
+};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use winit::window::Window;
@@ -30,6 +34,7 @@ pub struct Renderer {
     grid: GridDimensions,
     atlas: GlyphAtlas,
     theme: Theme,
+    damage_state: DamageState,
     _bind_group_layout: wgpu::BindGroupLayout,
     _atlas_view: wgpu::TextureView,
     _sampler: wgpu::Sampler,
@@ -152,6 +157,9 @@ impl Renderer {
             &sampler,
         );
 
+        // Damage tracking
+        let damage_state = DamageState::new(grid.columns as usize);
+
         Ok(Self {
             device,
             queue,
@@ -165,6 +173,7 @@ impl Renderer {
             grid,
             atlas,
             theme,
+            damage_state,
             _bind_group_layout: bind_group_layout,
             _atlas_view: atlas_view,
             _sampler: sampler,
@@ -235,6 +244,10 @@ impl Renderer {
             self.grid.rows
         );
 
+        // Reset damage state for new column count and force full repaint
+        self.damage_state.resize(self.grid.columns as usize);
+        self.damage_state.force_full_damage();
+
         // Rebuild test pattern and instances
         let cells = generate_test_pattern(&self.grid, &self.theme);
         let instances = generate_instances(&self.grid, &cells, &self.atlas);
@@ -269,17 +282,50 @@ impl Renderer {
     }
 
     /// Update the rendered cells from external terminal state.
+    ///
+    /// Uses damage tracking to only update GPU buffer rows that changed.
+    /// Falls back to full buffer write on first frame, after resize, or
+    /// when force_full_damage() was called.
     pub fn update_cells(&mut self, cells: &[GridCell]) {
-        let instances = generate_instances(&self.grid, cells, &self.atlas);
-        self.instance_count = instances.len() as u32;
+        let dirty = self.damage_state.process_frame(cells);
+        let cols = self.grid.columns as usize;
 
-        self.instance_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Cell Instances"),
-                contents: bytemuck::cast_slice(&instances),
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            });
+        let any_dirty = dirty.iter().any(|&d| d);
+        if !any_dirty {
+            return;
+        }
+
+        let all_dirty = dirty.iter().all(|&d| d);
+        if all_dirty {
+            // Full update: regenerate all instances and write entire buffer
+            let instances = generate_instances(&self.grid, cells, &self.atlas);
+            self.instance_count = instances.len() as u32;
+            self.queue.write_buffer(
+                &self.instance_buffer,
+                0,
+                bytemuck::cast_slice(&instances),
+            );
+        } else {
+            // Partial update: only write dirty rows
+            for (row, &is_dirty) in dirty.iter().enumerate() {
+                if is_dirty {
+                    let row_instances =
+                        generate_row_instances(&self.grid, cells, &self.atlas, row as u32);
+                    let offset = row_byte_offset(row, cols);
+                    self.queue.write_buffer(
+                        &self.instance_buffer,
+                        offset,
+                        bytemuck::cast_slice(&row_instances),
+                    );
+                }
+            }
+        }
+    }
+
+    /// Force a full repaint on the next update_cells() call.
+    /// Call this after theme changes, font size changes, or scroll position changes.
+    pub fn force_full_damage(&mut self) {
+        self.damage_state.force_full_damage();
     }
 }
 
