@@ -1,0 +1,20 @@
+Task: Write tests for keyboard input translation + Implement keyboard input handling
+Phase: 4 - Keyboard Input Pipeline
+
+Summary:
+Created input/mod.rs translating winit KeyEvents to terminal byte sequences.
+Red phase: 39 tests (all failing with todo!()).
+Green phase: Implemented translate_key(), ctrl_key_byte(), named_key_bytes().
+
+Files created/modified:
+- src/input/mod.rs (NEW): Key translation, 39 tests
+- src/lib.rs: Added input submodule
+
+Key design decisions:
+- translate_key() takes logical_key, text, state, modifiers as separate params (not full KeyEvent)
+  to keep the module testable without constructing winit event structs
+- Ctrl+letter: convert to control byte (0x01..0x1A) via ctrl_key_byte()
+- Named keys dispatched through named_key_bytes() with complete mapping
+- F1-F4 use SS3 format (\x1bOP..S), F5-F12 use CSI ~ format
+- Arrow keys use normal mode CSI sequences (not application cursor mode)
+- Key releases and modifier-only presses filtered to None
