@@ -1,0 +1,21 @@
+Phase 9 Tasks 1-2: Clipboard Integration
+
+Files changed:
+  - src/input/clipboard.rs: new clipboard module
+  - src/input/mod.rs: added pub mod clipboard
+  - Cargo.toml: added arboard = "3" dependency
+
+Implementation:
+  - is_copy_keybinding(): Cmd+C (macOS/Super) or Ctrl+Shift+C (Linux)
+  - is_paste_keybinding(): Cmd+V (macOS/Super) or Ctrl+Shift+V (Linux)
+  - Ctrl+C alone NOT detected as copy (it's terminal interrupt)
+  - wrap_bracketed_paste(): wraps text in \x1b[200~ ... \x1b[201~
+  - paste_bytes(): raw text or bracketed-wrapped based on mode flag
+
+Tests (12 new, 283 total):
+  - Copy keybinding: Cmd+C, Ctrl+Shift+C, Ctrl+C not copy, wrong key (4)
+  - Paste keybinding: Cmd+V, Ctrl+Shift+V, Ctrl+V not paste (3)
+  - Bracketed paste: wraps text, empty string (2)
+  - Paste bytes: without/with bracketed mode, UTF-8 content (3)
+
+Quality gates: 283 tests pass, clippy clean, fmt clean
