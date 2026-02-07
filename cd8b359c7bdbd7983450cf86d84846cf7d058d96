@@ -1,0 +1,14 @@
+Phase 4, Tasks 5-6: Write tests for static test pattern + Implement test pattern display
+
+Summary: Added generate_test_pattern() that fills a grid with themed visual
+verification content. Row 0: "VeloTerm v0.1.0" in accent color. Row 1: empty.
+Row 2: full ASCII printable range in text_primary. Row 3: "claude@anthropic ~ $"
+in prompt color. Remaining rows: alternating '#' and '.' in text_muted.
+
+Files modified:
+- src/renderer/grid_renderer.rs (generate_test_pattern, 10 new tests)
+
+Key decisions:
+- Theme colors passed as reference for zero-copy color assignment
+- Bounds-checked: content truncated to grid width, skipped if grid too short
+- Alternating pattern uses (row + col) % 2 for consistent checkerboard
