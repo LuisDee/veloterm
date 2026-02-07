@@ -41,7 +41,7 @@
 
 ## Phase 3: Grid Bridge — Terminal State to GPU Renderer
 
-- [ ] Task: Write tests for terminal-to-renderer grid bridge
+- [x] Task: Write tests for terminal-to-renderer grid bridge <!-- d2d7533 -->
   - Write tests for extracting character, fg color, and bg color from each `alacritty_terminal` cell
   - Write tests for mapping named ANSI colors (16) to theme RGBA values
   - Write tests for mapping 256-color indexed palette to RGBA
@@ -49,7 +49,7 @@
   - Write tests for default fg/bg color assignment from theme
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement grid bridge and color mapping
+- [x] Task: Implement grid bridge and color mapping <!-- d2d7533 -->
   - Create `src/terminal/grid_bridge.rs` to convert terminal grid state to renderer `CellInstance` data
   - Implement color conversion: Named → theme colors, Indexed → xterm-256 palette, RGB → passthrough
   - Map cell flags (bold, dim, inverse) to rendering attributes
