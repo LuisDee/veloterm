@@ -146,7 +146,7 @@
 
 - [x] Task: Conductor - User Manual Verification 'Scrollback Buffer and Scroll Navigation' (Protocol in workflow.md) <!-- c58a6a6 -->
 
-## Phase 8: Text Selection
+## Phase 8: Text Selection [checkpoint: e0cbbf9]
 
 - [x] Task: Write tests for text selection <!-- 8adba6c -->
   - Write tests for click-and-drag rectangular selection (start cell → end cell)
@@ -166,7 +166,7 @@
   - Extract selected text content from the terminal grid as a UTF-8 string
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Conductor - User Manual Verification 'Text Selection' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Text Selection' (Protocol in workflow.md) <!-- e0cbbf9 -->
 
 ## Phase 9: Clipboard Integration
 
