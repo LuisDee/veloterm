@@ -1,0 +1,25 @@
+Phase 7 Checkpoint Verification: Scrollback Buffer and Scroll Navigation
+
+Scope: git diff --name-only 161b1b8..c58a6a6
+  - conductor/tracks/core_terminal_emulation_20260207/plan.md
+  - src/terminal/mod.rs (7 scroll methods on Terminal)
+  - src/terminal/grid_bridge.rs (viewport-aware extract_grid_cells)
+
+Quality Gates:
+  - 253 tests pass (cargo test --lib)
+  - clippy: clean (cargo clippy --lib)
+  - fmt: clean (cargo fmt --check)
+
+Verification:
+  1. display_offset() delegates to grid.display_offset(), starts at 0
+  2. history_size() delegates to grid.history_size(), starts at 0
+  3. scroll_up(n) → Scroll::Delta(n) increases display_offset
+  4. scroll_down(n) → Scroll::Delta(-n) decreases display_offset
+  5. scroll_page_up() → Scroll::PageUp, display_offset > 0
+  6. scroll_page_down() → Scroll::PageDown, reduces offset after page_up
+  7. snap_to_bottom() → Scroll::Bottom, resets offset to 0
+  8. scroll_up clamped: can't scroll past history_size
+  9. extract_grid_cells uses Line(row - display_offset) for viewport rendering
+  10. Scrolled viewport shows correct history content (L2 at row 0 when offset=2)
+  11. Unscrolled viewport shows latest content (L4 at row 0)
+  12. 11 new tests covering all scroll and viewport paths
