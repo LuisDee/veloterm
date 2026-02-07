@@ -1,5 +1,6 @@
 // Window creation and event loop management for VeloTerm.
 
+use std::sync::Arc;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::WindowEvent;
@@ -61,7 +62,8 @@ pub fn scaled_font_size(base_size: f32, scale_factor: f64) -> f32 {
 /// Main application state implementing the winit event loop handler.
 pub struct App {
     config: WindowConfig,
-    window: Option<Window>,
+    window: Option<Arc<Window>>,
+    renderer: Option<crate::renderer::Renderer>,
 }
 
 impl App {
@@ -69,6 +71,7 @@ impl App {
         Self {
             config,
             window: None,
+            renderer: None,
         }
     }
 
@@ -97,6 +100,22 @@ impl ApplicationHandler for App {
                     size.height,
                     scale
                 );
+
+                let window = Arc::new(window);
+
+                // Initialize renderer
+                match pollster::block_on(crate::renderer::Renderer::new(window.clone())) {
+                    Ok(renderer) => {
+                        log::info!("Renderer initialized");
+                        self.renderer = Some(renderer);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to initialize renderer: {e}");
+                        event_loop.exit();
+                        return;
+                    }
+                }
+
                 self.window = Some(window);
             }
             Err(e) => {
@@ -119,12 +138,41 @@ impl ApplicationHandler for App {
             }
             WindowEvent::Resized(size) => {
                 log::debug!("Window resized to {}x{}", size.width, size.height);
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.resize(size.width, size.height);
+                }
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 log::debug!("Scale factor changed to {scale_factor:.2}");
             }
             WindowEvent::RedrawRequested => {
-                // Will be filled in by the renderer in Phase 2+
+                if let Some(renderer) = &self.renderer {
+                    match renderer.render_frame() {
+                        Ok(()) => {}
+                        Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                            // Reconfigure surface
+                            if let Some(r) = &mut self.renderer {
+                                let size = self
+                                    .window
+                                    .as_ref()
+                                    .map(|w| w.inner_size())
+                                    .unwrap_or_default();
+                                r.resize(size.width, size.height);
+                            }
+                        }
+                        Err(wgpu::SurfaceError::OutOfMemory) => {
+                            log::error!("GPU out of memory");
+                            event_loop.exit();
+                        }
+                        Err(e) => {
+                            log::warn!("Surface error: {e}");
+                        }
+                    }
+                }
+                // Request next frame
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
             }
             _ => {}
         }
