@@ -39,7 +39,7 @@
 
 - [x] Task: Conductor - User Manual Verification 'Terminal State Machine Integration' (Protocol in workflow.md) <!-- a6dd41a -->
 
-## Phase 3: Grid Bridge — Terminal State to GPU Renderer
+## Phase 3: Grid Bridge — Terminal State to GPU Renderer [checkpoint: 79a38ce]
 
 - [x] Task: Write tests for terminal-to-renderer grid bridge <!-- d2d7533 -->
   - Write tests for extracting character, fg color, and bg color from each `alacritty_terminal` cell
@@ -57,7 +57,7 @@
   - Update the renderer to accept dynamic cell data from the terminal
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Conductor - User Manual Verification 'Grid Bridge — Terminal State to GPU Renderer' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Grid Bridge — Terminal State to GPU Renderer' (Protocol in workflow.md) <!-- 79a38ce -->
 
 ## Phase 4: Keyboard Input Pipeline
 
