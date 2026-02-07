@@ -21,12 +21,12 @@
   - Implement hex-to-RGBA conversion utility
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Write tests for window creation and event loop setup
+- [x] Task: Write tests for window creation and event loop setup <!-- d62a12d -->
   - Write tests for window configuration (default size 1280x720, title "VeloTerm", resizable)
   - Write tests for DPI scale factor handling
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement window creation with winit
+- [x] Task: Implement window creation with winit <!-- d62a12d -->
   - Create window with winit: 1280x720 default size, title "VeloTerm", resizable
   - Set up event loop with proper close handling
   - Handle DPI scale factor for HiDPI displays
