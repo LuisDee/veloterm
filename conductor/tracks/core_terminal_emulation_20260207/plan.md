@@ -189,7 +189,7 @@
 
 ## Phase 10: Window Resize, Shell Exit, and Integration Polish
 
-- [ ] Task: Write tests for resize and shell exit handling
+- [x] Task: Write tests for resize and shell exit handling <!-- 40706b1 -->
   - Write tests for window resize → PTY size update via `TIOCSWINSZ`
   - Write tests for terminal content reflow after resize
   - Write tests for renderer grid recalculation on resize
@@ -197,7 +197,7 @@
   - Write tests for rapid resize debouncing/coalescing
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement resize handling, shell exit, and integration polish
+- [x] Task: Implement resize handling, shell exit, and integration polish <!-- 40706b1 -->
   - On window resize: update PTY size, let `alacritty_terminal` reflow, rebuild renderer grid
   - Detect shell exit (PTY EOF) and display "[Process exited]" or close the window
   - Debounce rapid resize events to avoid excessive reflow
