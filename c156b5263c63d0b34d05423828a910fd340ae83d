@@ -1,0 +1,21 @@
+Phase 5, Tasks 1-2: Render orchestration + window integration
+
+Summary: Created Renderer struct in src/renderer/mod.rs as top-level
+coordinator. Holds all GPU state, glyph atlas, grid, and render resources.
+Integrated into winit event loop in src/window.rs with Arc<Window> for
+wgpu Surface<'static> lifetime requirement.
+
+Files modified:
+- Cargo.toml (moved pollster from dev-dependencies to dependencies)
+- src/renderer/mod.rs (Renderer struct, new/render_frame/resize, 5 tests)
+- src/window.rs (App holds Arc<Window> + Option<Renderer>, event handling)
+
+Key decisions:
+- Arc<Window> required by wgpu Surface<'static> lifetime
+- pollster::block_on() for async Renderer::new() in synchronous resumed()
+- Surface errors handled: Lost/Outdated → resize, OutOfMemory → exit
+- GPU resources (bind_group_layout, atlas_view, sampler) prefixed with _
+  to suppress dead_code warning while keeping them alive
+- Continuous redraw via window.request_redraw() in RedrawRequested handler
+
+Quality gates: 124 tests pass, clippy clean, fmt clean
