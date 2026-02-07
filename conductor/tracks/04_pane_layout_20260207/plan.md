@@ -44,7 +44,7 @@
 
 - [x] Task: Conductor - User Manual Verification 'Phase 3: Pane-Aware Rendering' (Protocol in workflow.md)
 
-## Phase 4: Integration — Wire PaneTree into App Event Loop
+## Phase 4: Integration — Wire PaneTree into App Event Loop [checkpoint: 72fab64]
 
 - [x] Task 1: Refactor App to hold PaneTree instead of single terminal/pty <!-- 28bfb42 -->
   - [x] Write tests: App creates single-pane tree on startup, each pane has its own Terminal and PtySession, pane count matches tree leaf count

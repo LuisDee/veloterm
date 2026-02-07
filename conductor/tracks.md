@@ -26,7 +26,7 @@ _Link: [./conductor/tracks/07_perf_damage_20260207/](./conductor/tracks/07_perf_
 
 ## Wave 2 — Pane Layout Engine
 
-### [ ] Track 04: Pane Layout Engine (L)
+### [x] Track 04: Pane Layout Engine (L)
 _Link: [./conductor/tracks/04_pane_layout_20260207/](./conductor/tracks/04_pane_layout_20260207/)_
 
 ---
