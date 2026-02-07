@@ -10,7 +10,7 @@ pub const CELL_FLAG_STRIKETHROUGH: u32 = 0x20; // bit 5
 pub const CELL_FLAG_SELECTED: u32 = 0x40; // bit 6
 
 /// A single cell in the terminal grid.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GridCell {
     /// Character to display (space for empty cells).
     pub ch: char,

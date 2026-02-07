@@ -143,4 +143,58 @@ mod tests {
         assert_eq!(tracker.row_count(), 0);
         assert_eq!(tracker.dirty_rows().count(), 0);
     }
+
+    // ── GridCell PartialEq tests ────────────────────────────────────
+
+    use crate::config::theme::Color;
+    use crate::renderer::grid_renderer::GridCell;
+
+    fn white() -> Color {
+        Color::new(1.0, 1.0, 1.0, 1.0)
+    }
+
+    fn black() -> Color {
+        Color::new(0.0, 0.0, 0.0, 1.0)
+    }
+
+    fn red() -> Color {
+        Color::new(1.0, 0.0, 0.0, 1.0)
+    }
+
+    #[test]
+    fn gridcell_equal_when_all_fields_match() {
+        let a = GridCell::new('A', white(), black());
+        let b = GridCell::new('A', white(), black());
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn gridcell_not_equal_when_char_differs() {
+        let a = GridCell::new('A', white(), black());
+        let b = GridCell::new('B', white(), black());
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn gridcell_not_equal_when_fg_differs() {
+        let a = GridCell::new('A', white(), black());
+        let b = GridCell::new('A', red(), black());
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn gridcell_not_equal_when_bg_differs() {
+        let a = GridCell::new('A', white(), black());
+        let b = GridCell::new('A', white(), red());
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn gridcell_not_equal_when_flags_differ() {
+        let mut a = GridCell::new('A', white(), black());
+        let mut b = GridCell::new('A', white(), black());
+        a.flags = 0;
+        b.flags = crate::renderer::grid_renderer::CELL_FLAG_UNDERLINE;
+        assert_ne!(a, b);
+    }
 }
