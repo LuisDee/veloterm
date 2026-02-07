@@ -1,5 +1,7 @@
 // Keyboard input translation: converts winit KeyEvents to terminal byte sequences.
 
+pub mod selection;
+
 use winit::event::ElementState;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
