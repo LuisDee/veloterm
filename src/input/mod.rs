@@ -59,6 +59,7 @@ fn named_key_bytes(key: NamedKey, _modifiers: ModifiersState) -> Option<Vec<u8>>
         NamedKey::Backspace => Some(vec![0x7f]),
         NamedKey::Tab => Some(b"\t".to_vec()),
         NamedKey::Escape => Some(b"\x1b".to_vec()),
+        NamedKey::Space => Some(b" ".to_vec()),
 
         // Arrow keys (normal mode CSI sequences)
         NamedKey::ArrowUp => Some(b"\x1b[A".to_vec()),
@@ -324,6 +325,12 @@ mod tests {
     }
 
     // ── Modifier-only keys produce no output ────────────────────────
+
+    #[test]
+    fn space_named_key() {
+        let result = press(Key::Named(NamedKey::Space), None, no_mods());
+        assert_eq!(result, Some(b" ".to_vec()));
+    }
 
     #[test]
     fn shift_alone_produces_none() {
