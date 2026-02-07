@@ -27,18 +27,18 @@
 
 ## Phase 3: Renderer Integration
 
-- [ ] Task 1: Convert to persistent instance buffer with partial row writes
-  - [ ] Write tests: verify byte offset calculation for row N is `row * cols * 72`, verify generate_row_instances produces correct instance data for a single row, verify full-frame generates instances for all rows
-  - [ ] Replace `update_cells()` buffer recreation with persistent buffer + `queue.write_buffer()` partial writes per dirty row
-  - [ ] Allocate persistent buffer in `Renderer::new()` with full grid capacity
+- [x] Task 1: Convert to persistent instance buffer with partial row writes <!-- 51eb067 -->
+  - [x] Write tests: verify byte offset calculation for row N is `row * cols * 72`, verify generate_row_instances produces correct instance data for a single row, verify full-frame generates instances for all rows
+  - [x] Replace `update_cells()` buffer recreation with persistent buffer + `queue.write_buffer()` partial writes per dirty row
+  - [x] Allocate persistent buffer in `Renderer::new()` with full grid capacity
 
-- [ ] Task 2: Wire full-damage events into DamageState
-  - [ ] Write tests: resize triggers full damage and cache clear, theme change triggers full damage, font size change triggers full damage, scroll position change triggers full damage
-  - [ ] Add `force_full_damage()` method and call it from resize, theme change, font size change, and scroll handlers
+- [x] Task 2: Wire full-damage events into DamageState <!-- 909089e -->
+  - [x] Write tests: resize triggers full damage and cache clear, theme change triggers full damage, font size change triggers full damage, scroll position change triggers full damage
+  - [x] Add `force_full_damage()` method and call it from resize, theme change, font size change, and scroll handlers
 
-- [ ] Task 3: Add frame timing metrics
-  - [ ] Write tests: FrameMetrics records diff_time, update_time, and total_time; periodic summary computes averages over N frames
-  - [ ] Implement FrameMetrics struct with `std::time::Instant` measurements
-  - [ ] Log at debug level per-frame, info level summary every 60 frames
+- [x] Task 3: Add frame timing metrics <!-- 7e33150 -->
+  - [x] Write tests: FrameMetrics records diff_time, update_time, and total_time; periodic summary computes averages over N frames
+  - [x] Implement FrameMetrics struct with `std::time::Instant` measurements
+  - [x] Log at debug level per-frame, info level summary every 60 frames
 
 - [ ] Task: Conductor - User Manual Verification 'Phase 3: Renderer Integration' (Protocol in workflow.md)
