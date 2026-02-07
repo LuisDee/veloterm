@@ -1,0 +1,15 @@
+Phase 4, Tasks 1-2: Write tests for grid dimension calculation + Implement grid dimensions
+
+Summary: Created GridDimensions struct that computes columns/rows from window
+physical pixel size and cell pixel size (from glyph atlas). Handles resize by
+recalculating columns/rows while preserving cell size. Provides NDC cell_size
+and grid_size for shader uniforms. Minimum 1 column and 1 row enforced.
+
+Files modified:
+- src/renderer/grid_renderer.rs (GridDimensions struct, 15 tests)
+
+Key decisions:
+- Floor division for columns/rows (partial cells not rendered)
+- Minimum 1x1 grid to avoid division by zero in NDC calculation
+- cell_size_ndc = [2.0/cols, 2.0/rows] matches shader's NDC coordinate system
+- All pixel dimensions are physical (already DPI-scaled by caller)
