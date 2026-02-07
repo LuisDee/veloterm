@@ -127,7 +127,7 @@ pub fn clear_color() -> wgpu::Color {
 /// Per-cell instance data sent to the GPU vertex shader.
 /// Layout must match the CellInstance struct in grid.wgsl.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CellInstance {
     pub position: [f32; 2], // grid column, row
     pub atlas_uv: [f32; 4], // u, v, width, height in atlas
