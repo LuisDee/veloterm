@@ -1,5 +1,7 @@
 // Terminal state machine: wraps alacritty_terminal for VT parsing and grid state.
 
+pub mod grid_bridge;
+
 use alacritty_terminal::event::VoidListener;
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line, Point};
@@ -65,6 +67,11 @@ impl Terminal {
     /// Get the number of screen lines (rows).
     pub fn rows(&self) -> usize {
         self.term.grid().screen_lines()
+    }
+
+    /// Access the inner alacritty_terminal Term for grid iteration.
+    pub fn inner(&self) -> &alacritty_terminal::term::Term<VoidListener> {
+        &self.term
     }
 
     /// Get the cursor position as (row, col).
