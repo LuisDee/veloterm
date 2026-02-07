@@ -9,7 +9,7 @@ use gpu::{
     clear_color, create_atlas_sampler, create_atlas_texture, create_bind_group_layout,
     create_grid_bind_group, create_render_pipeline, GpuError, GridUniforms, SurfaceConfig,
 };
-use grid_renderer::{generate_instances, generate_test_pattern, GridDimensions};
+use grid_renderer::{generate_instances, generate_test_pattern, GridCell, GridDimensions};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use winit::window::Window;
@@ -268,6 +268,20 @@ impl Renderer {
     /// Get a reference to the grid dimensions.
     pub fn grid(&self) -> &GridDimensions {
         &self.grid
+    }
+
+    /// Update the rendered cells from external terminal state.
+    pub fn update_cells(&mut self, cells: &[GridCell]) {
+        let instances = generate_instances(&self.grid, cells, &self.atlas);
+        self.instance_count = instances.len() as u32;
+
+        self.instance_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Cell Instances"),
+                contents: bytemuck::cast_slice(&instances),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            });
     }
 }
 

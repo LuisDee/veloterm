@@ -3,8 +3,9 @@
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
-use winit::event::WindowEvent;
+use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowAttributes, WindowId};
 
 /// Default window width in logical pixels.
@@ -64,6 +65,9 @@ pub struct App {
     config: WindowConfig,
     window: Option<Arc<Window>>,
     renderer: Option<crate::renderer::Renderer>,
+    pty: Option<crate::pty::PtySession>,
+    terminal: Option<crate::terminal::Terminal>,
+    modifiers: ModifiersState,
 }
 
 impl App {
@@ -72,6 +76,9 @@ impl App {
             config,
             window: None,
             renderer: None,
+            pty: None,
+            terminal: None,
+            modifiers: ModifiersState::empty(),
         }
     }
 
@@ -107,6 +114,24 @@ impl ApplicationHandler for App {
                 match pollster::block_on(crate::renderer::Renderer::new(window.clone())) {
                     Ok(renderer) => {
                         log::info!("Renderer initialized");
+
+                        // Spawn PTY and terminal with grid dimensions
+                        let cols = renderer.grid().columns as u16;
+                        let rows = renderer.grid().rows as u16;
+                        let shell = crate::pty::default_shell();
+                        match crate::pty::PtySession::new(&shell, cols, rows) {
+                            Ok(pty) => {
+                                log::info!("PTY spawned: {shell} ({cols}x{rows})");
+                                let terminal =
+                                    crate::terminal::Terminal::new(cols as usize, rows as usize, 10_000);
+                                self.pty = Some(pty);
+                                self.terminal = Some(terminal);
+                            }
+                            Err(e) => {
+                                log::error!("Failed to spawn PTY: {e}");
+                            }
+                        }
+
                         self.renderer = Some(renderer);
                     }
                     Err(e) => {
@@ -136,16 +161,58 @@ impl ApplicationHandler for App {
                 log::info!("Window close requested");
                 event_loop.exit();
             }
+            WindowEvent::ModifiersChanged(new_modifiers) => {
+                self.modifiers = new_modifiers.state();
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                if event.state == ElementState::Pressed {
+                    let bytes = crate::input::translate_key(
+                        &event.logical_key,
+                        event.text.as_ref().map(|s| s.as_ref()),
+                        event.state,
+                        self.modifiers,
+                    );
+                    if let (Some(bytes), Some(pty)) = (bytes, self.pty.as_mut()) {
+                        if let Err(e) = pty.write(&bytes) {
+                            log::warn!("PTY write error: {e}");
+                        }
+                    }
+                }
+            }
             WindowEvent::Resized(size) => {
                 log::debug!("Window resized to {}x{}", size.width, size.height);
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize(size.width, size.height);
+
+                    // Update PTY and terminal dimensions
+                    let cols = renderer.grid().columns as u16;
+                    let rows = renderer.grid().rows as u16;
+                    if let Some(pty) = &self.pty {
+                        let _ = pty.resize(cols, rows);
+                    }
+                    if let Some(terminal) = &mut self.terminal {
+                        terminal.resize(cols as usize, rows as usize);
+                    }
                 }
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 log::debug!("Scale factor changed to {scale_factor:.2}");
             }
             WindowEvent::RedrawRequested => {
+                // Drain PTY output into terminal
+                if let (Some(pty), Some(terminal)) = (&self.pty, &mut self.terminal) {
+                    while let Ok(bytes) = pty.reader_rx.try_recv() {
+                        terminal.feed(&bytes);
+                    }
+                }
+
+                // Update renderer with live terminal cells
+                if let (Some(renderer), Some(terminal)) = (&mut self.renderer, &self.terminal) {
+                    let cells =
+                        crate::terminal::grid_bridge::extract_grid_cells(terminal);
+                    renderer.update_cells(&cells);
+                }
+
                 if let Some(renderer) = &self.renderer {
                     match renderer.render_frame() {
                         Ok(()) => {}
