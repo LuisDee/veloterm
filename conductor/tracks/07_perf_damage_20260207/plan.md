@@ -1,6 +1,6 @@
 # Plan: Performance & Damage Tracking
 
-## Phase 1: DamageTracker Core
+## Phase 1: DamageTracker Core [checkpoint: 7894ae5]
 
 - [x] Task 1: Implement DamageTracker struct with per-row dirty flags <!-- b20449a -->
   - [x] Write tests: construction with row count, mark_row_dirty, mark_all_dirty, dirty_rows iteration, clear resets all flags, resize adjusts flag count, out-of-bounds row index is ignored
@@ -11,7 +11,7 @@
   - [x] Write tests: GridCell equality when all fields match, inequality when char differs, inequality when fg differs, inequality when bg differs, inequality when flags differ
   - [x] Add `PartialEq` derive to GridCell and Color structs
 
-- [ ] Task: Conductor - User Manual Verification 'Phase 1: DamageTracker Core' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 1: DamageTracker Core' (Protocol in workflow.md)
 
 ## Phase 2: Grid Diff & Previous Frame Cache
 
