@@ -1,0 +1,16 @@
+Phase 2, Tasks 1-2: Write tests for wgpu device/surface + Implement GPU context
+
+Summary: Created GpuContext with headless adapter/device creation (no surface needed),
+SurfaceConfig for testable surface configuration, and clear_color() for Claude Dark
+background. 9 tests validate GPU creation on real hardware, adapter type, device limits,
+surface config values, and theme color accuracy.
+
+Files created/modified:
+- src/renderer/gpu.rs (GpuContext, GpuError, SurfaceConfig, clear_color, 9 tests)
+- Cargo.toml (added pollster dev-dependency for async test blocking)
+
+Key decisions:
+- Headless GPU creation (no surface) enables unit testing without a window
+- PowerPreference::HighPerformance for adapter selection
+- Fifo present mode (guaranteed available, v-synced)
+- Downlevel limits for broader GPU compatibility
