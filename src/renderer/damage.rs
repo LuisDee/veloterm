@@ -86,6 +86,60 @@ impl DamageTracker {
     }
 }
 
+/// Manages damage detection by caching the previous frame's grid cells
+/// and diffing against the current frame.
+pub struct DamageState {
+    prev_cells: Option<Vec<GridCell>>,
+    cols: usize,
+    force_full: bool,
+}
+
+impl DamageState {
+    /// Create a new DamageState with the given column count.
+    pub fn new(cols: usize) -> Self {
+        Self {
+            prev_cells: None,
+            cols,
+            force_full: false,
+        }
+    }
+
+    /// Process a new frame's cells and return per-row dirty flags.
+    ///
+    /// On the first frame (no cache) or after `force_full_damage()`, returns all-dirty.
+    /// Otherwise, diffs against the previous frame row-by-row.
+    /// Updates the cache with the current cells after diffing.
+    pub fn process_frame(&mut self, cells: &[GridCell]) -> Vec<bool> {
+        let rows = if self.cols > 0 {
+            cells.len() / self.cols
+        } else {
+            0
+        };
+
+        let dirty = match self.prev_cells.as_ref() {
+            Some(prev) if !self.force_full => diff_grid_rows(prev, cells, self.cols),
+            _ => {
+                self.force_full = false;
+                vec![true; rows]
+            }
+        };
+
+        self.prev_cells = Some(cells.to_vec());
+        dirty
+    }
+
+    /// Force the next frame to be fully dirty (e.g., on resize, theme change).
+    pub fn force_full_damage(&mut self) {
+        self.force_full = true;
+    }
+
+    /// Resize the state for a new column count. Clears the cache.
+    pub fn resize(&mut self, cols: usize) {
+        self.cols = cols;
+        self.prev_cells = None;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,5 +328,72 @@ mod tests {
         // When sizes differ, all rows of the larger grid should be dirty
         assert!(result.iter().all(|&d| d));
         assert_eq!(result.len(), 3);
+    }
+
+    // ── DamageState tests ───────────────────────────────────────────
+
+    #[test]
+    fn damage_state_first_frame_all_dirty() {
+        let mut state = DamageState::new(4);
+        let cells = make_grid(4, 3, 'A');
+        let dirty = state.process_frame(&cells);
+        assert_eq!(dirty.len(), 3);
+        assert!(dirty.iter().all(|&d| d), "first frame should be all dirty");
+    }
+
+    #[test]
+    fn damage_state_second_frame_no_changes_no_dirty() {
+        let mut state = DamageState::new(4);
+        let cells = make_grid(4, 3, 'A');
+        let _ = state.process_frame(&cells); // first frame
+        let dirty = state.process_frame(&cells); // identical second frame
+        assert_eq!(dirty, vec![false, false, false]);
+    }
+
+    #[test]
+    fn damage_state_second_frame_one_row_changed() {
+        let mut state = DamageState::new(4);
+        let cells = make_grid(4, 3, 'A');
+        let _ = state.process_frame(&cells);
+        let mut changed = cells.clone();
+        changed[5] = GridCell::new('B', white(), black()); // row 1
+        let dirty = state.process_frame(&changed);
+        assert_eq!(dirty, vec![false, true, false]);
+    }
+
+    #[test]
+    fn damage_state_cache_updates_after_each_diff() {
+        let mut state = DamageState::new(4);
+        let cells_a = make_grid(4, 3, 'A');
+        let _ = state.process_frame(&cells_a); // first frame
+        let mut cells_b = cells_a.clone();
+        cells_b[0] = GridCell::new('B', white(), black());
+        let _ = state.process_frame(&cells_b); // second frame: row 0 dirty
+        // Third frame same as cells_b → no dirty
+        let dirty = state.process_frame(&cells_b);
+        assert_eq!(dirty, vec![false, false, false]);
+    }
+
+    #[test]
+    fn damage_state_resize_clears_cache_returns_all_dirty() {
+        let mut state = DamageState::new(4);
+        let cells = make_grid(4, 3, 'A');
+        let _ = state.process_frame(&cells);
+        state.resize(5); // new column count
+        let cells_new = make_grid(5, 2, 'A');
+        let dirty = state.process_frame(&cells_new);
+        assert_eq!(dirty.len(), 2);
+        assert!(dirty.iter().all(|&d| d), "after resize should be all dirty");
+    }
+
+    #[test]
+    fn damage_state_force_full_damage() {
+        let mut state = DamageState::new(4);
+        let cells = make_grid(4, 3, 'A');
+        let _ = state.process_frame(&cells);
+        state.force_full_damage();
+        let dirty = state.process_frame(&cells); // same cells but forced
+        assert_eq!(dirty.len(), 3);
+        assert!(dirty.iter().all(|&d| d), "forced full damage should be all dirty");
     }
 }
