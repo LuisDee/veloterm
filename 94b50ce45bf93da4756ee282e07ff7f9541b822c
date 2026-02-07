@@ -1,0 +1,30 @@
+Phase 7 Tasks 1-2: Scrollback Buffer and Scroll Navigation
+
+Files changed:
+  - src/terminal/mod.rs: 7 new scroll methods on Terminal wrapper
+  - src/terminal/grid_bridge.rs: viewport-aware extract_grid_cells using display_offset
+
+Implementation:
+  - display_offset() → grid.display_offset()
+  - history_size() → grid.history_size()
+  - scroll_up(lines) → scroll_display(Scroll::Delta(lines))
+  - scroll_down(lines) → scroll_display(Scroll::Delta(-lines))
+  - scroll_page_up() → scroll_display(Scroll::PageUp)
+  - scroll_page_down() → scroll_display(Scroll::PageDown)
+  - snap_to_bottom() → scroll_display(Scroll::Bottom)
+  - extract_grid_cells: Line(row - offset) for viewport-aware rendering
+
+Tests (11 new, 253 total):
+  - display_offset_starts_at_zero (1)
+  - history_size_starts_at_zero (1)
+  - scrollback_accumulates_lines (1)
+  - scroll_up_increases_display_offset (1)
+  - scroll_down_decreases_display_offset (1)
+  - scroll_page_up_scrolls_by_page (1)
+  - scroll_page_down_reduces_offset (1)
+  - snap_to_bottom_resets_offset (1)
+  - scroll_up_clamped_to_history (1)
+  - extract_viewport_shows_scrollback_content (1)
+  - extract_viewport_at_bottom_shows_latest (1)
+
+Quality gates: 253 tests pass, clippy clean, fmt clean
