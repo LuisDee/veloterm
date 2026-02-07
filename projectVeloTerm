@@ -1,0 +1,835 @@
+# Terminal Emulator — Complete Design & Implementation Plan
+
+## Project Codename: **VeloTerm**
+*Cross-platform (macOS + Linux), GPU-accelerated terminal emulator with native split panes*
+
+---
+
+## 1. Tech Stack Decisions — Deep Analysis
+
+### 1.1 Language: Rust (Confirmed — Here's Why)
+
+**Your question:** Does Rust introduce measurable latency compared to C?
+
+**Answer: No.** The performance difference between Rust and C for a terminal emulator is negligible — well within measurement noise. Here's the evidence:
+
+- Benchmarks consistently show Rust and C within 0–5% of each other in compute-bound tasks. Where Rust appears marginally slower in synthetic benchmarks, it's typically due to bounds checking on array access — which you can opt out of with `unsafe` in hot paths if profiling shows it matters (it almost certainly won't).
+- **Alacritty (Rust) matches or beats Kitty (C) on latency benchmarks.** Dan Luu's terminal latency measurements show both in the same performance class (~5–7ms). The language is not the bottleneck.
+- Rust supports SIMD intrinsics (`std::arch`), inline assembly, zero-cost abstractions, and compiles through LLVM — the same backend as Clang for C. The generated machine code is effectively identical for equivalent algorithms.
+- The real-world advantage of Rust is *correctness under concurrency*. A terminal emulator has multiple threads (IO, parsing, rendering, UI events) sharing mutable state. In C, this is a perpetual source of data races, use-after-free, and subtle corruption. Rust's ownership model eliminates these at compile time. This means fewer bugs, faster development, and safer refactoring — all of which translate to shipping a better product faster.
+- **WezTerm and Warp are both Rust-based terminals that are fast, featureful, and production-proven.** The ecosystem has validated this choice.
+
+**Verdict:** Use Rust. The ~0% performance cost buys you memory safety, fearless concurrency, a superb package ecosystem (crates.io), and modern tooling (cargo, clippy, rust-analyzer). C would give you no meaningful speed advantage while dramatically increasing development time and bug surface.
+
+---
+
+### 1.2 Terminal Emulation Core: `alacritty_terminal` (Confirmed — With Caveats)
+
+**Your question:** Is this dependency too heavyweight or opinionated?
+
+**Answer:** It's the right choice, but understand what you're getting.
+
+`alacritty_terminal` is a well-separated crate within Alacritty's Cargo workspace. It handles:
+- VT100/VT220/xterm escape sequence parsing (CSI, OSC, DCS, etc.)
+- Terminal grid management (cells, rows, columns, scrollback)
+- ANSI color handling (16, 256, and 24-bit true color)
+- Text selection model
+- URL detection
+- Scrollback buffer
+
+**Why it's the right choice:**
+- Writing a correct VT/ANSI parser from scratch is genuinely months of work — not because the basic sequences are hard, but because the *edge cases are endless*. Applications like vim, tmux, htop, and less all rely on subtle escape sequence behaviors. Getting these wrong means broken rendering that's incredibly hard to debug.
+- Alacritty's parser is battle-tested by thousands of daily users across all platforms.
+- It's ~15K lines of focused terminal emulation code — not "heavyweight" by any measure.
+- It does **no** IO and **no** rendering. It's purely a state machine: bytes go in, grid state comes out. This is exactly the separation you want.
+
+**Caveats and mitigations:**
+- `alacritty_terminal` is designed for Alacritty's single-pane model. For split panes, you'll instantiate one `Term` per pane — this is fine, each is independent.
+- The crate's API surface is sometimes Alacritty-specific (e.g., its event model). You'll want a thin wrapper/adapter layer.
+- It doesn't support the Kitty keyboard protocol or Kitty graphics protocol out of the box. You'd need to add these yourself if desired (see feature roadmap below).
+- Pin to a specific version and vendor it if stability matters — Alacritty doesn't guarantee API stability for this crate.
+
+**Alternatives considered:**
+- **`libvterm` (C)** — Used by Neovim's terminal. It's lighter but requires FFI bindings, adds build complexity, and means maintaining C interop. The performance difference vs `alacritty_terminal` is zero for practical purposes — both parse bytes at speeds far exceeding any PTY's output rate.
+- **`vte` crate** — The low-level parser that `alacritty_terminal` itself uses. You could build on just this, but then you're reimplementing the grid, scrollback, selection, and all the higher-level state management. Not worth it.
+- **Writing your own** — Only makes sense if your terminal has fundamentally different semantics (e.g., a non-grid-based terminal). For a standard terminal, this is wasted effort.
+
+**Verdict:** Use `alacritty_terminal`. Wrap it in a thin adapter layer to isolate your code from its internals.
+
+---
+
+### 1.3 PTY Management: `portable-pty` (Confirmed — It's Ideal)
+
+**Your question:** Does the abstraction add measurable overhead?
+
+**Answer: No.** On Unix (your target: macOS + Linux), `portable-pty` calls the exact same system calls you would: `openpty()`, `fork()`, `exec()`, `read()`, `write()`, `ioctl(TIOCSWINSZ)`. The "abstraction layer" is a trait boundary and a struct wrapper around raw file descriptors — these are zero-cost in Rust (monomorphized away at compile time).
+
+The PTY is never the performance bottleneck. PTY read/write is bounded by the kernel's TTY subsystem and the child process's output rate. Even `cat /dev/urandom | base32` — the fastest possible output generator — is limited by kernel pipe buffers, not by how you call `read()`. Whether you use `portable-pty`, raw `nix` crate calls, or inline syscalls, the throughput and latency are identical.
+
+**Why `portable-pty` specifically:**
+- It's the PTY layer extracted from WezTerm — production-proven, actively maintained.
+- Clean API: `openpty()` → `PtyPair { master, slave }` → `spawn_command()` → `read()`/`write()`.
+- Handles edge cases you don't want to think about: session leaders, controlling terminals, CLOEXEC flags, signal handling during fork.
+- If you ever add Windows support, it already handles ConPTY.
+
+**Verdict:** Use `portable-pty`. Zero overhead, maximum correctness, saves you from subtle PTY bugs.
+
+---
+
+### 1.4 GUI Framework: Custom `wgpu` Renderer (Recommended Over `egui`)
+
+**Your question:** Is egui optimal for terminal rendering?
+
+**Answer: No. egui is the wrong tool for this job.** Here's why:
+
+A terminal is fundamentally a **fixed-width character grid** — not a general-purpose UI. egui's text rendering pipeline is designed for variable-width, layout-flexible UI text. Using it for a terminal means:
+
+1. **egui re-tessellates text every frame in immediate mode.** For a 200×50 terminal (10,000 cells), this means generating triangle meshes for 10,000 glyphs every 16ms. While egui caches galleys, the cache invalidation patterns for a terminal (where random cells change unpredictably) will defeat the caching.
+
+2. **egui's font atlas isn't optimized for monospace grid rendering.** Terminal rendering should be: "look up glyph in atlas → emit 1 quad with texture coordinates → done." egui's pipeline goes through layout → shaping → galley construction → tessellation → mesh generation. This is 10x more work than necessary.
+
+3. **egui's grapheme cluster handling has known issues** for terminal-style fixed-width rendering (as noted in egui issue #2532 — someone building a terminal-emulator-like project hit exactly this problem).
+
+4. **Monospace grid rendering is a solved problem with a much simpler approach.** Every fast terminal (Alacritty, Kitty, Ghostty, WezTerm) uses the same technique: a glyph atlas texture + a single instanced draw call. This is dramatically simpler AND faster than going through a general-purpose UI framework.
+
+**Recommended approach — `wgpu` with a custom terminal renderer:**
+
+```
+┌─────────────────────────────────────────────────────┐
+│  winit (window + event loop + platform integration) │
+├─────────────────────────────────────────────────────┤
+│  wgpu (GPU abstraction: Metal/Vulkan/OpenGL/DX12)   │
+├─────────────────────────────────────────────────────┤
+│  Custom Terminal Renderer                           │
+│  ├── GlyphAtlas (rasterize + cache glyphs in VRAM)  │
+│  ├── GridRenderer (instanced quad draw per cell)    │
+│  ├── CursorRenderer                                 │
+│  └── SelectionHighlight                             │
+├─────────────────────────────────────────────────────┤
+│  Simple UI Overlay (for split borders, tabs, etc.)  │
+│  └── egui OR custom minimal widgets                 │
+└─────────────────────────────────────────────────────┘
+```
+
+- **`winit`** handles window creation, event loop, keyboard/mouse input, and DPI scaling across macOS (Cocoa) and Linux (X11/Wayland). It's the standard in the Rust ecosystem.
+- **`wgpu`** abstracts GPU backends: Metal on macOS, Vulkan (primary) / OpenGL (fallback) on Linux. This is what WezTerm and Rio use. It's mature, safe (no raw OpenGL), and gives you compute shaders if needed.
+- **Custom glyph atlas**: Use `cosmic-text` or `rustybuzz` + `ab_glyph` for text shaping and rasterization. Bake glyphs into a texture atlas uploaded to GPU once. Rendering a frame = 1 draw call.
+- **For the split pane borders, resize handles, and any minimal UI chrome**: You can use `egui` as a lightweight overlay on top of your terminal renderer. egui + wgpu integration is well-supported (`egui-wgpu`). This gives you the best of both worlds: blazing custom rendering for the terminal grid, and egui's convenience for the small amount of UI chrome.
+
+**Why not the other alternatives:**
+- **`iced`** — Retained-mode, Elm-architecture. Better than egui for a terminal in theory (only re-renders on state change), but still not optimized for character grids. It would add significant complexity without matching custom wgpu performance.
+- **Native AppKit/GTK** — This is what Ghostty does (SwiftUI + GTK4). Produces the most "native" feel but requires maintaining two completely separate UI codebases. Consider this for v2 if you want maximum platform integration, but it's overkill for v1.
+- **Raw OpenGL** — No advantage over wgpu, more boilerplate, no safety guarantees, harder to maintain.
+
+**Verdict:** Custom `wgpu` renderer for the terminal grid + `winit` for windowing + optional `egui` overlay for UI chrome (split handles, status bar). This is the architecture that WezTerm and Rio prove works.
+
+---
+
+### 1.5 Rendering Strategy: GPU is Essential, Not Overkill
+
+**Your question:** Is GPU rendering overkill, or essential for sub-50ms latency?
+
+**Answer:** GPU rendering isn't what gives you low latency — it's what gives you *consistent* low latency under load, plus smooth scrolling and resize. Here's the nuance:
+
+- **Input latency** (key-to-screen) is primarily determined by your event loop architecture, not your rendering backend. xterm achieves ~2ms latency with pure CPU rendering. The key is: how quickly do you process the keypress, feed it to the PTY, read back the echo, update the grid state, and submit a render?
+- **GPU rendering shines when**: you're scrolling through large output (100K+ lines), resizing the window (redrawing the entire grid), rendering with ligatures/complex text, or running multiple split panes simultaneously. In these scenarios, CPU rendering would need to rasterize thousands of glyphs per frame — the GPU does this trivially.
+- **The glyph atlas pattern** eliminates the main cost of text rendering regardless of backend. But on GPU, drawing 10,000 textured quads is literally 1 draw call. On CPU, it's 10,000 blits.
+
+**Your <50ms target is very conservative** — modern GPU-accelerated terminals achieve <5ms input latency. Your real target should be **<10ms** to match the best in class.
+
+**Implementation approach:**
+
+1. **Glyph Atlas**: On startup (and when font changes), rasterize the ASCII range (0x20–0x7E) plus common symbols into a texture atlas. For less common glyphs, rasterize on first encounter and add to the atlas dynamically. Store atlas in GPU VRAM.
+
+2. **Damage Tracking**: Don't re-render the entire grid every frame. Track which cells changed since last frame (a simple bitfield — `bitvec` crate). Only update the vertex buffer for changed cells. For interactive typing, this means updating 1-5 cells per frame instead of 10,000. Zutty demonstrated this yields >10x GPU utilization reduction.
+
+3. **Render Pipeline**:
+   ```
+   Per frame:
+   1. Check if any cells are dirty → if not, skip render entirely
+   2. For dirty cells: update instance data (position, glyph atlas coords, fg/bg color)
+   3. Upload instance buffer to GPU (partial update only)
+   4. Issue 2 draw calls:
+      a. Background quads (colored rectangles for cell backgrounds)
+      b. Foreground glyphs (textured quads from glyph atlas)
+   5. Overlay: cursor, selection highlight, split borders
+   6. Present frame
+   ```
+
+4. **Latency vs Throughput Knobs** (steal from Kitty):
+   - `input_delay`: Artificial delay before processing input (0 = lowest latency, higher = less CPU)
+   - `repaint_delay`: Minimum time between repaints (2ms = responsive, 10ms = power-efficient)
+   - `sync_to_monitor`: VSync on/off (off = lower latency, on = no tearing)
+
+**Verdict:** GPU rendering via wgpu with glyph atlas + damage tracking. Not overkill — it's the proven architecture of every fast modern terminal.
+
+---
+
+### 1.6 Async I/O: Dedicated Threads, NOT Tokio
+
+**Your question:** Does async introduce scheduling overhead vs simple threads?
+
+**Answer: Yes, and for this use case, threads are better.** Here's why:
+
+Tokio is designed for high-concurrency network servers with thousands of concurrent connections. A terminal emulator has exactly 3 IO sources: keyboard input, PTY output, and (maybe) config file watching. This is not a high-concurrency problem.
+
+**The overhead of async here:**
+- Tokio's task scheduler adds 1-5μs of overhead per `.await` point — negligible in absolute terms, but unnecessary complexity.
+- PTY reads are inherently blocking on the kernel side. Wrapping them in `tokio::io::AsyncFd` or `spawn_blocking` adds abstraction without adding value.
+- Async introduces cancellation complexity, lifetime challenges with borrowed data across `.await` points, and makes debugging stack traces harder.
+
+**What every fast terminal actually does:**
+
+```
+Thread 1: Event Loop (main thread)
+├── Receives: keyboard/mouse events from winit
+├── Sends: keystrokes to PTY write channel
+├── Receives: parsed grid updates from Thread 2
+├── Triggers: re-render when grid changes
+└── Renders: GPU frame submission
+
+Thread 2: PTY Reader + Parser
+├── Blocking read() on PTY master fd
+├── Feed bytes into alacritty_terminal parser
+├── Produce grid state diffs
+└── Send diffs to Thread 1 via channel
+
+Thread 3 (optional): PTY Writer
+├── Receive keystrokes from Thread 1 via channel
+└── Blocking write() to PTY master fd
+```
+
+Communication between threads uses `crossbeam-channel` (bounded, lock-free, ~20ns per send/receive) or `std::sync::mpsc`. This is simpler, faster, and easier to reason about than async.
+
+**One important detail:** The PTY reader thread should use a reasonably sized read buffer (e.g., 64KB) and batch processing. When `cat huge_file.txt` floods the PTY, the reader should consume as much as available before sending a batch update to the renderer. This naturally amortizes the rendering cost.
+
+**Verdict:** Use dedicated threads with channels. No Tokio. Simpler, lower latency, easier to debug.
+
+---
+
+### 1.7 Split Pane Architecture: Binary Tree (Confirmed)
+
+**Your question:** Tree vs flat layout?
+
+**Answer:** Binary tree is the correct approach. Here's the design:
+
+```rust
+enum PaneNode {
+    Leaf {
+        id: PaneId,
+        terminal: TerminalInstance,  // owns Term + PtyPair + reader thread
+    },
+    Split {
+        direction: SplitDirection,   // Horizontal | Vertical
+        ratio: f32,                  // 0.0–1.0, position of divider
+        first: Box<PaneNode>,
+        second: Box<PaneNode>,
+    },
+}
+
+enum SplitDirection {
+    Horizontal,  // top/bottom
+    Vertical,    // left/right
+}
+```
+
+**Why tree beats flat:**
+- Recursive layout calculation is trivial: given a rectangle, split it by ratio, recurse into children.
+- Resizing a split just changes the `ratio` and re-layouts the subtree — O(depth), typically 3–5 levels max.
+- Closing a pane replaces the parent `Split` node with the surviving sibling — clean and simple.
+- The tree naturally represents the user's mental model of "I split this pane, then split that result."
+
+**Why not flat:**
+- Flat layouts with coordinate tracking require maintaining constraint systems or grid slot calculations. This gets complex fast when splits are nested asymmetrically.
+- Flat layouts make it harder to implement "close this pane and expand its neighbor to fill the space."
+
+**Performance:** The layout tree has zero impact on rendering performance. Layout calculation happens only on split/resize events (user-driven, rare). Rendering iterates over leaf nodes and draws each terminal into its allocated rectangle — the tree structure is invisible to the GPU.
+
+**Clickable GUI controls for splits:**
+- Render thin divider bars (2–4px) between panes using simple colored quads.
+- On hover: change cursor to resize cursor, highlight divider.
+- On drag: update `ratio` in parent Split node, re-layout, re-render.
+- Right-click on divider or pane: context menu with "Split Horizontal", "Split Vertical", "Close Pane".
+- Keyboard shortcuts: Ctrl+Shift+D (split vertical), Ctrl+Shift+E (split horizontal), Ctrl+Shift+W (close pane).
+
+---
+
+## 2. Performance Targets — Assessment
+
+| Target | Realistic? | How to Achieve |
+|--------|-----------|----------------|
+| **<50ms input latency** | Yes — this is conservative. Target <10ms. | Dedicated IO thread, damage-tracked rendering, no async overhead. Alacritty achieves ~6ms. |
+| **<10MB memory per terminal** | Yes, achievable. | alacritty_terminal's grid is compact. A 200×50 grid with 10K lines scrollback ≈ 2-4MB. Glyph atlas ≈ 1-2MB VRAM (shared across panes). Per-pane overhead ≈ 5-8MB. |
+| **<100ms startup** | Yes, easily. | Rust's minimal runtime, no GC warmup. Pre-rasterize ASCII glyph atlas on startup (~10-20ms). winit window creation ~30ms. wgpu device init ~20-50ms. |
+
+**Where the bottlenecks actually are (ordered by impact):**
+
+1. **Text shaping for complex glyphs** — Ligatures and emoji require HarfBuzz/rustybuzz calls that are 10-100x slower than simple ASCII lookup. Mitigate with aggressive caching.
+2. **Font rasterization** — First-time glyph rasterization is slow. Pre-rasterize common glyphs; lazy-load the rest with atlas growth.
+3. **PTY read batching** — Not reading enough per cycle forces too many event loop iterations. Use 64KB read buffers.
+4. **GPU buffer upload** — Uploading the entire vertex buffer every frame wastes bandwidth. Damage tracking fixes this.
+5. **VSync** — Locks you to 16.6ms frame time at 60Hz. Offer a `sync_to_monitor = false` option for lowest latency.
+
+---
+
+## 3. Complete Feature Set — Prioritized
+
+### Phase 1: Core Terminal (MVP — Weeks 1-8)
+
+**Goal:** A single-pane terminal that matches Alacritty's performance.
+
+- [ ] Window creation with `winit` (macOS + Linux, X11 + Wayland)
+- [ ] `wgpu` renderer initialization (Metal on macOS, Vulkan/OpenGL on Linux)
+- [ ] Glyph atlas: rasterize ASCII + common symbols using `cosmic-text` or `ab_glyph`
+- [ ] Grid renderer: instanced quad rendering from glyph atlas
+- [ ] `alacritty_terminal` integration: feed PTY bytes → get grid state
+- [ ] `portable-pty` integration: spawn shell, read/write
+- [ ] Dedicated IO thread with `crossbeam-channel`
+- [ ] Keyboard input → PTY write pipeline
+- [ ] Cursor rendering (block, beam, underline)
+- [ ] True Color (24-bit) support
+- [ ] Basic scrollback (configurable history size, 10K default)
+- [ ] Mouse scroll for scrollback navigation
+- [ ] Text selection (click + drag) with clipboard copy (Ctrl+Shift+C / Cmd+C)
+- [ ] Paste from clipboard (Ctrl+Shift+V / Cmd+V)
+- [ ] Configuration file (TOML): font family, font size, colors, scrollback size
+- [ ] Hot-reload configuration on file change
+- [ ] DPI/HiDPI awareness and scaling
+- [ ] Damage tracking: only re-render changed cells
+
+### Phase 2: Split Panes & Tabs (Weeks 9-14)
+
+**Goal:** Built-in multiplexing that makes tmux unnecessary.
+
+- [ ] Binary tree pane layout engine
+- [ ] Vertical split (Ctrl+Shift+D)
+- [ ] Horizontal split (Ctrl+Shift+E)
+- [ ] Close pane (Ctrl+Shift+W)
+- [ ] Clickable divider bars with drag-to-resize
+- [ ] Focus switching: click on pane, or Ctrl+Shift+Arrow
+- [ ] Visual focus indicator (subtle border highlight on active pane)
+- [ ] Each pane gets independent terminal instance + PTY
+- [ ] Pane zoom: temporarily maximize a pane (Ctrl+Shift+Z), toggle back
+- [ ] Tab support: Ctrl+Shift+T (new tab), Ctrl+Shift+{1-9} (switch tab)
+- [ ] Tab bar rendering (minimal, at top or bottom, configurable)
+- [ ] Tab naming (auto from CWD, or manual rename)
+- [ ] Reorder tabs with drag
+- [ ] Close tab with Ctrl+Shift+W (when no splits)
+
+### Phase 3: QoL Features (Weeks 15-20)
+
+**Goal:** The features that make developers choose your terminal over others.
+
+- [ ] **Clickable URLs**: Detect URLs in output, Ctrl/Cmd+click to open in browser
+- [ ] **Clickable file paths**: Detect file paths, click to open in `$EDITOR`
+- [ ] **Search in scrollback**: Ctrl+Shift+F → search bar with regex support, match highlighting
+- [ ] **Vi-mode**: Ctrl+Shift+Space to enter visual mode for keyboard-driven text selection/navigation
+- [ ] **Shell integration** (zsh, bash, fish):
+  - Semantic prompt detection (know where commands start/end)
+  - Current working directory tracking (auto-update window/tab title)
+  - Command timing (how long each command took)
+  - Right-click a command block → "Copy command" / "Copy output"
+- [ ] **Quick Terminal**: Global hotkey to summon/dismiss a drop-down terminal (like Guake/Ghostty)
+- [ ] **Synchronized rendering**: Support the synchronized update escape sequence to prevent partial frame rendering
+- [ ] **Notification on command completion**: When a long-running command finishes in a background pane/tab, flash the tab or show a desktop notification
+- [ ] **Ligature support**: Programming ligatures for fonts like Fira Code, JetBrains Mono
+- [ ] **Nerd Font / Powerline glyph support**: Correctly render Starship, Powerlevel10k, etc.
+- [ ] **Bold/Italic/Underline/Strikethrough** text decorations
+- [ ] **Cursor trail or smooth cursor movement** (optional, configurable)
+
+### Phase 4: Advanced Features (Weeks 21-28)
+
+**Goal:** Features that set your terminal apart.
+
+- [ ] **Kitty Graphics Protocol**: Inline image rendering in the terminal
+- [ ] **Kitty Keyboard Protocol**: Disambiguated key events for better TUI app support
+- [ ] **Session persistence**: Save/restore terminal sessions across restarts (optionally reattach to running processes)
+- [ ] **Command palette**: Ctrl+Shift+P → searchable list of all actions, settings, and keybindings
+- [ ] **Multiple color schemes**: Ship 10-15 curated schemes (Dracula, Tokyo Night, Catppuccin, Solarized, Gruvbox, Nord, One Dark, Monokai, Rosé Pine, Kanagawa) — not hundreds, just the popular ones done well
+- [ ] **Auto light/dark mode switching**: Follow OS preference
+- [ ] **Background opacity / blur**: Transparent backgrounds with blur (macOS vibrancy, compositor blur on Linux)
+- [ ] **Broadcast input**: Type in one pane, broadcast to all (useful for multi-server ops)
+- [ ] **Custom key bindings**: Full configurability of shortcuts via TOML config
+- [ ] **OSC 52 clipboard integration**: Let remote sessions set the local clipboard
+- [ ] **Sixel graphics protocol support** (in addition to Kitty graphics)
+
+---
+
+## 4. Architecture — Detailed Component Diagram
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                          VeloTerm                                │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌─────────────────────────────────┐                             │
+│  │         Config Manager          │  ← TOML config file         │
+│  │  (hot-reload via notify crate)  │    ~/.config/veloterm/       │
+│  └──────────┬──────────────────────┘    veloterm.toml             │
+│             │                                                     │
+│  ┌──────────▼──────────────────────────────────────────────┐     │
+│  │                    Application Core                      │     │
+│  │                                                          │     │
+│  │  ┌──────────────┐    ┌──────────────┐                    │     │
+│  │  │  Tab Manager  │───▶│  Pane Tree   │ (binary tree)     │     │
+│  │  │  (Vec<Tab>)   │    │  per tab     │                   │     │
+│  │  └──────────────┘    └──────┬───────┘                    │     │
+│  │                             │                             │     │
+│  │         ┌───────────────────┼───────────────────┐         │     │
+│  │         ▼                   ▼                   ▼         │     │
+│  │  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐    │     │
+│  │  │TermInstance 1│   │TermInstance 2│   │TermInstance N│   │     │
+│  │  │             │   │             │   │             │    │     │
+│  │  │ ┌─────────┐ │   │ ┌─────────┐ │   │ ┌─────────┐ │   │     │
+│  │  │ │alacritty│ │   │ │alacritty│ │   │ │alacritty│ │   │     │
+│  │  │ │_terminal│ │   │ │_terminal│ │   │ │_terminal│ │   │     │
+│  │  │ │ (Term)  │ │   │ │ (Term)  │ │   │ │ (Term)  │ │   │     │
+│  │  │ └────┬────┘ │   │ └────┬────┘ │   │ └────┬────┘ │   │     │
+│  │  │      │      │   │      │      │   │      │      │   │     │
+│  │  │ ┌────▼────┐ │   │ ┌────▼────┐ │   │ ┌────▼────┐ │   │     │
+│  │  │ │  PTY    │ │   │ │  PTY    │ │   │ │  PTY    │ │   │     │
+│  │  │ │(portabl│ │   │ │(portabl│ │   │ │(portabl│ │   │     │
+│  │  │ │ e-pty)  │ │   │ │ e-pty)  │ │   │ │ e-pty)  │ │   │     │
+│  │  │ └────┬────┘ │   │ └────┬────┘ │   │ └────┬────┘ │   │     │
+│  │  │      │      │   │      │      │   │      │      │   │     │
+│  │  │ [IO Thread] │   │ [IO Thread] │   │ [IO Thread] │   │     │
+│  │  └─────────────┘   └─────────────┘   └─────────────┘    │     │
+│  │                                                          │     │
+│  └──────────────────────────────────────────────────────────┘     │
+│                             │                                     │
+│                    ┌────────▼────────┐                            │
+│                    │  Render Engine  │                            │
+│                    │                 │                            │
+│                    │ ┌─────────────┐ │                            │
+│                    │ │ Glyph Atlas │ │  ← cosmic-text / ab_glyph │
+│                    │ │ (GPU VRAM)  │ │                            │
+│                    │ └─────────────┘ │                            │
+│                    │ ┌─────────────┐ │                            │
+│                    │ │Grid Renderer│ │  ← instanced quads         │
+│                    │ │(per pane)   │ │                            │
+│                    │ └─────────────┘ │                            │
+│                    │ ┌─────────────┐ │                            │
+│                    │ │ UI Overlay  │ │  ← dividers, tab bar,      │
+│                    │ │(egui/custom)│ │    search bar, etc.         │
+│                    │ └─────────────┘ │                            │
+│                    │                 │                            │
+│                    │   winit + wgpu  │                            │
+│                    └────────┬────────┘                            │
+│                             │                                     │
+│                    ┌────────▼────────┐                            │
+│                    │   OS Window     │                            │
+│                    │ Metal (macOS)   │                            │
+│                    │ Vulkan (Linux)  │                            │
+│                    └─────────────────┘                            │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 5. Crate Dependencies — Complete List
+
+### Core
+```toml
+[dependencies]
+# Window + Event Loop
+winit = "0.30"                    # Cross-platform windowing
+
+# GPU Rendering
+wgpu = "24"                       # GPU abstraction (Metal/Vulkan/GL)
+
+# Terminal Emulation
+alacritty_terminal = "0.24"       # VT parser + grid state machine
+
+# PTY
+portable-pty = "0.9"              # Cross-platform PTY
+
+# Text Rendering
+cosmic-text = "0.12"              # Text shaping + rasterization
+# OR:
+# ab_glyph = "0.2"               # Simpler glyph rasterization
+# rustybuzz = "0.18"             # HarfBuzz-compatible text shaping
+
+# Threading
+crossbeam-channel = "0.5"        # Fast lock-free channels
+
+# Configuration
+toml = "0.8"                     # Config file parsing
+serde = { version = "1", features = ["derive"] }
+notify = "7"                     # File watcher for hot-reload
+
+# Utilities
+log = "0.4"                      # Logging
+env_logger = "0.11"
+bitvec = "1"                     # Damage tracking bitfield
+unicode-width = "0.2"            # Character width calculation
+dirs = "5"                       # Platform-specific config dirs
+arboard = "3"                    # Cross-platform clipboard
+```
+
+### Optional / Phase 2+
+```toml
+# UI Overlay (for split borders, search bar, etc.)
+egui = "0.30"
+egui-wgpu = "0.30"
+egui-winit = "0.30"
+
+# URL Detection
+linkify = "0.10"
+
+# Regex search in scrollback
+regex = "1"
+```
+
+---
+
+## 6. Project Structure
+
+```
+veloterm/
+├── Cargo.toml
+├── Cargo.lock
+├── README.md
+├── veloterm.toml.default          # Default config (ships with binary)
+│
+├── src/
+│   ├── main.rs                    # Entry point, CLI args, setup
+│   │
+│   ├── app.rs                     # Application state, event loop orchestration
+│   │
+│   ├── config/
+│   │   ├── mod.rs                 # Config types, defaults
+│   │   ├── keys.rs                # Keybinding definitions
+│   │   └── theme.rs               # Color scheme definitions
+│   │
+│   ├── terminal/
+│   │   ├── mod.rs                 # TerminalInstance: owns Term + PTY + IO thread
+│   │   ├── pty.rs                 # PTY wrapper (portable-pty integration)
+│   │   ├── adapter.rs             # Adapter layer over alacritty_terminal
+│   │   └── shell_integration.rs   # OSC sequence handling for shell integration
+│   │
+│   ├── layout/
+│   │   ├── mod.rs                 # Tab + PaneTree management
+│   │   ├── pane_tree.rs           # Binary tree split/resize/close logic
+│   │   └── geometry.rs            # Rectangle calculations for layout
+│   │
+│   ├── renderer/
+│   │   ├── mod.rs                 # Render orchestration
+│   │   ├── gpu.rs                 # wgpu device, surface, pipeline setup
+│   │   ├── glyph_atlas.rs         # Glyph rasterization + GPU texture atlas
+│   │   ├── grid_renderer.rs       # Terminal grid → instanced quads
+│   │   ├── cursor.rs              # Cursor rendering
+│   │   ├── selection.rs           # Selection highlight rendering
+│   │   └── ui_overlay.rs          # Split borders, tab bar, search bar
+│   │
+│   ├── input/
+│   │   ├── mod.rs                 # Input event processing
+│   │   ├── keyboard.rs            # Key mapping + modifier handling
+│   │   └── mouse.rs               # Click, drag, scroll, selection
+│   │
+│   ├── search.rs                  # Scrollback search (regex)
+│   ├── clipboard.rs               # Cross-platform clipboard ops
+│   └── url_detector.rs            # URL/path detection + click handling
+│
+├── shaders/
+│   ├── grid.wgsl                  # Vertex + fragment shader for grid cells
+│   └── cursor.wgsl                # Cursor rendering shader
+│
+└── assets/
+    └── themes/
+        ├── dracula.toml
+        ├── tokyo_night.toml
+        ├── catppuccin_mocha.toml
+        ├── solarized_dark.toml
+        ├── gruvbox.toml
+        ├── nord.toml
+        ├── one_dark.toml
+        ├── monokai.toml
+        ├── rose_pine.toml
+        └── kanagawa.toml
+```
+
+---
+
+## 7. Rendering Pipeline — The Hot Path (Detailed)
+
+This is the most performance-critical code. Here's exactly what happens each frame:
+
+### 7.1 The Main Event Loop (Thread 1)
+
+```rust
+// Pseudocode — main event loop
+loop {
+    // 1. Process winit events
+    match event {
+        KeyboardInput(key) => {
+            if is_terminal_shortcut(key) {
+                handle_shortcut(key); // split, tab, search, etc.
+            } else {
+                active_pane.send_to_pty(key_to_bytes(key));
+            }
+        }
+        MouseInput(click) => {
+            if click.on_divider() {
+                start_resize_drag();
+            } else if click.on_pane(pane_id) {
+                set_focus(pane_id);
+                // handle selection, URL click, etc.
+            }
+        }
+        Resize(new_size) => {
+            recalculate_layout(new_size);
+            resize_all_ptys();
+        }
+    }
+
+    // 2. Drain terminal updates from IO threads
+    for pane in all_panes() {
+        while let Ok(update) = pane.channel.try_recv() {
+            pane.terminal.process(update);
+            pane.mark_dirty();
+        }
+    }
+
+    // 3. Render only if something changed
+    if any_pane_dirty() || cursor_blink_tick() || resize_pending() {
+        render_frame();
+    }
+
+    // 4. Sleep until next event or repaint deadline
+    // (winit's event_loop.run() handles this efficiently)
+}
+```
+
+### 7.2 The IO Thread (per pane)
+
+```rust
+// Pseudocode — IO reader thread
+fn pty_reader_thread(pty_master: ReadHalf, sender: Sender<Vec<u8>>) {
+    let mut buf = [0u8; 65536]; // 64KB read buffer
+    loop {
+        match pty_master.read(&mut buf) {
+            Ok(0) => break,  // PTY closed (shell exited)
+            Ok(n) => {
+                // Send raw bytes to main thread for parsing
+                sender.send(buf[..n].to_vec()).unwrap();
+            }
+            Err(e) if e.kind() == WouldBlock => continue,
+            Err(_) => break,
+        }
+    }
+}
+```
+
+### 7.3 Grid Renderer (GPU)
+
+```wgsl
+// grid.wgsl — Vertex shader for terminal cells
+struct CellInstance {
+    @location(0) position: vec2<f32>,     // screen position
+    @location(1) atlas_uv: vec4<f32>,     // glyph texture coordinates
+    @location(2) fg_color: vec4<f32>,     // foreground color
+    @location(3) bg_color: vec4<f32>,     // background color
+    @location(4) flags: u32,             // bold, italic, underline, etc.
+};
+
+@vertex
+fn vs_main(instance: CellInstance, @builtin(vertex_index) vi: u32) -> VertexOutput {
+    // Expand vertex_index (0-5, two triangles) to quad corners
+    let cell_size = uniforms.cell_size;
+    let quad_pos = quad_vertices[vi] * cell_size + instance.position;
+    // ... transform to clip space
+}
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    // Sample glyph from atlas texture
+    let glyph = textureSample(atlas_texture, atlas_sampler, in.atlas_uv.xy);
+    // Blend: background color * (1 - glyph.a) + foreground color * glyph.a
+    return mix(in.bg_color, in.fg_color, glyph.a);
+}
+```
+
+**Key optimization:** The entire terminal grid is rendered in **2 draw calls**:
+1. **Background pass**: One instanced draw for all cell background colors (simple colored quads, no texture sampling).
+2. **Foreground pass**: One instanced draw for all glyphs (textured quads from atlas).
+
+For a 200×50 terminal with 10,000 cells, this is 20,000 triangles — trivial for any GPU.
+
+---
+
+## 8. Configuration — Default veloterm.toml
+
+```toml
+# VeloTerm Configuration
+
+[font]
+family = "JetBrains Mono"
+size = 14.0
+# ligatures = true  # uncomment to enable
+
+[window]
+# opacity = 1.0
+# padding_x = 4
+# padding_y = 4
+# decorations = "full"  # "full" | "none" | "transparent"
+# startup_mode = "windowed"  # "windowed" | "maximized" | "fullscreen"
+
+[scrollback]
+history = 10000  # lines
+
+[cursor]
+style = "block"  # "block" | "beam" | "underline"
+blink = true
+# blink_interval_ms = 500
+
+[theme]
+name = "tokyo_night"  # or inline colors below
+
+# [colors]
+# foreground = "#c0caf5"
+# background = "#1a1b26"
+# cursor = "#c0caf5"
+# selection_fg = "#c0caf5"
+# selection_bg = "#33467c"
+# ...ANSI colors...
+
+[keybindings]
+split_vertical = "Ctrl+Shift+D"
+split_horizontal = "Ctrl+Shift+E"
+close_pane = "Ctrl+Shift+W"
+new_tab = "Ctrl+Shift+T"
+next_tab = "Ctrl+Shift+Right"
+prev_tab = "Ctrl+Shift+Left"
+zoom_pane = "Ctrl+Shift+Z"
+search = "Ctrl+Shift+F"
+# quick_terminal = "Ctrl+`"  # global hotkey
+
+[performance]
+# repaint_delay_ms = 6
+# input_delay_ms = 0
+# sync_to_monitor = true
+```
+
+---
+
+## 9. Build & Distribution
+
+### Build Commands
+```bash
+# Development
+cargo run
+
+# Release (optimized)
+cargo build --release
+
+# macOS app bundle (use cargo-bundle)
+cargo bundle --release
+
+# Linux: AppImage or .deb
+cargo deb  # via cargo-deb
+```
+
+### CI/CD (GitHub Actions)
+```yaml
+# Build matrix
+strategy:
+  matrix:
+    os: [macos-latest, ubuntu-latest]
+    include:
+      - os: macos-latest
+        target: aarch64-apple-darwin  # Apple Silicon
+      - os: macos-latest
+        target: x86_64-apple-darwin   # Intel Mac
+      - os: ubuntu-latest
+        target: x86_64-unknown-linux-gnu
+```
+
+### Platform-Specific Notes
+- **macOS**: wgpu will use Metal automatically. `winit` handles Retina DPI. For `.app` bundle, use `cargo-bundle` with an `Info.plist`.
+- **Linux X11**: wgpu prefers Vulkan, falls back to OpenGL ES. Ensure `libvulkan-dev` or Mesa drivers.
+- **Linux Wayland**: winit supports Wayland natively. wgpu works on Wayland via Vulkan.
+
+---
+
+## 10. Development Roadmap — Week by Week
+
+| Week | Milestone | Deliverable |
+|------|-----------|-------------|
+| 1-2 | **Window + GPU init** | winit window opens, wgpu clears to background color, handles resize |
+| 3-4 | **Glyph atlas + grid render** | Static "Hello World" grid renders with correct font, colors, spacing |
+| 5-6 | **PTY + terminal emulation** | Interactive shell works: type commands, see output, vim renders correctly |
+| 7-8 | **Polish MVP** | Scrollback, selection, clipboard, cursor styles, DPI scaling, config file |
+| 9-10 | **Split panes** | Vertical + horizontal splits, resize, close, focus switching |
+| 11-12 | **Tabs** | Tab bar, new/close/switch tabs, each tab has independent pane tree |
+| 13-14 | **Split UX polish** | Clickable dividers, drag resize, pane zoom, keyboard navigation |
+| 15-16 | **URLs + Search** | Clickable URLs, Ctrl+Shift+F search with regex and highlighting |
+| 17-18 | **Shell integration** | CWD tracking, command timing, semantic prompts |
+| 19-20 | **QoL features** | Vi-mode, quick terminal, ligatures, notification on command completion |
+| 21-24 | **Advanced rendering** | Kitty graphics protocol, multiple themes, background opacity |
+| 25-28 | **Polish + Release** | Command palette, performance profiling, documentation, packaging |
+
+---
+
+## 11. Testing Strategy
+
+### Performance Benchmarks (run on every PR)
+```bash
+# Latency: Use Typometer or custom measurement
+# Measure: keypress → pixel change (target: <10ms)
+
+# Throughput: vtebench or custom
+timeout 5 sh -c 'cat /dev/urandom | base32' | veloterm --bench
+
+# Startup time
+hyperfine 'veloterm --startup-bench'  # target: <100ms
+
+# Memory: after opening 5 panes with 10K scrollback each
+# target: <50MB total
+```
+
+### Correctness Tests
+- **vttest**: The standard VT100/VT220 compliance test suite. Run it in your terminal and visually verify.
+- **tmux/vim/htop rendering**: These are the applications users will immediately notice if broken.
+- **Unicode edge cases**: ZWJ emoji (👨‍👩‍👧‍👦), CJK wide characters, RTL text, combining diacriticals.
+- **24-bit color**: Run `scripts/truecolor.sh` to verify gradient rendering.
+
+### Integration Tests
+```rust
+#[test]
+fn test_split_and_close() {
+    let mut tree = PaneTree::new(initial_pane());
+    tree.split_vertical(pane_id, 0.5);
+    assert_eq!(tree.leaf_count(), 2);
+    tree.close(second_pane_id);
+    assert_eq!(tree.leaf_count(), 1);
+}
+
+#[test]
+fn test_escape_sequence_parsing() {
+    let mut term = Term::new(/* config */);
+    // Feed CSI sequence for cursor movement
+    term.process(b"\x1b[10;20H");
+    assert_eq!(term.cursor().row, 9);  // 0-indexed
+    assert_eq!(term.cursor().col, 19);
+}
+```
+
+---
+
+## 12. Why This Stack Will Win
+
+This architecture directly mirrors what the fastest terminals in existence use:
+
+| Component | VeloTerm | Alacritty | WezTerm | Ghostty |
+|-----------|----------|-----------|---------|---------|
+| Language | Rust | Rust | Rust | Zig |
+| GPU API | wgpu (Metal/Vulkan) | OpenGL | wgpu (WebGPU) | Metal/OpenGL |
+| Windowing | winit | winit | own impl | native (AppKit/GTK4) |
+| VT Parser | alacritty_terminal | alacritty_terminal | own impl | own impl (libghostty) |
+| PTY | portable-pty | nix | portable-pty | own impl |
+| IO Model | Threads + channels | Threads + channels | Threads + channels | Threads |
+| Glyph Render | cosmic-text | crossfont | own impl | own impl |
+
+You're not inventing anything risky. You're assembling proven components in a proven architecture, then differentiating on **user experience**: native split panes with clickable GUI controls, great defaults, and thoughtful feature design.
+
+The critical insight from Ghostty's success is: you don't need to be the absolute fastest — you need to be **fast enough** (same class as Alacritty) while being **more featureful and more pleasant to use**. That's exactly what this plan delivers.

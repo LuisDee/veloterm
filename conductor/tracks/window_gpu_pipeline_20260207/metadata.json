@@ -1,0 +1,8 @@
+{
+  "track_id": "window_gpu_pipeline_20260207",
+  "type": "feature",
+  "status": "new",
+  "created_at": "2026-02-07T18:30:00Z",
+  "updated_at": "2026-02-07T18:30:00Z",
+  "description": "Build the cross-platform window and GPU rendering pipeline — Initialize the Rust project with winit + wgpu, create the glyph atlas from a monospace font, and render a static grid of characters on screen. Validate that the rendering pipeline works end-to-end on both macOS Apple Silicon (Metal) and Linux X11/CentOS 9 (Vulkan/OpenGL fallback)."
+}
