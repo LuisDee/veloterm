@@ -22,14 +22,14 @@
 
 ## Phase 2: Terminal State Machine Integration
 
-- [ ] Task: Write tests for alacritty_terminal integration
+- [x] Task: Write tests for alacritty_terminal integration <!-- d88ecce -->
   - Write tests for `Term` creation with correct grid dimensions
   - Write tests for feeding raw bytes into the parser and observing grid state changes
   - Write tests for basic text insertion (feed "Hello" → grid row 0 contains "Hello")
   - Write tests for cursor position tracking after text insertion
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement terminal state machine wrapper
+- [x] Task: Implement terminal state machine wrapper <!-- d88ecce -->
   - Add `alacritty_terminal` dependency to `Cargo.toml`
   - Create `src/terminal/mod.rs` as a thin wrapper around `alacritty_terminal::Term`
   - Initialize `Term` with grid dimensions and scrollback size (10,000 lines)
