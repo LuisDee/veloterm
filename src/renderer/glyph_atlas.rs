@@ -91,19 +91,23 @@ impl GlyphAtlas {
             buffer.shape_until_scroll(&mut font_system, true);
 
             let aw = atlas_width;
-            let ah = atlas_height;
+            let sw = slot_w;
+            let sh = slot_h;
             buffer.draw(
                 &mut font_system,
                 &mut swash_cache,
                 white,
                 |x, y, _w, _h, color| {
                     if x >= 0 && y >= 0 {
-                        let ax = slot_x + x as u32;
-                        let ay = slot_y + y as u32;
-                        if ax < aw && ay < ah {
+                        let xu = x as u32;
+                        let yu = y as u32;
+                        // Clamp to slot boundaries to prevent bleed into adjacent glyphs
+                        if xu < sw && yu < sh {
+                            let ax = slot_x + xu;
+                            let ay = slot_y + yu;
                             let idx = (ay * aw + ax) as usize;
-                            // cosmic-text puts mask coverage in R channel
-                            atlas_data[idx] = atlas_data[idx].max(color.r());
+                            // Coverage/alpha is in the alpha channel, not red
+                            atlas_data[idx] = atlas_data[idx].max(color.a());
                         }
                     }
                 },
@@ -135,6 +139,15 @@ impl GlyphAtlas {
     /// Look up glyph metadata for a character.
     pub fn glyph_info(&self, c: char) -> Option<&GlyphInfo> {
         self.glyphs.get(&c)
+    }
+
+    /// Dump atlas as PGM (grayscale) image for debugging.
+    pub fn dump_pgm(&self, path: &str) -> std::io::Result<()> {
+        use std::io::Write;
+        let mut f = std::fs::File::create(path)?;
+        write!(f, "P5\n{} {}\n255\n", self.atlas_width, self.atlas_height)?;
+        f.write_all(&self.atlas_data)?;
+        Ok(())
     }
 }
 
