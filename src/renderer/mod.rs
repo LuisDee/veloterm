@@ -219,6 +219,11 @@ impl Renderer {
             return;
         }
 
+        // Clamp to GPU's max texture dimension to prevent wgpu validation errors
+        let max_dim = self.device.limits().max_texture_dimension_2d;
+        let width = width.min(max_dim);
+        let height = height.min(max_dim);
+
         // Reconfigure surface
         self.surface_config = SurfaceConfig::new(width, height, self.surface_config.format);
         self.surface
