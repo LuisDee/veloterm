@@ -1,5 +1,36 @@
 // Terminal grid to instanced quad rendering.
 
+use crate::config::theme::Color;
+use crate::renderer::glyph_atlas::GlyphAtlas;
+use crate::renderer::gpu::CellInstance;
+
+/// A single cell in the terminal grid.
+#[derive(Debug, Clone, Copy)]
+pub struct GridCell {
+    /// Character to display (space for empty cells).
+    pub ch: char,
+    /// Foreground color.
+    pub fg: Color,
+    /// Background color.
+    pub bg: Color,
+}
+
+impl GridCell {
+    /// Create a new grid cell.
+    pub fn new(ch: char, fg: Color, bg: Color) -> Self {
+        Self { ch, fg, bg }
+    }
+
+    /// Create an empty cell with the given background color.
+    pub fn empty(bg: Color) -> Self {
+        Self {
+            ch: ' ',
+            fg: Color::new(1.0, 1.0, 1.0, 1.0),
+            bg,
+        }
+    }
+}
+
 /// Grid dimensions and cell sizing computed from window size and font metrics.
 #[derive(Debug, Clone)]
 pub struct GridDimensions {
@@ -61,9 +92,66 @@ impl GridDimensions {
     }
 }
 
+/// Generate CellInstance data from a grid of cells and a glyph atlas.
+///
+/// `cells` should have `grid.columns * grid.rows` entries, in row-major order.
+/// Returns a Vec of CellInstance ready for GPU upload.
+pub fn generate_instances(
+    grid: &GridDimensions,
+    cells: &[GridCell],
+    atlas: &GlyphAtlas,
+) -> Vec<CellInstance> {
+    let total = grid.total_cells() as usize;
+    let mut instances = Vec::with_capacity(total);
+
+    for i in 0..total {
+        let col = (i as u32) % grid.columns;
+        let row = (i as u32) / grid.columns;
+
+        let cell = cells
+            .get(i)
+            .copied()
+            .unwrap_or(GridCell::empty(Color::new(0.0, 0.0, 0.0, 1.0)));
+
+        let (atlas_uv, has_glyph) = if cell.ch != ' ' {
+            if let Some(info) = atlas.glyph_info(cell.ch) {
+                (info.uv, true)
+            } else {
+                ([0.0, 0.0, 0.0, 0.0], false)
+            }
+        } else {
+            ([0.0, 0.0, 0.0, 0.0], false)
+        };
+
+        instances.push(CellInstance {
+            position: [col as f32, row as f32],
+            atlas_uv,
+            fg_color: [cell.fg.r, cell.fg.g, cell.fg.b, cell.fg.a],
+            bg_color: [cell.bg.r, cell.bg.g, cell.bg.b, cell.bg.a],
+            flags: if has_glyph { 1 } else { 0 },
+            _padding: [0; 3],
+        });
+    }
+
+    instances
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::renderer::glyph_atlas::GlyphAtlas;
+
+    fn test_atlas() -> GlyphAtlas {
+        GlyphAtlas::new(13.0, 1.0)
+    }
+
+    fn test_fg() -> Color {
+        Color::from_hex("#E8E5DF")
+    }
+
+    fn test_bg() -> Color {
+        Color::from_hex("#1A1816")
+    }
 
     // ── Grid dimension calculation ──────────────────────────────────
 
@@ -186,5 +274,102 @@ mod tests {
     fn total_cells_is_columns_times_rows() {
         let grid = GridDimensions::new(1280, 720, 16.0, 42.0);
         assert_eq!(grid.total_cells(), 80 * 17);
+    }
+
+    // ── Cell instance buffer generation ─────────────────────────────
+
+    // Use integer cell sizes to avoid float truncation issues in tests
+    fn test_grid(cols: u32, rows: u32) -> GridDimensions {
+        GridDimensions::new(cols * 10, rows * 20, 10.0, 20.0)
+    }
+
+    #[test]
+    fn generate_instances_returns_correct_count() {
+        let atlas = test_atlas();
+        let grid = test_grid(4, 3);
+        let cells: Vec<GridCell> = (0..grid.total_cells())
+            .map(|_| GridCell::empty(test_bg()))
+            .collect();
+        let instances = generate_instances(&grid, &cells, &atlas);
+        assert_eq!(instances.len(), 12); // 4 * 3
+    }
+
+    #[test]
+    fn generate_instances_position_is_col_row() {
+        let atlas = test_atlas();
+        let grid = test_grid(3, 2);
+        let cells: Vec<GridCell> = (0..grid.total_cells())
+            .map(|_| GridCell::empty(test_bg()))
+            .collect();
+        let instances = generate_instances(&grid, &cells, &atlas);
+        // First row: (0,0), (1,0), (2,0)
+        assert_eq!(instances[0].position, [0.0, 0.0]);
+        assert_eq!(instances[1].position, [1.0, 0.0]);
+        assert_eq!(instances[2].position, [2.0, 0.0]);
+        // Second row: (0,1), (1,1), (2,1)
+        assert_eq!(instances[3].position, [0.0, 1.0]);
+    }
+
+    #[test]
+    fn generate_instances_glyph_sets_has_glyph_flag() {
+        let atlas = test_atlas();
+        let grid = test_grid(2, 1);
+        let cells = vec![
+            GridCell::new('A', test_fg(), test_bg()),
+            GridCell::empty(test_bg()),
+        ];
+        let instances = generate_instances(&grid, &cells, &atlas);
+        assert_eq!(instances[0].flags & 1, 1, "'A' should have has_glyph flag");
+        assert_eq!(instances[1].flags & 1, 0, "space should not have has_glyph");
+    }
+
+    #[test]
+    fn generate_instances_uv_from_atlas() {
+        let atlas = test_atlas();
+        let grid = test_grid(1, 1);
+        let cells = vec![GridCell::new('A', test_fg(), test_bg())];
+        let instances = generate_instances(&grid, &cells, &atlas);
+        let expected_uv = atlas.glyph_info('A').unwrap().uv;
+        assert_eq!(instances[0].atlas_uv, expected_uv);
+    }
+
+    #[test]
+    fn generate_instances_space_has_zero_uv() {
+        let atlas = test_atlas();
+        let grid = test_grid(1, 1);
+        let cells = vec![GridCell::empty(test_bg())];
+        let instances = generate_instances(&grid, &cells, &atlas);
+        assert_eq!(instances[0].atlas_uv, [0.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn generate_instances_fg_color_from_cell() {
+        let atlas = test_atlas();
+        let fg = Color::from_hex("#FF0000");
+        let grid = test_grid(1, 1);
+        let cells = vec![GridCell::new('X', fg, test_bg())];
+        let instances = generate_instances(&grid, &cells, &atlas);
+        assert_eq!(instances[0].fg_color, [fg.r, fg.g, fg.b, fg.a]);
+    }
+
+    #[test]
+    fn generate_instances_bg_color_from_cell() {
+        let atlas = test_atlas();
+        let bg = Color::from_hex("#00FF00");
+        let grid = test_grid(1, 1);
+        let cells = vec![GridCell::new('X', test_fg(), bg)];
+        let instances = generate_instances(&grid, &cells, &atlas);
+        assert_eq!(instances[0].bg_color, [bg.r, bg.g, bg.b, bg.a]);
+    }
+
+    #[test]
+    fn generate_instances_unknown_char_no_glyph() {
+        let atlas = test_atlas();
+        let grid = test_grid(1, 1);
+        // Control char not in atlas
+        let cells = vec![GridCell::new('\x01', test_fg(), test_bg())];
+        let instances = generate_instances(&grid, &cells, &atlas);
+        assert_eq!(instances[0].flags & 1, 0);
+        assert_eq!(instances[0].atlas_uv, [0.0, 0.0, 0.0, 0.0]);
     }
 }
