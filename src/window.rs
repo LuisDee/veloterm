@@ -291,4 +291,38 @@ mod tests {
         let size = scaled_font_size(13.0, 1.5);
         assert!((size - 19.5).abs() < f32::EPSILON);
     }
+
+    // ── App initialization and shutdown ──────────────────────────────
+
+    #[test]
+    fn app_starts_with_no_window() {
+        let app = App::new(WindowConfig::default());
+        assert!(app.window.is_none());
+    }
+
+    #[test]
+    fn app_starts_with_no_renderer() {
+        let app = App::new(WindowConfig::default());
+        assert!(app.renderer.is_none());
+    }
+
+    #[test]
+    fn app_drop_without_run_is_safe() {
+        let app = App::new(WindowConfig::default());
+        drop(app);
+        // No panic — clean drop without GPU resources
+    }
+
+    #[test]
+    fn app_stores_config() {
+        let cfg = WindowConfig {
+            width: 800.0,
+            height: 600.0,
+            title: "Test".to_string(),
+            resizable: false,
+        };
+        let app = App::new(cfg.clone());
+        assert_eq!(app.config.width, 800.0);
+        assert_eq!(app.config.title, "Test");
+    }
 }
