@@ -48,6 +48,19 @@ impl Default for CursorState {
     }
 }
 
+impl CursorStyle {
+    /// Convert a config string ("block", "beam", "underline") to a CursorStyle.
+    /// Returns None for unknown strings.
+    pub fn from_config_str(s: &str) -> Option<Self> {
+        match s {
+            "block" => Some(CursorStyle::Block),
+            "beam" => Some(CursorStyle::Beam),
+            "underline" => Some(CursorStyle::Underline),
+            _ => None,
+        }
+    }
+}
+
 impl CursorState {
     /// Create a new cursor at the origin.
     pub fn new() -> Self {
@@ -339,5 +352,36 @@ mod tests {
         let mut cursor = CursorState::new();
         cursor.set_style(CursorStyle::Underline);
         assert_eq!(cursor.style, CursorStyle::Underline);
+    }
+
+    // ── CursorStyle::from_config_str ────────────────────────────────
+
+    #[test]
+    fn from_config_str_block() {
+        assert_eq!(
+            CursorStyle::from_config_str("block"),
+            Some(CursorStyle::Block)
+        );
+    }
+
+    #[test]
+    fn from_config_str_beam() {
+        assert_eq!(
+            CursorStyle::from_config_str("beam"),
+            Some(CursorStyle::Beam)
+        );
+    }
+
+    #[test]
+    fn from_config_str_underline() {
+        assert_eq!(
+            CursorStyle::from_config_str("underline"),
+            Some(CursorStyle::Underline)
+        );
+    }
+
+    #[test]
+    fn from_config_str_unknown() {
+        assert_eq!(CursorStyle::from_config_str("box"), None);
     }
 }

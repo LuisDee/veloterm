@@ -8,6 +8,9 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowAttributes, WindowId};
 
+use crate::config::theme::Theme;
+use crate::config::types::Config;
+
 /// Default window width in logical pixels.
 pub const DEFAULT_WIDTH: f64 = 1280.0;
 /// Default window height in logical pixels.
@@ -63,6 +66,7 @@ pub fn scaled_font_size(base_size: f32, scale_factor: f64) -> f32 {
 /// Main application state implementing the winit event loop handler.
 pub struct App {
     config: WindowConfig,
+    app_config: Config,
     window: Option<Arc<Window>>,
     renderer: Option<crate::renderer::Renderer>,
     pty: Option<crate::pty::PtySession>,
@@ -71,9 +75,10 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(config: WindowConfig) -> Self {
+    pub fn new(config: WindowConfig, app_config: Config) -> Self {
         Self {
             config,
+            app_config,
             window: None,
             renderer: None,
             pty: None,
@@ -110,14 +115,29 @@ impl ApplicationHandler for App {
 
                 let window = Arc::new(window);
 
+                // Resolve theme from config
+                let theme = Theme::from_name(&self.app_config.colors.theme).unwrap_or_else(|| {
+                    log::warn!(
+                        "Unknown theme '{}', falling back to claude_dark",
+                        self.app_config.colors.theme
+                    );
+                    Theme::claude_dark()
+                });
+                let font_size = self.app_config.font.size as f32;
+
                 // Initialize renderer
-                match pollster::block_on(crate::renderer::Renderer::new(window.clone())) {
+                match pollster::block_on(crate::renderer::Renderer::new(
+                    window.clone(),
+                    theme,
+                    font_size,
+                )) {
                     Ok(renderer) => {
                         log::info!("Renderer initialized");
 
                         // Spawn PTY and terminal with grid dimensions
                         let cols = renderer.grid().columns as u16;
                         let rows = renderer.grid().rows as u16;
+                        let scrollback = self.app_config.scrollback.lines as usize;
                         let shell = crate::pty::default_shell();
                         match crate::pty::PtySession::new(&shell, cols, rows) {
                             Ok(pty) => {
@@ -125,7 +145,7 @@ impl ApplicationHandler for App {
                                 let terminal = crate::terminal::Terminal::new(
                                     cols as usize,
                                     rows as usize,
-                                    10_000,
+                                    scrollback,
                                 );
                                 self.pty = Some(pty);
                                 self.terminal = Some(terminal);
@@ -251,6 +271,7 @@ impl ApplicationHandler for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::types::Config;
 
     // ── WindowConfig defaults ──────────────────────────────────────
 
@@ -365,19 +386,19 @@ mod tests {
 
     #[test]
     fn app_starts_with_no_window() {
-        let app = App::new(WindowConfig::default());
+        let app = App::new(WindowConfig::default(), Config::default());
         assert!(app.window.is_none());
     }
 
     #[test]
     fn app_starts_with_no_renderer() {
-        let app = App::new(WindowConfig::default());
+        let app = App::new(WindowConfig::default(), Config::default());
         assert!(app.renderer.is_none());
     }
 
     #[test]
     fn app_drop_without_run_is_safe() {
-        let app = App::new(WindowConfig::default());
+        let app = App::new(WindowConfig::default(), Config::default());
         drop(app);
         // No panic — clean drop without GPU resources
     }
@@ -390,8 +411,18 @@ mod tests {
             title: "Test".to_string(),
             resizable: false,
         };
-        let app = App::new(cfg.clone());
+        let app = App::new(cfg.clone(), Config::default());
         assert_eq!(app.config.width, 800.0);
         assert_eq!(app.config.title, "Test");
+    }
+
+    #[test]
+    fn app_stores_app_config() {
+        let mut app_config = Config::default();
+        app_config.colors.theme = "claude_warm".to_string();
+        app_config.scrollback.lines = 5000;
+        let app = App::new(WindowConfig::default(), app_config);
+        assert_eq!(app.app_config.colors.theme, "claude_warm");
+        assert_eq!(app.app_config.scrollback.lines, 5000);
     }
 }

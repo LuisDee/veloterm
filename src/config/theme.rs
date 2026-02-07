@@ -56,6 +56,17 @@ impl Color {
 }
 
 impl Theme {
+    /// Look up a theme by config name (e.g., "claude_dark").
+    /// Returns None if the name is unknown.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "claude_dark" => Some(Self::claude_dark()),
+            "claude_light" => Some(Self::claude_light()),
+            "claude_warm" => Some(Self::claude_warm()),
+            _ => None,
+        }
+    }
+
     /// Claude Dark theme — warm dark background with high contrast text.
     pub fn claude_dark() -> Self {
         Self {
@@ -389,5 +400,30 @@ mod tests {
         assert_eq!(Theme::claude_dark().name, "Claude Dark");
         assert_eq!(Theme::claude_light().name, "Claude Light");
         assert_eq!(Theme::claude_warm().name, "Claude Warm");
+    }
+
+    // ── from_name tests ──────────────────────────────────────────
+
+    #[test]
+    fn from_name_claude_dark() {
+        let theme = Theme::from_name("claude_dark").unwrap();
+        assert_eq!(theme.name, "Claude Dark");
+    }
+
+    #[test]
+    fn from_name_claude_light() {
+        let theme = Theme::from_name("claude_light").unwrap();
+        assert_eq!(theme.name, "Claude Light");
+    }
+
+    #[test]
+    fn from_name_claude_warm() {
+        let theme = Theme::from_name("claude_warm").unwrap();
+        assert_eq!(theme.name, "Claude Warm");
+    }
+
+    #[test]
+    fn from_name_unknown_returns_none() {
+        assert!(Theme::from_name("nonexistent").is_none());
     }
 }

@@ -14,8 +14,6 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use winit::window::Window;
 
-const BASE_FONT_SIZE: f32 = 13.0;
-
 /// Top-level render coordinator.
 /// Holds all GPU state, glyph atlas, grid, and render resources.
 pub struct Renderer {
@@ -37,9 +35,9 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    /// Initialize the renderer with a window.
+    /// Initialize the renderer with a window, theme, and font size.
     /// Creates GPU context, glyph atlas, grid, and all render resources.
-    pub async fn new(window: Arc<Window>) -> Result<Self, GpuError> {
+    pub async fn new(window: Arc<Window>, theme: Theme, font_size: f32) -> Result<Self, GpuError> {
         let size = window.inner_size();
         let scale_factor = window.scale_factor() as f32;
 
@@ -92,7 +90,7 @@ impl Renderer {
         surface.configure(&device, &surface_config.to_wgpu_config());
 
         // Glyph atlas
-        let atlas = GlyphAtlas::new(BASE_FONT_SIZE, scale_factor);
+        let atlas = GlyphAtlas::new(font_size, scale_factor);
         log::info!(
             "Glyph atlas: {}x{} (cell: {:.1}x{:.1})",
             atlas.atlas_width,
@@ -117,8 +115,7 @@ impl Renderer {
             GridDimensions::new(size.width, size.height, atlas.cell_width, atlas.cell_height);
         log::info!("Grid: {}x{} cells", grid.columns, grid.rows);
 
-        // Theme and test pattern
-        let theme = Theme::claude_dark();
+        // Initial test pattern with configured theme
         let cells = generate_test_pattern(&grid, &theme);
         let instances = generate_instances(&grid, &cells, &atlas);
         let instance_count = instances.len() as u32;
@@ -294,7 +291,7 @@ mod tests {
     #[test]
     fn renderer_components_initialize() {
         // Test that all component pieces work together without a window
-        let atlas = GlyphAtlas::new(BASE_FONT_SIZE, 2.0);
+        let atlas = GlyphAtlas::new(13.0, 2.0);
         let grid = GridDimensions::new(1280, 720, atlas.cell_width, atlas.cell_height);
         let theme = Theme::claude_dark();
         let cells = generate_test_pattern(&grid, &theme);
@@ -307,7 +304,7 @@ mod tests {
 
     #[test]
     fn renderer_uniforms_match_grid() {
-        let atlas = GlyphAtlas::new(BASE_FONT_SIZE, 2.0);
+        let atlas = GlyphAtlas::new(13.0, 2.0);
         let grid = GridDimensions::new(1280, 720, atlas.cell_width, atlas.cell_height);
 
         let uniforms = GridUniforms {
@@ -324,7 +321,7 @@ mod tests {
 
     #[test]
     fn renderer_resize_changes_grid() {
-        let atlas = GlyphAtlas::new(BASE_FONT_SIZE, 2.0);
+        let atlas = GlyphAtlas::new(13.0, 2.0);
         let mut grid = GridDimensions::new(1280, 720, atlas.cell_width, atlas.cell_height);
         let original_cols = grid.columns;
         let original_rows = grid.rows;
@@ -336,7 +333,7 @@ mod tests {
 
     #[test]
     fn renderer_instances_have_correct_count_after_resize() {
-        let atlas = GlyphAtlas::new(BASE_FONT_SIZE, 2.0);
+        let atlas = GlyphAtlas::new(13.0, 2.0);
         let mut grid = GridDimensions::new(1280, 720, atlas.cell_width, atlas.cell_height);
         let theme = Theme::claude_dark();
 
@@ -355,7 +352,7 @@ mod tests {
             Err(_) => return, // Skip if no GPU
         };
 
-        let atlas = GlyphAtlas::new(BASE_FONT_SIZE, 1.0);
+        let atlas = GlyphAtlas::new(13.0, 1.0);
         let atlas_texture = create_atlas_texture(
             &ctx.device,
             &ctx.queue,
@@ -408,5 +405,29 @@ mod tests {
         );
 
         assert!(instances.len() > 0);
+    }
+
+    // ── Config integration tests ────────────────────────────────────
+
+    #[test]
+    fn config_font_size_affects_cell_dimensions() {
+        let small = GlyphAtlas::new(10.0, 1.0);
+        let large = GlyphAtlas::new(20.0, 1.0);
+        // Larger font → larger cells
+        assert!(large.cell_width > small.cell_width);
+        assert!(large.cell_height > small.cell_height);
+    }
+
+    #[test]
+    fn config_theme_from_name_works_in_renderer() {
+        let atlas = GlyphAtlas::new(13.0, 2.0);
+        let grid = GridDimensions::new(1280, 720, atlas.cell_width, atlas.cell_height);
+
+        for name in &["claude_dark", "claude_light", "claude_warm"] {
+            let theme = Theme::from_name(name).unwrap();
+            let cells = generate_test_pattern(&grid, &theme);
+            let instances = generate_instances(&grid, &cells, &atlas);
+            assert_eq!(instances.len(), grid.total_cells() as usize);
+        }
     }
 }

@@ -3,6 +3,7 @@
 pub mod clipboard;
 pub mod selection;
 
+use std::collections::HashMap;
 use winit::event::ElementState;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
@@ -38,6 +39,14 @@ pub fn translate_key(
         Key::Named(named) => named_key_bytes(*named, modifiers),
         _ => None,
     }
+}
+
+/// Look up a keybinding action from config bindings.
+///
+/// Given a key combo string (e.g., "ctrl+shift+c") and the config keybinding map,
+/// returns the action name if a binding is defined, or None.
+pub fn lookup_binding(key_combo: &str, bindings: &HashMap<String, String>) -> Option<String> {
+    bindings.get(key_combo).cloned()
 }
 
 /// Translate a Ctrl+key combination to a control byte (0x01..=0x1A).
@@ -370,5 +379,34 @@ mod tests {
     #[test]
     fn ctrl_byte_non_letter() {
         assert_eq!(ctrl_key_byte('5'), None);
+    }
+
+    // ── Keybinding lookup tests ───────────────────────────────────
+
+    #[test]
+    fn lookup_binding_found() {
+        let mut bindings = HashMap::new();
+        bindings.insert("ctrl+shift+c".to_string(), "copy".to_string());
+        assert_eq!(
+            lookup_binding("ctrl+shift+c", &bindings),
+            Some("copy".to_string())
+        );
+    }
+
+    #[test]
+    fn lookup_binding_not_found() {
+        let bindings = HashMap::new();
+        assert_eq!(lookup_binding("ctrl+shift+c", &bindings), None);
+    }
+
+    #[test]
+    fn lookup_binding_multiple() {
+        let mut bindings = HashMap::new();
+        bindings.insert("ctrl+shift+c".to_string(), "copy".to_string());
+        bindings.insert("ctrl+shift+v".to_string(), "paste".to_string());
+        assert_eq!(
+            lookup_binding("ctrl+shift+v", &bindings),
+            Some("paste".to_string())
+        );
     }
 }
