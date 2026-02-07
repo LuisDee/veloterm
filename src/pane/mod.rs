@@ -1,5 +1,7 @@
 // Pane layout engine: binary tree data structure for terminal pane management.
 
+pub mod divider;
+
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Global monotonically increasing pane ID counter.
@@ -217,7 +219,7 @@ pub enum RemoveResult {
 
 /// Split a rect into two sub-rects along a direction with a given ratio.
 /// Clamps the ratio so neither sub-rect is smaller than min_size pixels.
-fn split_rect(bounds: Rect, direction: SplitDirection, ratio: f32, min_size: f32) -> (Rect, Rect) {
+pub(crate) fn split_rect(bounds: Rect, direction: SplitDirection, ratio: f32, min_size: f32) -> (Rect, Rect) {
     match direction {
         SplitDirection::Vertical => {
             let total = bounds.width;
@@ -243,7 +245,7 @@ fn split_rect(bounds: Rect, direction: SplitDirection, ratio: f32, min_size: f32
 }
 
 /// Clamp a split ratio so neither side is smaller than min_size.
-fn clamp_ratio(ratio: f32, total: f32, min_size: f32) -> f32 {
+pub(crate) fn clamp_ratio(ratio: f32, total: f32, min_size: f32) -> f32 {
     if total <= 0.0 || total < 2.0 * min_size {
         return 0.5; // Can't satisfy constraint; split evenly
     }
