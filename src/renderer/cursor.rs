@@ -42,6 +42,12 @@ pub struct CursorState {
     last_blink: Instant,
 }
 
+impl Default for CursorState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CursorState {
     /// Create a new cursor at the origin.
     pub fn new() -> Self {
