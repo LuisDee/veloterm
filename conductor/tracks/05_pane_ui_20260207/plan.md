@@ -1,6 +1,6 @@
 # Track 05: Pane UI & Interaction — Plan
 
-## Phase 1: Divider Geometry & Interaction State Machine
+## Phase 1: Divider Geometry & Interaction State Machine [checkpoint: 24fc738]
 
 ### Task 1.1: Divider Rect Calculation <!-- 04005b9 -->
 - [x] Write tests for computing divider `Rect`s from a pane layout
@@ -17,7 +17,7 @@
 - Returns `InteractionEffect` enum (SetCursor, StartDrag, UpdateRatio, FocusPane, None)
 
 ### Phase 1 Completion
-- [ ] Phase completion verification and checkpointing
+- [x] Phase completion verification and checkpointing
 
 ## Phase 2: Rendering & Mouse Integration
 
