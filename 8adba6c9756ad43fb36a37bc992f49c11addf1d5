@@ -1,0 +1,28 @@
+Phase 8 Tasks 1-2: Text Selection
+
+Files changed:
+  - src/input/selection.rs: new selection module
+  - src/input/mod.rs: added pub mod selection
+  - src/renderer/grid_renderer.rs: added CELL_FLAG_SELECTED constant (bit 6)
+
+Implementation:
+  - SelectionType enum: Range, Word, Line
+  - Selection struct: start/end (row, col) + selection_type
+  - pixel_to_cell(): converts pixel coordinates to cell (row, col) clamped to bounds
+  - find_word_boundaries(): scans left/right for alphanumeric/_  word chars
+  - is_word_char(): alphanumeric or underscore (punctuation/whitespace are boundaries)
+  - normalize(): ensures start before end in reading order
+  - selection_contains(): reading-order containment for single/multi-line selections
+  - selected_text(): extracts text, trims trailing spaces per line, joins with \n
+  - apply_selection_flags(): sets CELL_FLAG_SELECTED (0x40) on selected cells
+
+Tests (18 new, 271 total):
+  - Pixel-to-cell: origin, mid-cell, clamped bounds, negative clamped (4)
+  - Selection contains: start/end cell, outside, multiline middle row, reversed (5)
+  - Word boundaries: single word, at space, with punctuation (3)
+  - Line selection: spans full row (1)
+  - Selected text: single line, multiline with trimming (2)
+  - Apply selection flags: sets flag, doesn't set outside (2)
+  - Cleared selection flags reset to zero (1)
+
+Quality gates: 271 tests pass, clippy clean, fmt clean
