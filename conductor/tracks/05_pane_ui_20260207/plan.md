@@ -7,9 +7,9 @@
 - [x] Implement `calculate_dividers(root: &PaneNode, bounds: Rect, min_size: f32) -> Vec<DividerInfo>` in `src/pane/divider.rs`
 - `DividerInfo` contains: rect, direction (H/V), and reference to the parent Split node
 
-### Task 1.2: Hit-Testing
-- [ ] Write tests for point-in-divider detection with configurable hit zone (8px)
-- [ ] Implement `hit_test_divider(point: (f32, f32), dividers: &[DividerInfo], margin: f32) -> Option<&DividerInfo>`
+### Task 1.2: Hit-Testing <!-- a6a80fe -->
+- [x] Write tests for point-in-divider detection with configurable hit zone (8px)
+- [x] Implement `hit_test_divider(point: (f32, f32), dividers: &[DividerInfo], margin: f32) -> Option<usize>`
 
 ### Task 1.3: PaneInteraction State Machine
 - [ ] Write tests for state transitions: Idle ↔ Hovering ↔ Dragging
