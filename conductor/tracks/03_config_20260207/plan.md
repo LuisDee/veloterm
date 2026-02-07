@@ -70,7 +70,7 @@
 
 - [x] Task: Conductor - User Manual Verification 'Hot-Reload via File Watcher' (Protocol in workflow.md) <!-- 81d1b2d -->
 
-## Phase 4: Integration — Wire Config into Renderer and Input
+## Phase 4: Integration — Wire Config into Renderer and Input [checkpoint: 20b1100]
 
 - [x] Task: Write tests for config integration with renderer and input <!-- 47f877b -->
   - Write tests for renderer using theme from config instead of hardcoded `claude_dark()`
@@ -95,4 +95,4 @@
     - Scrollback change → log info (applies on next terminal creation)
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Conductor - User Manual Verification 'Integration — Wire Config into Renderer and Input' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Integration — Wire Config into Renderer and Input' (Protocol in workflow.md) <!-- 20b1100 -->
