@@ -1,0 +1,19 @@
+Phase 2, Tasks 3-4: Write tests for render pipeline + Implement pipeline and shaders
+
+Summary: Created grid.wgsl WGSL shader and render pipeline infrastructure.
+Shader handles vertex expansion (vertex_index to quad corners), NDC positioning,
+atlas UV mapping, and fg/bg color blending via glyph alpha. CellInstance struct
+(72 bytes, bytemuck Pod) matches shader input layout with 5 vertex attributes.
+GridUniforms holds cell_size, grid_size, atlas_size. Bind group layout covers
+uniforms, atlas texture, and sampler. 7 new tests validate struct sizes, vertex
+buffer layout, shader compilation, and pipeline creation on real GPU hardware.
+
+Files created/modified:
+- shaders/grid.wgsl (vertex + fragment shader, uniforms, CellInstance)
+- src/renderer/gpu.rs (CellInstance, GridUniforms, bind group layout, pipeline creation, 7 new tests)
+
+Key decisions:
+- Single draw call with instanced quads (6 vertices per cell, instance step mode)
+- Glyph alpha sampled from R channel of atlas texture
+- Fifo present mode with alpha blending enabled
+- 72-byte CellInstance with 12-byte padding for alignment
