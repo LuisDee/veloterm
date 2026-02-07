@@ -1,0 +1,21 @@
+Phase 1 Checkpoint: PTY Spawning and Raw I/O
+
+Automated Verification:
+- Command: cargo test (135 tests pass)
+- Command: cargo clippy -- -D warnings (clean)
+- Command: cargo fmt --check (clean)
+
+PTY-specific tests (7):
+- default_shell_returns_nonempty_string
+- default_shell_returns_valid_path
+- pty_session_spawns_successfully
+- pty_session_sets_initial_size
+- pty_session_receives_output
+- pty_session_write_sends_to_shell (echoes MARKER_12345 through real /bin/sh PTY)
+- pty_session_resize_updates_size
+
+Manual Verification:
+- cargo test pty --verbose: All 7 PTY tests pass
+- Real shell interaction verified via MARKER_12345 echo test
+
+User Confirmation: Yes (proceeded with checkpoint)
