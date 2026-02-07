@@ -276,6 +276,79 @@ impl Config {
 
         Ok(())
     }
+
+    /// Compare two configs and return a delta indicating which sections changed.
+    pub fn diff(&self, other: &Config) -> ConfigDelta {
+        ConfigDelta {
+            font_changed: self.font != other.font,
+            colors_changed: self.colors != other.colors,
+            keys_changed: self.keys != other.keys,
+            cursor_changed: self.cursor != other.cursor,
+            scrollback_changed: self.scrollback != other.scrollback,
+            performance_changed: self.performance != other.performance,
+        }
+    }
+
+    /// Generate a fully commented default config as a TOML string.
+    pub fn print_default() -> String {
+        r#"# VeloTerm Configuration
+# Place this file at ~/.config/veloterm/veloterm.toml
+
+[font]
+# Font family name
+family = "monospace"
+# Font size in points
+size = 14.0
+
+[colors]
+# Theme: "claude_dark", "claude_light", or "claude_warm"
+theme = "claude_dark"
+
+[cursor]
+# Cursor style: "block", "beam", or "underline"
+style = "block"
+# Enable cursor blinking
+blink = true
+
+[scrollback]
+# Number of lines to keep in scrollback history
+lines = 10000
+
+[performance]
+# Maximum frames per second
+fps_limit = 60
+
+# [keys]
+# Keybindings as "key_combo" = "action" pairs
+# Example:
+# "ctrl+shift+c" = "copy"
+# "ctrl+shift+v" = "paste"
+"#
+        .to_string()
+    }
+}
+
+/// Indicates which config sections changed between two Config instances.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConfigDelta {
+    pub font_changed: bool,
+    pub colors_changed: bool,
+    pub keys_changed: bool,
+    pub cursor_changed: bool,
+    pub scrollback_changed: bool,
+    pub performance_changed: bool,
+}
+
+impl ConfigDelta {
+    /// Returns true if no sections changed.
+    pub fn is_empty(&self) -> bool {
+        !self.font_changed
+            && !self.colors_changed
+            && !self.keys_changed
+            && !self.cursor_changed
+            && !self.scrollback_changed
+            && !self.performance_changed
+    }
 }
 
 #[cfg(test)]
@@ -501,5 +574,95 @@ fps_limit = 0
         let err = ConfigError::Validation("font size must be > 0".to_string());
         let msg = format!("{err}");
         assert!(msg.contains("font size must be > 0"));
+    }
+
+    // ── Config diffing tests ────────────────────────────────────────
+
+    #[test]
+    fn diff_identical_configs_is_empty() {
+        let a = Config::default();
+        let b = Config::default();
+        let delta = a.diff(&b);
+        assert!(delta.is_empty());
+    }
+
+    #[test]
+    fn diff_detects_font_change() {
+        let a = Config::default();
+        let mut b = Config::default();
+        b.font.size = 20.0;
+        let delta = a.diff(&b);
+        assert!(delta.font_changed);
+        assert!(!delta.colors_changed);
+    }
+
+    #[test]
+    fn diff_detects_theme_change() {
+        let a = Config::default();
+        let mut b = Config::default();
+        b.colors.theme = "claude_light".to_string();
+        let delta = a.diff(&b);
+        assert!(delta.colors_changed);
+        assert!(!delta.font_changed);
+    }
+
+    #[test]
+    fn diff_detects_keybinding_change() {
+        let a = Config::default();
+        let mut b = Config::default();
+        b.keys
+            .bindings
+            .insert("ctrl+c".to_string(), "copy".to_string());
+        let delta = a.diff(&b);
+        assert!(delta.keys_changed);
+    }
+
+    #[test]
+    fn diff_detects_cursor_change() {
+        let a = Config::default();
+        let mut b = Config::default();
+        b.cursor.style = "beam".to_string();
+        let delta = a.diff(&b);
+        assert!(delta.cursor_changed);
+    }
+
+    #[test]
+    fn diff_detects_scrollback_change() {
+        let a = Config::default();
+        let mut b = Config::default();
+        b.scrollback.lines = 5000;
+        let delta = a.diff(&b);
+        assert!(delta.scrollback_changed);
+    }
+
+    #[test]
+    fn diff_detects_performance_change() {
+        let a = Config::default();
+        let mut b = Config::default();
+        b.performance.fps_limit = 120;
+        let delta = a.diff(&b);
+        assert!(delta.performance_changed);
+    }
+
+    // ── Default config generation tests ─────────────────────────────
+
+    #[test]
+    fn print_default_is_valid_toml() {
+        let toml_str = Config::print_default();
+        // Must parse without error
+        let config = Config::from_toml(&toml_str).unwrap();
+        assert_eq!(config, Config::default());
+    }
+
+    #[test]
+    fn print_default_round_trips() {
+        let toml_str = Config::print_default();
+        let parsed = Config::from_toml(&toml_str).unwrap();
+        let default = Config::default();
+        assert_eq!(parsed.font, default.font);
+        assert_eq!(parsed.colors, default.colors);
+        assert_eq!(parsed.cursor, default.cursor);
+        assert_eq!(parsed.scrollback, default.scrollback);
+        assert_eq!(parsed.performance, default.performance);
     }
 }
