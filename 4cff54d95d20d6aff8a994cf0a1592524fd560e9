@@ -1,0 +1,17 @@
+Phase 3, Tasks 1-2: Write tests for glyph rasterization + Implement glyph atlas
+
+Summary: Created GlyphAtlas using cosmic-text FontSystem and SwashCache to
+rasterize all 95 ASCII printable glyphs (0x20-0x7E) into a power-of-two R8
+texture atlas. Cell-sized slots with pre-positioned glyphs enable direct UV
+mapping from the grid shader without bearing offset calculations.
+
+Files created/modified:
+- src/renderer/glyph_atlas.rs (GlyphAtlas, GlyphInfo, 13 tests)
+
+Key decisions:
+- cosmic-text Buffer::draw() for glyph rendering (handles baseline positioning)
+- R8 format (single byte per pixel = glyph mask coverage from color.r())
+- Cell-sized atlas slots (cell_width x cell_height) for direct quad UV mapping
+- 16 glyphs per row in atlas, power-of-two dimensions
+- Family::Monospace for portable font selection (system default monospace)
+- Line height = ceil(font_size * scale * 1.6) for comfortable terminal spacing
