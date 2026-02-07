@@ -102,13 +102,13 @@
 
 ## Phase 4: Grid Renderer and Static Display
 
-- [ ] Task: Write tests for grid dimension calculation
+- [x] Task: Write tests for grid dimension calculation <!-- 7fa33d2 -->
   - Write tests for column/row calculation from window size and cell dimensions
   - Write tests for grid recalculation on window resize
   - Write tests for DPI-scaled cell sizing
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement grid dimension calculation
+- [x] Task: Implement grid dimension calculation <!-- 7fa33d2 -->
   - Create `src/renderer/grid_renderer.rs`
   - Calculate grid columns = floor(window_width / cell_width)
   - Calculate grid rows = floor(window_height / cell_height)
