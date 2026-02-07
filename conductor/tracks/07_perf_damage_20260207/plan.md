@@ -13,7 +13,7 @@
 
 - [x] Task: Conductor - User Manual Verification 'Phase 1: DamageTracker Core' (Protocol in workflow.md)
 
-## Phase 2: Grid Diff & Previous Frame Cache
+## Phase 2: Grid Diff & Previous Frame Cache [checkpoint: 54cf582]
 
 - [x] Task 1: Implement row-level grid diff function <!-- fba3f74 -->
   - [x] Write tests: identical grids produce no dirty rows, single cell change marks only that row dirty, changes in multiple rows mark all affected rows, empty grids produce no dirty rows, grids with different dimensions trigger full damage
@@ -23,7 +23,7 @@
   - [x] Write tests: first frame (no cache) returns all-dirty, second frame with no changes returns no dirty rows, second frame with one row changed returns that row dirty, cache updates after each diff, resize clears cache and returns all-dirty
   - [x] Implement `DamageState` struct wrapping DamageTracker + previous frame cache
 
-- [ ] Task: Conductor - User Manual Verification 'Phase 2: Grid Diff & Previous Frame Cache' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 2: Grid Diff & Previous Frame Cache' (Protocol in workflow.md)
 
 ## Phase 3: Renderer Integration
 
