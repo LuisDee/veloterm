@@ -15,9 +15,9 @@
 
 ## Phase 2: Grid Diff & Previous Frame Cache
 
-- [ ] Task 1: Implement row-level grid diff function
-  - [ ] Write tests: identical grids produce no dirty rows, single cell change marks only that row dirty, changes in multiple rows mark all affected rows, empty grids produce no dirty rows, grids with different dimensions trigger full damage
-  - [ ] Implement `diff_grid_rows(prev: &[GridCell], curr: &[GridCell], cols: usize) -> Vec<bool>` in `src/renderer/damage.rs`
+- [x] Task 1: Implement row-level grid diff function <!-- fba3f74 -->
+  - [x] Write tests: identical grids produce no dirty rows, single cell change marks only that row dirty, changes in multiple rows mark all affected rows, empty grids produce no dirty rows, grids with different dimensions trigger full damage
+  - [x] Implement `diff_grid_rows(prev: &[GridCell], curr: &[GridCell], cols: usize) -> Vec<bool>` in `src/renderer/damage.rs`
 
 - [ ] Task 2: Implement DamageState that manages previous frame cache and diffing
   - [ ] Write tests: first frame (no cache) returns all-dirty, second frame with no changes returns no dirty rows, second frame with one row changed returns that row dirty, cache updates after each diff, resize clears cache and returns all-dirty
