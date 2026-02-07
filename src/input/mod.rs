@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use winit::event::ElementState;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
-use crate::pane::{FocusDirection, SplitDirection};
+use crate::pane::FocusDirection;
 
 /// A pane management command triggered by a keybinding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

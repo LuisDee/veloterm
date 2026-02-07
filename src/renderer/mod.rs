@@ -104,7 +104,13 @@ impl Renderer {
             .copied()
             .unwrap_or(surface_caps.formats[0]);
 
-        let surface_config = SurfaceConfig::new(size.width, size.height, format);
+        // Clamp to GPU's max texture dimension to prevent wgpu validation errors
+        // (macOS retina windows can exceed 2048px)
+        let max_dim = device.limits().max_texture_dimension_2d;
+        let clamped_width = size.width.min(max_dim).max(1);
+        let clamped_height = size.height.min(max_dim).max(1);
+
+        let surface_config = SurfaceConfig::new(clamped_width, clamped_height, format);
         surface.configure(&device, &surface_config.to_wgpu_config());
 
         // Glyph atlas
@@ -128,9 +134,9 @@ impl Renderer {
         let atlas_view = atlas_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = create_atlas_sampler(&device);
 
-        // Grid dimensions
+        // Grid dimensions (use clamped size to match surface)
         let grid =
-            GridDimensions::new(size.width, size.height, atlas.cell_width, atlas.cell_height);
+            GridDimensions::new(clamped_width, clamped_height, atlas.cell_width, atlas.cell_height);
         log::info!("Grid: {}x{} cells", grid.columns, grid.rows);
 
         // Initial test pattern with configured theme
