@@ -35,7 +35,7 @@
 
 - [x] Task: Conductor - User Manual Verification 'Project Initialization and Window Creation' (Protocol in workflow.md) <!-- 9f911e1 -->
 
-## Phase 2: GPU Pipeline Setup
+## Phase 2: GPU Pipeline Setup [checkpoint: d9f26fb]
 
 - [x] Task: Write tests for wgpu device and surface initialization <!-- 2d31114 -->
   - Write tests for GPU adapter selection (prefer high-performance)
@@ -66,7 +66,7 @@
   - Set up bind groups for uniform buffer (cell_size, grid_size) and texture sampler
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Conductor - User Manual Verification 'GPU Pipeline Setup' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'GPU Pipeline Setup' (Protocol in workflow.md) <!-- d9f26fb -->
 
 ## Phase 3: Glyph Atlas
 
