@@ -125,7 +125,7 @@
 
 ## Phase 7: Scrollback Buffer and Scroll Navigation
 
-- [ ] Task: Write tests for scrollback and scroll navigation
+- [x] Task: Write tests for scrollback and scroll navigation <!-- 94b50ce -->
   - Write tests for scrollback history accumulation (lines scrolled off-screen are preserved)
   - Write tests for Shift+PageUp/PageDown scrolling one page
   - Write tests for Shift+UpArrow/DownArrow scrolling one line
@@ -133,7 +133,7 @@
   - Write tests for snap-to-bottom on keyboard input
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement scrollback buffer and scroll navigation
+- [x] Task: Implement scrollback buffer and scroll navigation <!-- 94b50ce -->
   - Configure `alacritty_terminal` with 10,000-line scrollback
   - Implement scroll viewport tracking (display offset from bottom)
   - Map Shift+PageUp/PageDown to page scroll in the viewport
