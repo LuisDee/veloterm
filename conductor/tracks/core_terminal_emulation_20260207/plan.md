@@ -81,7 +81,7 @@
 
 ## Phase 5: Cursor Rendering
 
-- [ ] Task: Write tests for cursor rendering
+- [x] Task: Write tests for cursor rendering <!-- 2413561 -->
   - Write tests for cursor position extraction from terminal state
   - Write tests for block cursor cell instance generation (filled rectangle)
   - Write tests for beam cursor cell instance generation (thin vertical line)
@@ -90,7 +90,7 @@
   - Write tests for cursor blink timing (500ms on/off cycle)
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement cursor rendering
+- [x] Task: Implement cursor rendering <!-- 2413561 -->
   - Create `src/renderer/cursor.rs` for cursor state and rendering
   - Generate cursor overlay cell instance(s) based on cursor style and position
   - Implement blink timer toggling cursor visibility at 500ms intervals
