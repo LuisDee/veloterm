@@ -1,0 +1,17 @@
+{
+  "track_id": "03_config",
+  "state": "NOT_STARTED",
+  "complexity": "M",
+  "wave": 1,
+  "cc_version_at_brief": "v1",
+  "cc_version_current": "v1",
+  "dependencies": [],
+  "interfaces_owned": ["Config::load", "Config::watch", "Config::diff", "Theme system"],
+  "interfaces_consumed": ["src/config/theme.rs (existing)"],
+  "events_published": [],
+  "events_consumed": [],
+  "patches": [],
+  "created_at": "2026-02-07T21:00:00Z",
+  "started_at": null,
+  "completed_at": null
+}
