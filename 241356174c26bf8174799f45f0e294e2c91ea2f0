@@ -1,0 +1,25 @@
+Phase 5 Tasks 1-2: Cursor Rendering
+
+Files changed:
+  - src/renderer/cursor.rs (NEW): CursorState, CursorStyle, flag constants, blink timer
+  - src/renderer/mod.rs: added cursor submodule
+  - src/renderer/gpu.rs: added PartialEq derive to CellInstance
+
+Implementation:
+  - CursorStyle enum: Block, Beam, Underline
+  - CursorState manages position, style, focus, blink timer
+  - Flag encoding: bit 1=is_cursor, bits 2-3=shape (block/beam/underline/hollow)
+  - Blink interval: 500ms toggle via Instant-based timer
+  - Unfocused window shows hollow block cursor regardless of style
+  - to_cell_instance() generates CellInstance with cursor colors and flags
+
+Tests (25 new, 227 total):
+  - Cursor position: origin, update, default style/visible/focused (5)
+  - Block cursor: generates instance, position, flag, shape, colors (5)
+  - Beam cursor: shape flag, cursor flag (2)
+  - Underline cursor: shape flag, cursor flag (2)
+  - Hollow block: unfocused shows hollow, still has cursor flag, refocus restores style (3)
+  - Blink timing: initially visible, not-visible→None, toggle, no-change-before-interval, off/on (6)
+  - Set style: beam, underline (2)
+
+Quality gates: 227 tests pass, clippy clean, fmt clean
