@@ -21,6 +21,9 @@ unicode-width = "0.2"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
 
+# Terminal Emulation
+alacritty_terminal = "0.25"
+
 # PTY Management
 portable-pty = "0.9"
 
