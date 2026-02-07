@@ -2,7 +2,7 @@
 
 ## Phase 1: Project Initialization and Window Creation
 
-- [ ] Task: Initialize Rust project with Cargo workspace and directory structure
+- [x] Task: Initialize Rust project with Cargo workspace and directory structure <!-- d36e071 -->
   - Create `Cargo.toml` with dependencies (winit, wgpu, cosmic-text, log, env_logger, unicode-width)
   - Create `rustfmt.toml` with `max_width = 100`
   - Create `src/main.rs` with minimal entry point
