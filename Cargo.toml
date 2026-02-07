@@ -32,3 +32,11 @@ portable-pty = "0.9"
 
 # Threading
 crossbeam-channel = "0.5"
+
+# Configuration
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"

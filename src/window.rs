@@ -122,8 +122,11 @@ impl ApplicationHandler for App {
                         match crate::pty::PtySession::new(&shell, cols, rows) {
                             Ok(pty) => {
                                 log::info!("PTY spawned: {shell} ({cols}x{rows})");
-                                let terminal =
-                                    crate::terminal::Terminal::new(cols as usize, rows as usize, 10_000);
+                                let terminal = crate::terminal::Terminal::new(
+                                    cols as usize,
+                                    rows as usize,
+                                    10_000,
+                                );
                                 self.pty = Some(pty);
                                 self.terminal = Some(terminal);
                             }
@@ -208,8 +211,7 @@ impl ApplicationHandler for App {
 
                 // Update renderer with live terminal cells
                 if let (Some(renderer), Some(terminal)) = (&mut self.renderer, &self.terminal) {
-                    let cells =
-                        crate::terminal::grid_bridge::extract_grid_cells(terminal);
+                    let cells = crate::terminal::grid_bridge::extract_grid_cells(terminal);
                     renderer.update_cells(&cells);
                 }
 
