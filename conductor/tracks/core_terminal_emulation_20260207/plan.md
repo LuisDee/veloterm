@@ -2,14 +2,14 @@
 
 ## Phase 1: PTY Spawning and Raw I/O
 
-- [ ] Task: Write tests for PTY creation and shell spawning
+- [x] Task: Write tests for PTY creation and shell spawning <!-- 23cf6cc -->
   - Write tests for PTY pair creation via `portable-pty`
   - Write tests for reading `$SHELL` with `/bin/sh` fallback
   - Write tests for PTY size initialization from grid dimensions
   - Write tests for basic read/write on the PTY master fd
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement PTY management module
+- [x] Task: Implement PTY management module <!-- 23cf6cc -->
   - Create `src/pty/mod.rs` with PTY lifecycle management
   - Add `portable-pty` and `crossbeam-channel` dependencies to `Cargo.toml`
   - Spawn the user's default shell (`$SHELL` or `/bin/sh`)
