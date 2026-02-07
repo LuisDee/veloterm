@@ -419,6 +419,25 @@ mod tests {
     }
 
     #[test]
+    fn config_larger_font_produces_fewer_grid_cells() {
+        // Same window size, different font sizes → different grid dimensions
+        let small_atlas = GlyphAtlas::new(10.0, 1.0);
+        let large_atlas = GlyphAtlas::new(20.0, 1.0);
+        let small_grid =
+            GridDimensions::new(1280, 720, small_atlas.cell_width, small_atlas.cell_height);
+        let large_grid =
+            GridDimensions::new(1280, 720, large_atlas.cell_width, large_atlas.cell_height);
+        assert!(
+            large_grid.columns < small_grid.columns,
+            "larger font should produce fewer columns"
+        );
+        assert!(
+            large_grid.rows < small_grid.rows,
+            "larger font should produce fewer rows"
+        );
+    }
+
+    #[test]
     fn config_theme_from_name_works_in_renderer() {
         let atlas = GlyphAtlas::new(13.0, 2.0);
         let grid = GridDimensions::new(1280, 720, atlas.cell_width, atlas.cell_height);
@@ -429,5 +448,35 @@ mod tests {
             let instances = generate_instances(&grid, &cells, &atlas);
             assert_eq!(instances.len(), grid.total_cells() as usize);
         }
+    }
+
+    #[test]
+    fn config_theme_produces_different_background_colors() {
+        let atlas = GlyphAtlas::new(13.0, 1.0);
+        let grid = GridDimensions::new(640, 480, atlas.cell_width, atlas.cell_height);
+
+        let dark = Theme::from_name("claude_dark").unwrap();
+        let light = Theme::from_name("claude_light").unwrap();
+
+        let dark_cells = generate_test_pattern(&grid, &dark);
+        let light_cells = generate_test_pattern(&grid, &light);
+
+        let dark_instances = generate_instances(&grid, &dark_cells, &atlas);
+        let light_instances = generate_instances(&grid, &light_cells, &atlas);
+
+        // Background colors must differ between themes
+        assert_ne!(
+            dark_instances[0].bg_color, light_instances[0].bg_color,
+            "dark and light themes should produce different bg colors"
+        );
+    }
+
+    #[test]
+    fn config_unknown_theme_falls_back_to_claude_dark() {
+        let fallback = Theme::from_name("nonexistent");
+        assert!(fallback.is_none());
+        // Application code does: .unwrap_or_else(|| Theme::claude_dark())
+        let theme = fallback.unwrap_or_else(Theme::claude_dark);
+        assert_eq!(theme.name, "Claude Dark");
     }
 }

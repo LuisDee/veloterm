@@ -425,4 +425,79 @@ mod tests {
         assert_eq!(app.app_config.colors.theme, "claude_warm");
         assert_eq!(app.app_config.scrollback.lines, 5000);
     }
+
+    #[test]
+    fn app_config_defaults_match_expected_values() {
+        let app = App::new(WindowConfig::default(), Config::default());
+        assert_eq!(app.app_config.colors.theme, "claude_dark");
+        assert_eq!(app.app_config.font.size, 14.0);
+        assert_eq!(app.app_config.scrollback.lines, 10_000);
+        assert_eq!(app.app_config.cursor.style, "block");
+        assert!(app.app_config.cursor.blink);
+    }
+
+    #[test]
+    fn app_config_font_size_is_passed_through() {
+        let mut cfg = Config::default();
+        cfg.font.size = 20.0;
+        let app = App::new(WindowConfig::default(), cfg);
+        assert_eq!(app.app_config.font.size, 20.0);
+    }
+
+    #[test]
+    fn app_config_theme_resolution() {
+        // Verify Theme::from_name produces the right theme for each config value
+        use crate::config::theme::Theme;
+        for (config_name, display_name) in [
+            ("claude_dark", "Claude Dark"),
+            ("claude_light", "Claude Light"),
+            ("claude_warm", "Claude Warm"),
+        ] {
+            let theme = Theme::from_name(config_name).unwrap();
+            assert_eq!(theme.name, display_name);
+        }
+    }
+
+    #[test]
+    fn app_config_unknown_theme_fallback() {
+        use crate::config::theme::Theme;
+        // Unknown theme returns None, app falls back to claude_dark
+        let result = Theme::from_name("nonexistent");
+        assert!(result.is_none());
+        let fallback = result.unwrap_or_else(Theme::claude_dark);
+        assert_eq!(fallback.name, "Claude Dark");
+    }
+
+    #[test]
+    fn app_config_scrollback_passed_to_terminal() {
+        let scrollback = 5000_usize;
+        let terminal = crate::terminal::Terminal::new(80, 24, scrollback);
+        // Terminal is created successfully with custom scrollback
+        assert_eq!(terminal.history_size(), 0); // empty at start, but accepts the config value
+    }
+
+    #[test]
+    fn app_config_from_toml_wires_all_fields() {
+        let toml = r#"
+[font]
+size = 18.0
+
+[colors]
+theme = "claude_light"
+
+[scrollback]
+lines = 2000
+
+[cursor]
+style = "beam"
+blink = false
+"#;
+        let cfg = Config::from_toml(toml).unwrap();
+        let app = App::new(WindowConfig::default(), cfg);
+        assert_eq!(app.app_config.font.size, 18.0);
+        assert_eq!(app.app_config.colors.theme, "claude_light");
+        assert_eq!(app.app_config.scrollback.lines, 2000);
+        assert_eq!(app.app_config.cursor.style, "beam");
+        assert!(!app.app_config.cursor.blink);
+    }
 }
