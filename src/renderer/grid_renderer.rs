@@ -136,6 +136,66 @@ pub fn generate_instances(
     instances
 }
 
+/// Generate a test pattern grid for visual verification.
+///
+/// Layout:
+/// - Row 0: "VeloTerm v0.1.0" in accent color
+/// - Row 1: Empty
+/// - Row 2: Full ASCII printable range (0x20-0x7E)
+/// - Row 3: "claude@anthropic ~ $" with prompt colors
+/// - Remaining: Alternating characters for cell alignment validation
+pub fn generate_test_pattern(
+    grid: &GridDimensions,
+    theme: &crate::config::theme::Theme,
+) -> Vec<GridCell> {
+    let total = grid.total_cells() as usize;
+    let cols = grid.columns as usize;
+    let mut cells = vec![GridCell::empty(theme.background); total];
+
+    // Row 0: VeloTerm header in accent color
+    let header = "VeloTerm v0.1.0";
+    for (i, ch) in header.chars().enumerate() {
+        if i < cols {
+            cells[i] = GridCell::new(ch, theme.accent, theme.background);
+        }
+    }
+
+    // Row 1: empty (already filled with empty cells)
+
+    // Row 2: ASCII printable range
+    if grid.rows > 2 {
+        let row_start = 2 * cols;
+        for (i, byte) in (0x20u8..=0x7Eu8).enumerate() {
+            if i < cols {
+                cells[row_start + i] =
+                    GridCell::new(byte as char, theme.text_primary, theme.background);
+            }
+        }
+    }
+
+    // Row 3: prompt line
+    if grid.rows > 3 {
+        let row_start = 3 * cols;
+        let prompt = "claude@anthropic ~ $";
+        for (i, ch) in prompt.chars().enumerate() {
+            if i < cols {
+                cells[row_start + i] = GridCell::new(ch, theme.prompt, theme.background);
+            }
+        }
+    }
+
+    // Remaining rows: alternating characters
+    for row in 4..grid.rows as usize {
+        let row_start = row * cols;
+        for col in 0..cols {
+            let ch = if (row + col) % 2 == 0 { '#' } else { '.' };
+            cells[row_start + col] = GridCell::new(ch, theme.text_muted, theme.background);
+        }
+    }
+
+    cells
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -371,5 +431,111 @@ mod tests {
         let instances = generate_instances(&grid, &cells, &atlas);
         assert_eq!(instances[0].flags & 1, 0);
         assert_eq!(instances[0].atlas_uv, [0.0, 0.0, 0.0, 0.0]);
+    }
+
+    // ── Test pattern generation ─────────────────────────────────────
+
+    fn test_theme() -> crate::config::theme::Theme {
+        crate::config::theme::Theme::claude_dark()
+    }
+
+    #[test]
+    fn test_pattern_returns_correct_cell_count() {
+        let grid = test_grid(80, 24);
+        let theme = test_theme();
+        let cells = generate_test_pattern(&grid, &theme);
+        assert_eq!(cells.len(), 80 * 24);
+    }
+
+    #[test]
+    fn test_pattern_row0_has_veloterm_header() {
+        let grid = test_grid(80, 24);
+        let theme = test_theme();
+        let cells = generate_test_pattern(&grid, &theme);
+        let header: String = cells[..15].iter().map(|c| c.ch).collect();
+        assert_eq!(header, "VeloTerm v0.1.0");
+    }
+
+    #[test]
+    fn test_pattern_row0_header_uses_accent_color() {
+        let grid = test_grid(80, 24);
+        let theme = test_theme();
+        let cells = generate_test_pattern(&grid, &theme);
+        // 'V' in row 0 should use accent color
+        assert_eq!(cells[0].fg, theme.accent);
+    }
+
+    #[test]
+    fn test_pattern_row1_is_empty() {
+        let grid = test_grid(80, 24);
+        let theme = test_theme();
+        let cells = generate_test_pattern(&grid, &theme);
+        // Row 1 should all be spaces
+        for i in 80..160 {
+            assert_eq!(cells[i].ch, ' ', "row 1, col {} should be space", i - 80);
+        }
+    }
+
+    #[test]
+    fn test_pattern_row2_has_ascii_range() {
+        let grid = test_grid(80, 24);
+        let theme = test_theme();
+        let cells = generate_test_pattern(&grid, &theme);
+        let row2_start = 2 * 80;
+        // First char is space (0x20), then '!' (0x21), etc.
+        assert_eq!(cells[row2_start].ch, ' ');
+        assert_eq!(cells[row2_start + 1].ch, '!');
+        assert_eq!(cells[row2_start + 33].ch, 'A'); // 0x41 - 0x20 = 33
+    }
+
+    #[test]
+    fn test_pattern_row2_uses_text_primary() {
+        let grid = test_grid(80, 24);
+        let theme = test_theme();
+        let cells = generate_test_pattern(&grid, &theme);
+        let row2_start = 2 * 80;
+        assert_eq!(cells[row2_start + 1].fg, theme.text_primary);
+    }
+
+    #[test]
+    fn test_pattern_row3_has_prompt() {
+        let grid = test_grid(80, 24);
+        let theme = test_theme();
+        let cells = generate_test_pattern(&grid, &theme);
+        let row3_start = 3 * 80;
+        let prompt: String = cells[row3_start..row3_start + 20]
+            .iter()
+            .map(|c| c.ch)
+            .collect();
+        assert_eq!(prompt, "claude@anthropic ~ $");
+    }
+
+    #[test]
+    fn test_pattern_row3_uses_prompt_color() {
+        let grid = test_grid(80, 24);
+        let theme = test_theme();
+        let cells = generate_test_pattern(&grid, &theme);
+        let row3_start = 3 * 80;
+        assert_eq!(cells[row3_start].fg, theme.prompt);
+    }
+
+    #[test]
+    fn test_pattern_remaining_rows_alternate() {
+        let grid = test_grid(80, 24);
+        let theme = test_theme();
+        let cells = generate_test_pattern(&grid, &theme);
+        // Row 4, col 0: (4+0)%2 == 0 → '#'
+        let row4_start = 4 * 80;
+        assert_eq!(cells[row4_start].ch, '#');
+        assert_eq!(cells[row4_start + 1].ch, '.');
+    }
+
+    #[test]
+    fn test_pattern_remaining_uses_text_muted() {
+        let grid = test_grid(80, 24);
+        let theme = test_theme();
+        let cells = generate_test_pattern(&grid, &theme);
+        let row4_start = 4 * 80;
+        assert_eq!(cells[row4_start].fg, theme.text_muted);
     }
 }
