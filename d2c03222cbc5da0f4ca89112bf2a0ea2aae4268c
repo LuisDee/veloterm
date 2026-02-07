@@ -1,0 +1,15 @@
+Phase 5, Tasks 3-4: Clean shutdown tests + final integration
+
+Summary: Added 4 tests for App initialization state and clean shutdown.
+Verified all existing quality gates (128 tests, clippy clean, fmt clean).
+env_logger, log statements, close handling, and Drop-based cleanup were
+already implemented in Tasks 1-2.
+
+Files modified:
+- src/window.rs (4 new shutdown/init tests)
+
+Tests added:
+- app_starts_with_no_window
+- app_starts_with_no_renderer
+- app_drop_without_run_is_safe
+- app_stores_config
