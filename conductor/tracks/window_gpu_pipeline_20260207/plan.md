@@ -70,7 +70,7 @@
 
 ## Phase 3: Glyph Atlas
 
-- [ ] Task: Write tests for glyph rasterization and atlas packing
+- [x] Task: Write tests for glyph rasterization and atlas packing <!-- 4cff54d -->
   - Write tests for font loading (JetBrains Mono with fallbacks)
   - Write tests for glyph metrics (advance width, height, bearing)
   - Write tests for atlas texture dimensions (power-of-two)
@@ -78,7 +78,7 @@
   - Write tests for ASCII range coverage (0x20–0x7E, 95 glyphs)
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement glyph atlas rasterization
+- [x] Task: Implement glyph atlas rasterization <!-- 4cff54d -->
   - Create `src/renderer/glyph_atlas.rs`
   - Load monospace font using cosmic-text (JetBrains Mono → Fira Code → SF Mono → system monospace)
   - Rasterize ASCII printable range (0x20–0x7E) at configured font size (13px * DPI scale)
