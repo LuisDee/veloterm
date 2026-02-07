@@ -1,6 +1,6 @@
 # Plan: Core Terminal Emulation
 
-## Phase 1: PTY Spawning and Raw I/O
+## Phase 1: PTY Spawning and Raw I/O [checkpoint: 66f48c4]
 
 - [x] Task: Write tests for PTY creation and shell spawning <!-- 23cf6cc -->
   - Write tests for PTY pair creation via `portable-pty`
@@ -18,7 +18,7 @@
   - Implement write-to-PTY from the main thread
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Conductor - User Manual Verification 'PTY Spawning and Raw I/O' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'PTY Spawning and Raw I/O' (Protocol in workflow.md) <!-- 66f48c4 -->
 
 ## Phase 2: Terminal State Machine Integration
 
