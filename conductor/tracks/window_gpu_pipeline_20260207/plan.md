@@ -116,14 +116,14 @@
   - Store grid state (dimensions, cell size, instance buffer)
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Write tests for cell instance buffer generation
+- [x] Task: Write tests for cell instance buffer generation <!-- f3937bd -->
   - Write tests for CellInstance struct layout (position, atlas_uv, fg_color, bg_color, flags)
   - Write tests for instance buffer generation from a grid of characters
   - Write tests for correct UV lookup from glyph atlas for each character
   - Write tests for color assignment from theme
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement cell instance buffer and rendering
+- [x] Task: Implement cell instance buffer and rendering <!-- f3937bd -->
   - Define CellInstance struct matching shader layout
   - Generate instance data for each cell: screen position, glyph UV, fg/bg colors
   - Upload instance buffer to GPU
