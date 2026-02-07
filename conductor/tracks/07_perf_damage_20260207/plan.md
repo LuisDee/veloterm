@@ -19,9 +19,9 @@
   - [x] Write tests: identical grids produce no dirty rows, single cell change marks only that row dirty, changes in multiple rows mark all affected rows, empty grids produce no dirty rows, grids with different dimensions trigger full damage
   - [x] Implement `diff_grid_rows(prev: &[GridCell], curr: &[GridCell], cols: usize) -> Vec<bool>` in `src/renderer/damage.rs`
 
-- [ ] Task 2: Implement DamageState that manages previous frame cache and diffing
-  - [ ] Write tests: first frame (no cache) returns all-dirty, second frame with no changes returns no dirty rows, second frame with one row changed returns that row dirty, cache updates after each diff, resize clears cache and returns all-dirty
-  - [ ] Implement `DamageState` struct wrapping DamageTracker + previous frame cache
+- [x] Task 2: Implement DamageState that manages previous frame cache and diffing <!-- 62453b7 -->
+  - [x] Write tests: first frame (no cache) returns all-dirty, second frame with no changes returns no dirty rows, second frame with one row changed returns that row dirty, cache updates after each diff, resize clears cache and returns all-dirty
+  - [x] Implement `DamageState` struct wrapping DamageTracker + previous frame cache
 
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Grid Diff & Previous Frame Cache' (Protocol in workflow.md)
 
