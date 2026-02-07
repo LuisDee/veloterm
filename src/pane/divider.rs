@@ -19,6 +19,33 @@ pub struct DividerInfo {
 /// Width of the divider bar in pixels.
 pub const DIVIDER_WIDTH: f32 = 2.0;
 
+/// Default hit-test margin in pixels around a divider.
+pub const HIT_TEST_MARGIN: f32 = 8.0;
+
+/// Hit-test a point against dividers, returning the first divider within margin.
+/// The margin expands the divider rect by `margin` pixels on each side of the
+/// thin axis (perpendicular to the divider line).
+pub fn hit_test_divider(point: (f32, f32), dividers: &[DividerInfo], margin: f32) -> Option<usize> {
+    let (px, py) = point;
+    for (i, divider) in dividers.iter().enumerate() {
+        let r = &divider.rect;
+        let expanded = match divider.direction {
+            SplitDirection::Vertical => {
+                // Expand horizontally (the thin axis)
+                Rect::new(r.x - margin, r.y, r.width + margin * 2.0, r.height)
+            }
+            SplitDirection::Horizontal => {
+                // Expand vertically (the thin axis)
+                Rect::new(r.x, r.y - margin, r.width, r.height + margin * 2.0)
+            }
+        };
+        if expanded.contains_point(px, py) {
+            return Some(i);
+        }
+    }
+    None
+}
+
 /// Calculate divider rects from the pane tree.
 /// Walks the tree in pre-order, emitting a DividerInfo at each Split node.
 pub fn calculate_dividers(root: &PaneNode, bounds: Rect, min_size: f32) -> Vec<DividerInfo> {
@@ -287,5 +314,100 @@ mod tests {
         assert_eq!(dividers.len(), 2);
         assert_eq!(dividers[0].split_index, 0); // root horizontal
         assert_eq!(dividers[1].split_index, 1); // inner vertical
+    }
+
+    // ── Hit-testing tests ────────────────────────────────────────────
+
+    fn make_vertical_dividers() -> Vec<DividerInfo> {
+        // Simulate a vertical split at x=640 in 1280x720 window
+        let root = PaneNode::split(
+            SplitDirection::Vertical,
+            0.5,
+            PaneNode::leaf(PaneId(1)),
+            PaneNode::leaf(PaneId(2)),
+        );
+        calculate_dividers(&root, Rect::new(0.0, 0.0, 1280.0, 720.0), 20.0)
+    }
+
+    #[test]
+    fn hit_test_on_divider_returns_index() {
+        let dividers = make_vertical_dividers();
+        // Divider at x=639, width=2. Point exactly on divider.
+        let result = hit_test_divider((640.0, 360.0), &dividers, HIT_TEST_MARGIN);
+        assert_eq!(result, Some(0));
+    }
+
+    #[test]
+    fn hit_test_within_margin_returns_index() {
+        let dividers = make_vertical_dividers();
+        // Point 5px to the left of divider center, within 8px margin
+        let result = hit_test_divider((635.0, 360.0), &dividers, HIT_TEST_MARGIN);
+        assert_eq!(result, Some(0));
+    }
+
+    #[test]
+    fn hit_test_outside_margin_returns_none() {
+        let dividers = make_vertical_dividers();
+        // Point 20px away from divider
+        let result = hit_test_divider((620.0, 360.0), &dividers, HIT_TEST_MARGIN);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn hit_test_beyond_divider_length_returns_none() {
+        let dividers = make_vertical_dividers();
+        // Point at correct x but below the divider (y > 720)
+        let result = hit_test_divider((640.0, 800.0), &dividers, HIT_TEST_MARGIN);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn hit_test_empty_dividers_returns_none() {
+        let result = hit_test_divider((640.0, 360.0), &[], HIT_TEST_MARGIN);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn hit_test_horizontal_divider() {
+        let root = PaneNode::split(
+            SplitDirection::Horizontal,
+            0.5,
+            PaneNode::leaf(PaneId(1)),
+            PaneNode::leaf(PaneId(2)),
+        );
+        let dividers = calculate_dividers(&root, Rect::new(0.0, 0.0, 1280.0, 720.0), 20.0);
+        // Horizontal divider at y=359, height=2. Point near divider.
+        let result = hit_test_divider((640.0, 360.0), &dividers, HIT_TEST_MARGIN);
+        assert_eq!(result, Some(0));
+    }
+
+    #[test]
+    fn hit_test_picks_first_matching_divider() {
+        // Two dividers close together: [[A | B] | C]
+        let root = PaneNode::split(
+            SplitDirection::Vertical,
+            0.5,
+            PaneNode::split(
+                SplitDirection::Vertical,
+                0.5,
+                PaneNode::leaf(PaneId(1)),
+                PaneNode::leaf(PaneId(2)),
+            ),
+            PaneNode::leaf(PaneId(3)),
+        );
+        let dividers = calculate_dividers(&root, Rect::new(0.0, 0.0, 1200.0, 600.0), 20.0);
+        // Root divider at x=599, inner at x=299. Point near root divider.
+        let result = hit_test_divider((600.0, 300.0), &dividers, HIT_TEST_MARGIN);
+        assert_eq!(result, Some(0));
+    }
+
+    #[test]
+    fn hit_test_zero_margin() {
+        let dividers = make_vertical_dividers();
+        // With zero margin, must be exactly on the 2px divider (x=639..641)
+        let on = hit_test_divider((639.5, 360.0), &dividers, 0.0);
+        assert_eq!(on, Some(0));
+        let off = hit_test_divider((637.0, 360.0), &dividers, 0.0);
+        assert_eq!(off, None);
     }
 }
