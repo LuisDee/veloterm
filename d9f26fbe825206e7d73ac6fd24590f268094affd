@@ -1,0 +1,26 @@
+Phase 2 Checkpoint Verification — GPU Pipeline Setup
+
+Quality Gates:
+- cargo test --lib: 69 tests passed (0 failed)
+- cargo clippy -- -D warnings: clean (no warnings)
+- cargo fmt --check: clean (no diffs)
+
+Manual Verification:
+- cargo run: Window opens as decorated 1280x720 window with title "VeloTerm"
+- Window displays dark background (#1A1816 Claude Dark theme)
+- Window is closeable via title bar close button
+- User confirmed: "Yes looks good now"
+
+Bug Fixed During Verification:
+- Window was opening fullscreen without decorations on second monitor (macOS multi-monitor)
+- Fix: explicitly set with_decorations(true) and with_fullscreen(None) on WindowAttributes
+- Committed as 73cae5a
+
+Phase Summary:
+- GpuContext: headless adapter/device creation for unit testing
+- SurfaceConfig: testable surface configuration (Fifo present mode, Bgra8UnormSrgb)
+- CellInstance: 72-byte Pod struct with 5 vertex attributes (instance step mode)
+- GridUniforms: 32-byte uniform struct (cell_size, grid_size, atlas_size)
+- grid.wgsl: vertex expansion, NDC positioning, atlas UV mapping, fg/bg blending
+- Render pipeline: instanced quads, alpha blending, bind group layout (uniforms + atlas + sampler)
+- 16 GPU-specific tests + 53 from Phase 1 = 69 total tests
