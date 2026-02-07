@@ -1,0 +1,8 @@
+/Users/luisdeburnay/work/terminal-em/target/release/deps/paste-85d9dbc0d790cf12.d: /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/paste-1.0.15/src/lib.rs /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/paste-1.0.15/src/attr.rs /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/paste-1.0.15/src/error.rs /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/paste-1.0.15/src/segment.rs
+
+/Users/luisdeburnay/work/terminal-em/target/release/deps/libpaste-85d9dbc0d790cf12.dylib: /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/paste-1.0.15/src/lib.rs /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/paste-1.0.15/src/attr.rs /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/paste-1.0.15/src/error.rs /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/paste-1.0.15/src/segment.rs
+
+/Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/paste-1.0.15/src/lib.rs:
+/Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/paste-1.0.15/src/attr.rs:
+/Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/paste-1.0.15/src/error.rs:
+/Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/paste-1.0.15/src/segment.rs:

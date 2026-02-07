@@ -1,0 +1,14 @@
+/Users/luisdeburnay/work/terminal-em/target/release/deps/thiserror-c24175dfc3fc8999.d: /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/lib.rs /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/aserror.rs /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/display.rs /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/var.rs /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/private.rs /Users/luisdeburnay/work/terminal-em/target/release/build/thiserror-78865c761e077f9a/out/private.rs
+
+/Users/luisdeburnay/work/terminal-em/target/release/deps/libthiserror-c24175dfc3fc8999.rlib: /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/lib.rs /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/aserror.rs /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/display.rs /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/var.rs /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/private.rs /Users/luisdeburnay/work/terminal-em/target/release/build/thiserror-78865c761e077f9a/out/private.rs
+
+/Users/luisdeburnay/work/terminal-em/target/release/deps/libthiserror-c24175dfc3fc8999.rmeta: /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/lib.rs /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/aserror.rs /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/display.rs /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/var.rs /Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/private.rs /Users/luisdeburnay/work/terminal-em/target/release/build/thiserror-78865c761e077f9a/out/private.rs
+
+/Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/lib.rs:
+/Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/aserror.rs:
+/Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/display.rs:
+/Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/var.rs:
+/Users/luisdeburnay/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/private.rs:
+/Users/luisdeburnay/work/terminal-em/target/release/build/thiserror-78865c761e077f9a/out/private.rs:
+
+# env-dep:OUT_DIR=/Users/luisdeburnay/work/terminal-em/target/release/build/thiserror-78865c761e077f9a/out
