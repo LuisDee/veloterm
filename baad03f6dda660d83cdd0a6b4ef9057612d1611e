@@ -1,0 +1,28 @@
+Phase 6 Tasks 1-2: ANSI Color and SGR Attribute Support
+
+Files changed:
+  - src/terminal/grid_bridge.rs: SGR attribute handling in extract_grid_cells
+  - src/renderer/grid_renderer.rs: GridCell flags field, cell flag constants, flag propagation
+
+Implementation:
+  - bold_brighten_named(): maps normal named colors (0-7) to bright variants (8-15)
+  - apply_dim(): reduces RGB intensity by 33% while preserving alpha
+  - extract_grid_cells() now reads cell.flags from alacritty_terminal and:
+    - Bold + named color → bright variant color
+    - Dim → reduced fg intensity
+    - Inverse → swaps fg/bg colors
+    - Underline → CELL_FLAG_UNDERLINE (bit 4) in GridCell.flags
+    - Strikethrough → CELL_FLAG_STRIKETHROUGH (bit 5) in GridCell.flags
+  - generate_instances() merges GridCell.flags into CellInstance.flags
+
+Tests (15 new, 242 total):
+  - Bold brightening: red→bright_red, black→bright_black, white→bright_white, already-bright unchanged (4)
+  - Bold integration: feed \x1b[1;31mX → bright red color (1)
+  - Dim: reduces RGB, preserves alpha (2)
+  - Dim integration: feed \x1b[2mX → reduced fg (1)
+  - Inverse integration: feed \x1b[7mX → fg/bg swapped (1)
+  - Underline: sets flag, clears flag when absent (2)
+  - Strikethrough: sets flag, clears flag when absent (2)
+  - Flag propagation: underline and strikethrough from GridCell to CellInstance (2)
+
+Quality gates: 242 tests pass, clippy clean, fmt clean
