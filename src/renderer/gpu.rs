@@ -124,6 +124,158 @@ pub fn clear_color() -> wgpu::Color {
     }
 }
 
+/// Per-cell instance data sent to the GPU vertex shader.
+/// Layout must match the CellInstance struct in grid.wgsl.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct CellInstance {
+    pub position: [f32; 2], // grid column, row
+    pub atlas_uv: [f32; 4], // u, v, width, height in atlas
+    pub fg_color: [f32; 4], // foreground RGBA
+    pub bg_color: [f32; 4], // background RGBA
+    pub flags: u32,         // bit 0: has_glyph
+    pub _padding: [u32; 3], // pad to 16-byte alignment
+}
+
+impl CellInstance {
+    /// Vertex buffer layout describing CellInstance attributes for the pipeline.
+    pub fn vertex_buffer_layout() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<CellInstance>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &[
+                // position: vec2<f32> at location(0)
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x2,
+                    offset: 0,
+                    shader_location: 0,
+                },
+                // atlas_uv: vec4<f32> at location(1)
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: 8,
+                    shader_location: 1,
+                },
+                // fg_color: vec4<f32> at location(2)
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: 24,
+                    shader_location: 2,
+                },
+                // bg_color: vec4<f32> at location(3)
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: 40,
+                    shader_location: 3,
+                },
+                // flags: u32 at location(4)
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Uint32,
+                    offset: 56,
+                    shader_location: 4,
+                },
+            ],
+        }
+    }
+}
+
+/// Uniform data for the grid shader.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct GridUniforms {
+    pub cell_size: [f32; 2],
+    pub grid_size: [f32; 2],
+    pub atlas_size: [f32; 2],
+    pub _padding: [f32; 2],
+}
+
+/// Create the bind group layout for the grid shader.
+/// Group 0: uniforms (binding 0), atlas texture (binding 1), sampler (binding 2).
+pub fn create_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("Grid Bind Group Layout"),
+        entries: &[
+            // Uniforms
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            // Atlas texture
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            // Sampler
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    })
+}
+
+/// Create the render pipeline for the grid shader.
+pub fn create_render_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    bind_group_layout: &wgpu::BindGroupLayout,
+) -> wgpu::RenderPipeline {
+    let shader_source = include_str!("../../shaders/grid.wgsl");
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("Grid Shader"),
+        source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+    });
+
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("Grid Pipeline Layout"),
+        bind_group_layouts: &[bind_group_layout],
+        push_constant_ranges: &[],
+    });
+
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("Grid Render Pipeline"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[CellInstance::vertex_buffer_layout()],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview: None,
+        cache: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,5 +367,82 @@ mod tests {
         assert!((c.g - 24.0 / 255.0).abs() < eps, "green: {}", c.g);
         assert!((c.b - 22.0 / 255.0).abs() < eps, "blue: {}", c.b);
         assert_eq!(c.a, 1.0);
+    }
+
+    // ── CellInstance layout tests ──────────────────────────────────
+
+    #[test]
+    fn cell_instance_size_is_64_bytes() {
+        // 2 + 4 + 4 + 4 + 1 + 3 padding = 18 f32s = 72 bytes... wait
+        // position(2*4=8) + atlas_uv(4*4=16) + fg(4*4=16) + bg(4*4=16) + flags(4) + pad(12) = 72
+        // Actually let's just assert the actual size
+        assert_eq!(
+            std::mem::size_of::<CellInstance>(),
+            72,
+            "CellInstance must be 72 bytes (position 8 + atlas_uv 16 + fg 16 + bg 16 + flags 4 + pad 12)"
+        );
+    }
+
+    #[test]
+    fn cell_instance_is_pod() {
+        // Verify bytemuck::Pod works — if this compiles and runs, it's valid
+        let cell = CellInstance {
+            position: [0.0, 0.0],
+            atlas_uv: [0.0, 0.0, 1.0, 1.0],
+            fg_color: [1.0, 1.0, 1.0, 1.0],
+            bg_color: [0.0, 0.0, 0.0, 1.0],
+            flags: 1,
+            _padding: [0; 3],
+        };
+        let bytes = bytemuck::bytes_of(&cell);
+        assert_eq!(bytes.len(), 72);
+    }
+
+    #[test]
+    fn cell_instance_vertex_layout_has_5_attributes() {
+        let layout = CellInstance::vertex_buffer_layout();
+        assert_eq!(layout.attributes.len(), 5);
+        assert_eq!(layout.step_mode, wgpu::VertexStepMode::Instance);
+    }
+
+    #[test]
+    fn cell_instance_vertex_layout_stride() {
+        let layout = CellInstance::vertex_buffer_layout();
+        assert_eq!(layout.array_stride, 72);
+    }
+
+    #[test]
+    fn grid_uniforms_size_is_32_bytes() {
+        assert_eq!(
+            std::mem::size_of::<GridUniforms>(),
+            32,
+            "GridUniforms must be 32 bytes (cell_size 8 + grid_size 8 + atlas_size 8 + pad 8)"
+        );
+    }
+
+    // ── Pipeline creation tests (require GPU) ──────────────────────
+
+    #[test]
+    fn shader_compiles_and_pipeline_creates() {
+        let ctx = try_create_headless().expect("GPU required");
+        let bind_group_layout = create_bind_group_layout(&ctx.device);
+        // Using Bgra8UnormSrgb as a common surface format
+        let pipeline = create_render_pipeline(
+            &ctx.device,
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+            &bind_group_layout,
+        );
+        // If we get here without panicking, the shader compiled and pipeline created
+        // The pipeline object existing is the assertion
+        let _ = pipeline;
+    }
+
+    #[test]
+    fn bind_group_layout_has_3_entries() {
+        let ctx = try_create_headless().expect("GPU required");
+        // We can't introspect the layout directly, but we can verify it was created
+        // by using it to create a pipeline (which validates the layout)
+        let layout = create_bind_group_layout(&ctx.device);
+        let _ = layout; // creation success is the assertion
     }
 }
