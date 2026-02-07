@@ -1,0 +1,15 @@
+Phase 3, Tasks 3-4: Write tests for atlas GPU upload + Implement texture upload
+
+Summary: Added GPU texture upload, sampler, and bind group creation functions.
+Atlas R8 data is uploaded to an R8Unorm texture via queue.write_texture. Sampler
+uses linear filtering with ClampToEdge addressing. Bind group wires together
+uniforms buffer (binding 0), atlas texture view (binding 1), and sampler (binding 2).
+
+Files modified:
+- src/renderer/gpu.rs (create_atlas_texture, create_atlas_sampler, create_grid_bind_group, 4 new tests)
+
+Key decisions:
+- R8Unorm texture format (single channel, shader reads from .r)
+- Linear mag/min filtering for smooth glyph edges
+- ClampToEdge addressing to prevent atlas edge bleeding
+- Bind group matches grid.wgsl layout: uniforms + texture + sampler
