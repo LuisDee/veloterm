@@ -115,6 +115,42 @@ impl Terminal {
     pub fn snap_to_bottom(&mut self) {
         self.term.scroll_display(Scroll::Bottom);
     }
+
+    /// Resize the terminal grid to new dimensions. Triggers content reflow.
+    pub fn resize(&mut self, cols: usize, rows: usize) {
+        let size = TermSize {
+            columns: cols,
+            screen_lines: rows,
+        };
+        self.term.resize(size);
+    }
+}
+
+/// Coalesces rapid resize events, keeping only the latest pending size.
+#[derive(Default)]
+pub struct ResizeDebouncer {
+    pending: Option<(usize, usize)>,
+}
+
+impl ResizeDebouncer {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record a resize request. Overwrites any previous pending request.
+    pub fn request(&mut self, cols: usize, rows: usize) {
+        self.pending = Some((cols, rows));
+    }
+
+    /// Get the pending resize, if any.
+    pub fn pending(&self) -> Option<(usize, usize)> {
+        self.pending
+    }
+
+    /// Clear the pending resize after it has been applied.
+    pub fn clear(&mut self) {
+        self.pending = None;
+    }
 }
 
 #[cfg(test)]
@@ -272,5 +308,55 @@ mod tests {
         feed_overflow_lines(&mut term, 10);
         term.scroll_up(99999);
         assert!(term.display_offset() <= term.history_size());
+    }
+
+    // ── Terminal resize ────────────────────────────────────────────────
+
+    #[test]
+    fn resize_changes_columns() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        term.resize(120, 40);
+        assert_eq!(term.columns(), 120);
+    }
+
+    #[test]
+    fn resize_changes_rows() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        term.resize(120, 40);
+        assert_eq!(term.rows(), 40);
+    }
+
+    #[test]
+    fn resize_preserves_content() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        term.feed(b"Hello");
+        term.resize(120, 40);
+        // Content should still be present after resize
+        assert_eq!(term.cell_char(0, 0), 'H');
+        assert_eq!(term.cell_char(0, 4), 'o');
+    }
+
+    // ── Resize debouncer ───────────────────────────────────────────────
+
+    #[test]
+    fn debouncer_no_pending_initially() {
+        let d = ResizeDebouncer::new();
+        assert_eq!(d.pending(), None);
+    }
+
+    #[test]
+    fn debouncer_stores_latest_request() {
+        let mut d = ResizeDebouncer::new();
+        d.request(80, 24);
+        d.request(120, 40);
+        assert_eq!(d.pending(), Some((120, 40)));
+    }
+
+    #[test]
+    fn debouncer_clear_removes_pending() {
+        let mut d = ResizeDebouncer::new();
+        d.request(80, 24);
+        d.clear();
+        assert_eq!(d.pending(), None);
     }
 }
