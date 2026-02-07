@@ -37,13 +37,13 @@
 
 ## Phase 2: GPU Pipeline Setup
 
-- [ ] Task: Write tests for wgpu device and surface initialization
+- [x] Task: Write tests for wgpu device and surface initialization <!-- 2d31114 -->
   - Write tests for GPU adapter selection (prefer high-performance)
   - Write tests for surface configuration (format, present mode)
   - Write tests for device limits and features
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement wgpu device, surface, and render pipeline
+- [x] Task: Implement wgpu device, surface, and render pipeline <!-- 2d31114 -->
   - Create `src/renderer/gpu.rs` with GPU state management
   - Request adapter with power preference high-performance
   - Create device and queue
