@@ -1,5 +1,6 @@
 // Window creation and event loop management for VeloTerm.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
@@ -10,6 +11,9 @@ use winit::window::{Window, WindowAttributes, WindowId};
 
 use crate::config::theme::Theme;
 use crate::config::types::Config;
+use crate::input::{match_pane_command, PaneCommand};
+use crate::pane::{PaneId, PaneTree, SplitDirection};
+use crate::renderer::PaneRenderDescriptor;
 
 /// Default window width in logical pixels.
 pub const DEFAULT_WIDTH: f64 = 1280.0;
@@ -63,14 +67,20 @@ pub fn scaled_font_size(base_size: f32, scale_factor: f64) -> f32 {
     base_size * scale_factor as f32
 }
 
+/// Per-pane state: the terminal emulator and PTY session for a single pane.
+pub struct PaneState {
+    pub terminal: crate::terminal::Terminal,
+    pub pty: crate::pty::PtySession,
+}
+
 /// Main application state implementing the winit event loop handler.
 pub struct App {
     config: WindowConfig,
-    app_config: Config,
+    pub(crate) app_config: Config,
     window: Option<Arc<Window>>,
     renderer: Option<crate::renderer::Renderer>,
-    pty: Option<crate::pty::PtySession>,
-    terminal: Option<crate::terminal::Terminal>,
+    pane_tree: PaneTree,
+    pane_states: HashMap<PaneId, PaneState>,
     modifiers: ModifiersState,
 }
 
@@ -81,9 +91,142 @@ impl App {
             app_config,
             window: None,
             renderer: None,
-            pty: None,
-            terminal: None,
+            pane_tree: PaneTree::new(),
+            pane_states: HashMap::new(),
             modifiers: ModifiersState::empty(),
+        }
+    }
+
+    /// Get the pane tree (for testing).
+    pub fn pane_tree(&self) -> &PaneTree {
+        &self.pane_tree
+    }
+
+    /// Get the pane states map (for testing).
+    pub fn pane_states(&self) -> &HashMap<PaneId, PaneState> {
+        &self.pane_states
+    }
+
+    /// Spawn a PTY + Terminal for a new pane, using the given grid dimensions.
+    fn spawn_pane(&mut self, pane_id: PaneId, cols: u16, rows: u16) {
+        let scrollback = self.app_config.scrollback.lines as usize;
+        let shell = crate::pty::default_shell();
+        match crate::pty::PtySession::new(&shell, cols, rows) {
+            Ok(pty) => {
+                log::info!(
+                    "PTY spawned for pane {:?}: {shell} ({cols}x{rows})",
+                    pane_id
+                );
+                let terminal = crate::terminal::Terminal::new(
+                    cols as usize,
+                    rows as usize,
+                    scrollback,
+                );
+                self.pane_states.insert(pane_id, PaneState { terminal, pty });
+            }
+            Err(e) => {
+                log::error!("Failed to spawn PTY for pane {:?}: {e}", pane_id);
+            }
+        }
+    }
+
+    /// Handle a pane command (split, close, focus, zoom).
+    fn handle_pane_command(
+        &mut self,
+        command: PaneCommand,
+        event_loop: &ActiveEventLoop,
+    ) {
+        let (width, height) = self
+            .window
+            .as_ref()
+            .map(|w| {
+                let s = w.inner_size();
+                (s.width, s.height)
+            })
+            .unwrap_or((1280, 720));
+
+        match command {
+            PaneCommand::SplitVertical | PaneCommand::SplitHorizontal => {
+                let direction = match command {
+                    PaneCommand::SplitVertical => SplitDirection::Vertical,
+                    _ => SplitDirection::Horizontal,
+                };
+                if let Some(new_id) = self.pane_tree.split_focused(direction) {
+                    // Compute grid dims for the new pane from its layout rect
+                    let layout = self
+                        .pane_tree
+                        .calculate_layout(width as f32, height as f32);
+                    if let Some((_, rect)) = layout.iter().find(|(id, _)| *id == new_id) {
+                        let (cols, rows) = self.grid_dims_for_rect(rect);
+                        self.spawn_pane(new_id, cols, rows);
+                    }
+                    // Resize existing panes since the layout changed
+                    self.resize_all_panes(width, height);
+                    // Force full damage on all panes
+                    if let Some(renderer) = &mut self.renderer {
+                        renderer.pane_damage_mut().force_full_damage_all();
+                    }
+                }
+            }
+            PaneCommand::ClosePane => {
+                let closing_id = self.pane_tree.focused_pane_id();
+                match self.pane_tree.close_focused() {
+                    Some(_) => {
+                        // Remove state for closed pane
+                        self.pane_states.remove(&closing_id);
+                        if let Some(renderer) = &mut self.renderer {
+                            renderer.remove_pane_damage(closing_id);
+                            renderer.pane_damage_mut().force_full_damage_all();
+                        }
+                        // Resize remaining panes
+                        self.resize_all_panes(width, height);
+                    }
+                    None => {
+                        // Last pane — exit application
+                        log::info!("Last pane closed, exiting");
+                        event_loop.exit();
+                    }
+                }
+            }
+            PaneCommand::FocusDirection(direction) => {
+                self.pane_tree
+                    .focus_direction(direction, width as f32, height as f32);
+            }
+            PaneCommand::ZoomToggle => {
+                self.pane_tree.zoom_toggle();
+                // Resize all panes since visible panes changed
+                self.resize_all_panes(width, height);
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.pane_damage_mut().force_full_damage_all();
+                }
+            }
+        }
+    }
+
+    /// Compute grid columns and rows for a pane rect.
+    fn grid_dims_for_rect(&self, rect: &crate::pane::Rect) -> (u16, u16) {
+        if let Some(renderer) = &self.renderer {
+            let cw = renderer.cell_width();
+            let ch = renderer.cell_height();
+            let cols = (rect.width / cw).floor().max(1.0) as u16;
+            let rows = (rect.height / ch).floor().max(1.0) as u16;
+            (cols, rows)
+        } else {
+            (80, 24)
+        }
+    }
+
+    /// Resize all pane terminals and PTYs to match their current layout rects.
+    fn resize_all_panes(&mut self, width: u32, height: u32) {
+        let layout = self
+            .pane_tree
+            .calculate_layout(width as f32, height as f32);
+        for (pane_id, rect) in &layout {
+            let (cols, rows) = self.grid_dims_for_rect(rect);
+            if let Some(state) = self.pane_states.get_mut(pane_id) {
+                state.terminal.resize(cols as usize, rows as usize);
+                let _ = state.pty.resize(cols, rows);
+            }
         }
     }
 
@@ -134,28 +277,13 @@ impl ApplicationHandler for App {
                     Ok(renderer) => {
                         log::info!("Renderer initialized");
 
-                        // Spawn PTY and terminal with grid dimensions
-                        let cols = renderer.grid().columns as u16;
-                        let rows = renderer.grid().rows as u16;
-                        let scrollback = self.app_config.scrollback.lines as usize;
-                        let shell = crate::pty::default_shell();
-                        match crate::pty::PtySession::new(&shell, cols, rows) {
-                            Ok(pty) => {
-                                log::info!("PTY spawned: {shell} ({cols}x{rows})");
-                                let terminal = crate::terminal::Terminal::new(
-                                    cols as usize,
-                                    rows as usize,
-                                    scrollback,
-                                );
-                                self.pty = Some(pty);
-                                self.terminal = Some(terminal);
-                            }
-                            Err(e) => {
-                                log::error!("Failed to spawn PTY: {e}");
-                            }
-                        }
-
                         self.renderer = Some(renderer);
+
+                        // Spawn PTY and terminal for the initial pane
+                        let initial_pane_id = self.pane_tree.focused_pane_id();
+                        let cols = self.renderer.as_ref().unwrap().grid().columns as u16;
+                        let rows = self.renderer.as_ref().unwrap().grid().rows as u16;
+                        self.spawn_pane(initial_pane_id, cols, rows);
                     }
                     Err(e) => {
                         log::error!("Failed to initialize renderer: {e}");
@@ -189,14 +317,26 @@ impl ApplicationHandler for App {
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed {
+                    // Check for pane commands first
+                    if let Some(cmd) =
+                        match_pane_command(&event.logical_key, self.modifiers)
+                    {
+                        self.handle_pane_command(cmd, event_loop);
+                        return;
+                    }
+
+                    // Route normal keys to focused pane's PTY
                     let bytes = crate::input::translate_key(
                         &event.logical_key,
                         event.text.as_ref().map(|s| s.as_ref()),
                         event.state,
                         self.modifiers,
                     );
-                    if let (Some(bytes), Some(pty)) = (bytes, self.pty.as_mut()) {
-                        if let Err(e) = pty.write(&bytes) {
+                    let focused = self.pane_tree.focused_pane_id();
+                    if let (Some(bytes), Some(state)) =
+                        (bytes, self.pane_states.get_mut(&focused))
+                    {
+                        if let Err(e) = state.pty.write(&bytes) {
                             log::warn!("PTY write error: {e}");
                         }
                     }
@@ -206,48 +346,58 @@ impl ApplicationHandler for App {
                 log::debug!("Window resized to {}x{}", size.width, size.height);
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize(size.width, size.height);
-
-                    // Update PTY and terminal dimensions
-                    let cols = renderer.grid().columns as u16;
-                    let rows = renderer.grid().rows as u16;
-                    if let Some(pty) = &self.pty {
-                        let _ = pty.resize(cols, rows);
-                    }
-                    if let Some(terminal) = &mut self.terminal {
-                        terminal.resize(cols as usize, rows as usize);
-                    }
+                    renderer.pane_damage_mut().force_full_damage_all();
                 }
+                // Resize all pane terminals and PTYs
+                self.resize_all_panes(size.width, size.height);
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 log::debug!("Scale factor changed to {scale_factor:.2}");
             }
             WindowEvent::RedrawRequested => {
-                // Drain PTY output into terminal
-                if let (Some(pty), Some(terminal)) = (&self.pty, &mut self.terminal) {
-                    while let Ok(bytes) = pty.reader_rx.try_recv() {
-                        terminal.feed(&bytes);
+                let (width, height) = self
+                    .window
+                    .as_ref()
+                    .map(|w| {
+                        let s = w.inner_size();
+                        (s.width, s.height)
+                    })
+                    .unwrap_or((1280, 720));
+
+                // Drain PTY output into terminals for all panes
+                for state in self.pane_states.values_mut() {
+                    while let Ok(bytes) = state.pty.reader_rx.try_recv() {
+                        state.terminal.feed(&bytes);
                     }
                 }
 
-                // Update renderer with live terminal cells
-                if let (Some(renderer), Some(terminal)) = (&mut self.renderer, &self.terminal) {
-                    let cells = crate::terminal::grid_bridge::extract_grid_cells(terminal);
-                    renderer.update_cells(&cells);
+                // Build render descriptors for visible panes
+                let layout = self
+                    .pane_tree
+                    .calculate_layout(width as f32, height as f32);
+                let visible = self.pane_tree.visible_panes();
+
+                let mut pane_descs: Vec<PaneRenderDescriptor> = Vec::new();
+                for (pane_id, rect) in &layout {
+                    if !visible.contains(pane_id) {
+                        continue;
+                    }
+                    if let Some(state) = self.pane_states.get(&pane_id) {
+                        let cells =
+                            crate::terminal::grid_bridge::extract_grid_cells(&state.terminal);
+                        pane_descs.push(PaneRenderDescriptor {
+                            pane_id: *pane_id,
+                            rect: *rect,
+                            cells,
+                        });
+                    }
                 }
 
-                if let Some(renderer) = &self.renderer {
-                    match renderer.render_frame() {
+                if let Some(renderer) = &mut self.renderer {
+                    match renderer.render_panes(&mut pane_descs) {
                         Ok(()) => {}
                         Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                            // Reconfigure surface
-                            if let Some(r) = &mut self.renderer {
-                                let size = self
-                                    .window
-                                    .as_ref()
-                                    .map(|w| w.inner_size())
-                                    .unwrap_or_default();
-                                r.resize(size.width, size.height);
-                            }
+                            renderer.resize(width, height);
                         }
                         Err(wgpu::SurfaceError::OutOfMemory) => {
                             log::error!("GPU out of memory");
@@ -499,5 +649,103 @@ blink = false
         assert_eq!(app.app_config.scrollback.lines, 2000);
         assert_eq!(app.app_config.cursor.style, "beam");
         assert!(!app.app_config.cursor.blink);
+    }
+
+    // ── PaneTree integration ──────────────────────────────────────
+
+    #[test]
+    fn app_creates_single_pane_tree_on_startup() {
+        let app = App::new(WindowConfig::default(), Config::default());
+        assert_eq!(app.pane_tree.pane_count(), 1);
+    }
+
+    #[test]
+    fn app_pane_states_empty_before_resumed() {
+        let app = App::new(WindowConfig::default(), Config::default());
+        // Before window creation, no PTY states are spawned
+        assert!(app.pane_states.is_empty());
+    }
+
+    #[test]
+    fn app_pane_tree_focused_pane_is_initial() {
+        let app = App::new(WindowConfig::default(), Config::default());
+        let ids = app.pane_tree.pane_ids();
+        assert_eq!(app.pane_tree.focused_pane_id(), ids[0]);
+    }
+
+    #[test]
+    fn app_spawn_pane_adds_state() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        let pane_id = app.pane_tree.focused_pane_id();
+        app.spawn_pane(pane_id, 80, 24);
+        assert!(app.pane_states.contains_key(&pane_id));
+    }
+
+    #[test]
+    fn app_spawn_pane_terminal_has_correct_dims() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        let pane_id = app.pane_tree.focused_pane_id();
+        app.spawn_pane(pane_id, 120, 40);
+        let state = app.pane_states.get(&pane_id).unwrap();
+        assert_eq!(state.terminal.columns(), 120);
+        assert_eq!(state.terminal.rows(), 40);
+    }
+
+    #[test]
+    fn app_pane_count_matches_tree_leaf_count() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        let pane_id = app.pane_tree.focused_pane_id();
+        app.spawn_pane(pane_id, 80, 24);
+        assert_eq!(app.pane_tree.pane_count(), app.pane_states.len());
+    }
+
+    #[test]
+    fn app_multiple_panes_have_independent_terminals() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        let first_id = app.pane_tree.focused_pane_id();
+        app.spawn_pane(first_id, 80, 24);
+
+        let second_id = app
+            .pane_tree
+            .split_focused(SplitDirection::Vertical)
+            .unwrap();
+        app.spawn_pane(second_id, 60, 20);
+
+        // Each pane has its own terminal
+        let s1 = app.pane_states.get(&first_id).unwrap();
+        let s2 = app.pane_states.get(&second_id).unwrap();
+        assert_eq!(s1.terminal.columns(), 80);
+        assert_eq!(s2.terminal.columns(), 60);
+    }
+
+    #[test]
+    fn app_close_pane_removes_state() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        let first_id = app.pane_tree.focused_pane_id();
+        app.spawn_pane(first_id, 80, 24);
+
+        let second_id = app
+            .pane_tree
+            .split_focused(SplitDirection::Vertical)
+            .unwrap();
+        app.spawn_pane(second_id, 80, 24);
+
+        // Close focused pane (second_id)
+        let closing_id = app.pane_tree.focused_pane_id();
+        app.pane_tree.close_focused();
+        app.pane_states.remove(&closing_id);
+
+        assert_eq!(app.pane_tree.pane_count(), 1);
+        assert_eq!(app.pane_states.len(), 1);
+        assert!(!app.pane_states.contains_key(&closing_id));
+    }
+
+    #[test]
+    fn app_grid_dims_for_rect_default_without_renderer() {
+        let app = App::new(WindowConfig::default(), Config::default());
+        let rect = crate::pane::Rect::new(0.0, 0.0, 640.0, 480.0);
+        let (cols, rows) = app.grid_dims_for_rect(&rect);
+        // Without renderer, falls back to 80x24
+        assert_eq!((cols, rows), (80, 24));
     }
 }

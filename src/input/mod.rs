@@ -7,6 +7,57 @@ use std::collections::HashMap;
 use winit::event::ElementState;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
+use crate::pane::{FocusDirection, SplitDirection};
+
+/// A pane management command triggered by a keybinding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaneCommand {
+    SplitVertical,
+    SplitHorizontal,
+    ClosePane,
+    FocusDirection(FocusDirection),
+    ZoomToggle,
+}
+
+/// Check if a key event matches a pane command keybinding.
+///
+/// Hardcoded defaults (Ctrl+Shift prefix):
+/// - Ctrl+Shift+D: split vertical
+/// - Ctrl+Shift+E: split horizontal
+/// - Ctrl+Shift+W: close pane
+/// - Ctrl+Shift+Arrow: focus direction
+/// - Ctrl+Shift+Z: zoom toggle
+pub fn match_pane_command(
+    logical_key: &Key,
+    modifiers: ModifiersState,
+) -> Option<PaneCommand> {
+    let ctrl_shift = modifiers.control_key() && modifiers.shift_key();
+    if !ctrl_shift {
+        return None;
+    }
+
+    match logical_key {
+        Key::Character(s) => {
+            let lower = s.to_lowercase();
+            match lower.as_str() {
+                "d" => Some(PaneCommand::SplitVertical),
+                "e" => Some(PaneCommand::SplitHorizontal),
+                "w" => Some(PaneCommand::ClosePane),
+                "z" => Some(PaneCommand::ZoomToggle),
+                _ => None,
+            }
+        }
+        Key::Named(named) => match named {
+            NamedKey::ArrowLeft => Some(PaneCommand::FocusDirection(FocusDirection::Left)),
+            NamedKey::ArrowRight => Some(PaneCommand::FocusDirection(FocusDirection::Right)),
+            NamedKey::ArrowUp => Some(PaneCommand::FocusDirection(FocusDirection::Up)),
+            NamedKey::ArrowDown => Some(PaneCommand::FocusDirection(FocusDirection::Down)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Translate a winit key event into terminal byte sequences to send to the PTY.
 ///
 /// Returns `None` if the key event should not produce any output (e.g. modifier-only
@@ -408,5 +459,89 @@ mod tests {
             lookup_binding("ctrl+shift+v", &bindings),
             Some("paste".to_string())
         );
+    }
+
+    // ── Pane command matching ──────────────────────────────────────
+
+    fn ctrl_shift() -> ModifiersState {
+        ModifiersState::CONTROL | ModifiersState::SHIFT
+    }
+
+    #[test]
+    fn pane_cmd_split_vertical() {
+        let result = match_pane_command(&Key::Character("D".into()), ctrl_shift());
+        assert_eq!(result, Some(PaneCommand::SplitVertical));
+    }
+
+    #[test]
+    fn pane_cmd_split_horizontal() {
+        let result = match_pane_command(&Key::Character("E".into()), ctrl_shift());
+        assert_eq!(result, Some(PaneCommand::SplitHorizontal));
+    }
+
+    #[test]
+    fn pane_cmd_close_pane() {
+        let result = match_pane_command(&Key::Character("W".into()), ctrl_shift());
+        assert_eq!(result, Some(PaneCommand::ClosePane));
+    }
+
+    #[test]
+    fn pane_cmd_zoom_toggle() {
+        let result = match_pane_command(&Key::Character("Z".into()), ctrl_shift());
+        assert_eq!(result, Some(PaneCommand::ZoomToggle));
+    }
+
+    #[test]
+    fn pane_cmd_focus_left() {
+        let result = match_pane_command(&Key::Named(NamedKey::ArrowLeft), ctrl_shift());
+        assert_eq!(
+            result,
+            Some(PaneCommand::FocusDirection(FocusDirection::Left))
+        );
+    }
+
+    #[test]
+    fn pane_cmd_focus_right() {
+        let result = match_pane_command(&Key::Named(NamedKey::ArrowRight), ctrl_shift());
+        assert_eq!(
+            result,
+            Some(PaneCommand::FocusDirection(FocusDirection::Right))
+        );
+    }
+
+    #[test]
+    fn pane_cmd_focus_up() {
+        let result = match_pane_command(&Key::Named(NamedKey::ArrowUp), ctrl_shift());
+        assert_eq!(
+            result,
+            Some(PaneCommand::FocusDirection(FocusDirection::Up))
+        );
+    }
+
+    #[test]
+    fn pane_cmd_focus_down() {
+        let result = match_pane_command(&Key::Named(NamedKey::ArrowDown), ctrl_shift());
+        assert_eq!(
+            result,
+            Some(PaneCommand::FocusDirection(FocusDirection::Down))
+        );
+    }
+
+    #[test]
+    fn pane_cmd_normal_key_no_match() {
+        let result = match_pane_command(&Key::Character("a".into()), no_mods());
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn pane_cmd_ctrl_only_no_match() {
+        let result = match_pane_command(&Key::Character("d".into()), ModifiersState::CONTROL);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn pane_cmd_unbound_key_with_ctrl_shift_no_match() {
+        let result = match_pane_command(&Key::Character("x".into()), ctrl_shift());
+        assert_eq!(result, None);
     }
 }
