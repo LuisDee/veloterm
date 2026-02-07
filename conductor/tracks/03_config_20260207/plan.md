@@ -72,7 +72,7 @@
 
 ## Phase 4: Integration — Wire Config into Renderer and Input
 
-- [ ] Task: Write tests for config integration with renderer and input
+- [x] Task: Write tests for config integration with renderer and input <!-- 47f877b -->
   - Write tests for renderer using theme from config instead of hardcoded `claude_dark()`
   - Write tests for cursor style and blink from config being applied
   - Write tests for scrollback size from config being passed to terminal
@@ -80,7 +80,7 @@
   - Write tests for font size from config affecting cell dimensions
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement config integration with renderer and input
+- [x] Task: Implement config integration with renderer and input <!-- 47f877b -->
   - Update `main.rs` to load `Config` at startup and pass it through the application
   - Update `WindowConfig` to derive values from `Config`
   - Update renderer initialization to use `Config.colors.theme` for theme selection
