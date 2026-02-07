@@ -1,3 +1,33 @@
+use crate::renderer::grid_renderer::GridCell;
+
+/// Compare two grid cell buffers row-by-row and return per-row dirty flags.
+///
+/// Returns a `Vec<bool>` with one entry per row. A row is dirty if any cell
+/// in that row differs between `prev` and `curr`. If the slices have different
+/// lengths, all rows of the larger grid are marked dirty (full damage).
+pub fn diff_grid_rows(prev: &[GridCell], curr: &[GridCell], cols: usize) -> Vec<bool> {
+    if cols == 0 {
+        return Vec::new();
+    }
+
+    let prev_rows = prev.len() / cols;
+    let curr_rows = curr.len() / cols;
+
+    // Different grid sizes → full damage on the larger grid
+    if prev.len() != curr.len() {
+        let max_rows = prev_rows.max(curr_rows);
+        return vec![true; max_rows];
+    }
+
+    (0..curr_rows)
+        .map(|row| {
+            let start = row * cols;
+            let end = start + cols;
+            prev[start..end] != curr[start..end]
+        })
+        .collect()
+}
+
 /// Tracks per-row dirty state for the terminal grid.
 ///
 /// Enables selective GPU buffer updates by identifying which rows changed
@@ -196,5 +226,53 @@ mod tests {
         a.flags = 0;
         b.flags = crate::renderer::grid_renderer::CELL_FLAG_UNDERLINE;
         assert_ne!(a, b);
+    }
+
+    // ── Grid diff tests ─────────────────────────────────────────────
+
+    fn make_grid(cols: usize, rows: usize, ch: char) -> Vec<GridCell> {
+        vec![GridCell::new(ch, white(), black()); cols * rows]
+    }
+
+    #[test]
+    fn diff_identical_grids_no_dirty_rows() {
+        let grid = make_grid(4, 3, 'A');
+        let result = diff_grid_rows(&grid, &grid, 4);
+        assert_eq!(result, vec![false, false, false]);
+    }
+
+    #[test]
+    fn diff_single_cell_change_marks_only_that_row() {
+        let prev = make_grid(4, 3, 'A');
+        let mut curr = prev.clone();
+        curr[5] = GridCell::new('B', white(), black()); // row 1, col 1
+        let result = diff_grid_rows(&prev, &curr, 4);
+        assert_eq!(result, vec![false, true, false]);
+    }
+
+    #[test]
+    fn diff_changes_in_multiple_rows() {
+        let prev = make_grid(4, 3, 'A');
+        let mut curr = prev.clone();
+        curr[0] = GridCell::new('X', white(), black()); // row 0
+        curr[9] = GridCell::new('Y', white(), black()); // row 2
+        let result = diff_grid_rows(&prev, &curr, 4);
+        assert_eq!(result, vec![true, false, true]);
+    }
+
+    #[test]
+    fn diff_empty_grids_no_dirty_rows() {
+        let result = diff_grid_rows(&[], &[], 0);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn diff_different_sizes_all_dirty() {
+        let small = make_grid(4, 2, 'A');
+        let large = make_grid(4, 3, 'A');
+        let result = diff_grid_rows(&small, &large, 4);
+        // When sizes differ, all rows of the larger grid should be dirty
+        assert!(result.iter().all(|&d| d));
+        assert_eq!(result.len(), 3);
     }
 }
