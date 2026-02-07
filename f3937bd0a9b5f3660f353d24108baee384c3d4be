@@ -1,0 +1,15 @@
+Phase 4, Tasks 3-4: Write tests for cell instance buffer + Implement instance generation
+
+Summary: Added GridCell struct and generate_instances() function that converts
+a grid of cells into CellInstance data for the GPU vertex buffer. Each cell's
+character is looked up in the glyph atlas to get UV coordinates, and the
+has_glyph flag is set when a non-space character with a valid atlas entry exists.
+
+Files modified:
+- src/renderer/grid_renderer.rs (GridCell, generate_instances, 8 new tests)
+
+Key decisions:
+- Space characters and missing glyphs get zero UV rect and no has_glyph flag
+- Out-of-bounds cells default to empty with black background
+- Position is [col, row] matching the shader's grid coordinate system
+- Colors passed through as [r, g, b, a] float arrays
