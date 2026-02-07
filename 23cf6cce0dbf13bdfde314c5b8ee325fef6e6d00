@@ -1,0 +1,18 @@
+Task: Write tests for PTY creation and shell spawning + Implement PTY management module
+Phase: 1 - PTY Spawning and Raw I/O
+
+Summary:
+Created the PTY management module (src/pty/mod.rs) with TDD workflow.
+Red phase: 7 tests written covering shell detection, PTY creation, read/write, and resize.
+Green phase: Implemented PtySession with portable-pty and crossbeam-channel.
+
+Files created/modified:
+- src/pty/mod.rs (NEW): PtySession struct, default_shell(), PtyError enum, 7 tests
+- src/lib.rs: Added `pub mod pty`
+- Cargo.toml: Added portable-pty 0.9, crossbeam-channel 0.5
+
+Key design decisions:
+- Dedicated reader thread with 64KB buffer for PTY output
+- Main thread writes directly to PTY (no writer thread for single-pane MVP)
+- crossbeam-channel unbounded for PTY output delivery
+- $SHELL with /bin/sh fallback for shell detection
