@@ -1,6 +1,6 @@
 # Plan: Configuration & Theming
 
-## Phase 1: Config Struct and TOML Parsing
+## Phase 1: Config Struct and TOML Parsing [checkpoint: a9a4326]
 
 - [x] Task: Write tests for config struct and TOML parsing <!-- a194c04 -->
   - Write tests for `Config::default()` producing valid defaults (font size 14.0, theme "claude_dark", cursor block+blink, scrollback 10000, fps 60)
@@ -23,7 +23,7 @@
   - Implement validation: font size > 0, theme name in allowed set, scrollback > 0
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Conductor - User Manual Verification 'Config Struct and TOML Parsing' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Config Struct and TOML Parsing' (Protocol in workflow.md) <!-- a9a4326 -->
 
 ## Phase 2: Config Diffing and Default Generation
 
