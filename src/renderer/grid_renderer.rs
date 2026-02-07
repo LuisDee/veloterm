@@ -80,6 +80,16 @@ impl GridDimensions {
         }
     }
 
+    /// Calculate grid dimensions from a pane rect (in physical pixels) and cell size.
+    pub fn from_pane_rect(rect: &crate::pane::Rect, cell_width: f32, cell_height: f32) -> Self {
+        Self::new(
+            rect.width as u32,
+            rect.height as u32,
+            cell_width,
+            cell_height,
+        )
+    }
+
     /// Recalculate grid dimensions for a new window size, keeping the same cell size.
     pub fn resize(&mut self, window_width: u32, window_height: u32) {
         self.window_width = window_width;
@@ -696,5 +706,57 @@ mod tests {
                 row
             );
         }
+    }
+
+    // ── Pane grid dimension tests ──────────────────────────────────────
+
+    #[test]
+    fn pane_grid_dimensions_from_pane_rect() {
+        let rect = crate::pane::Rect::new(0.0, 0.0, 640.0, 360.0);
+        let grid = GridDimensions::from_pane_rect(&rect, 10.0, 20.0);
+        assert_eq!(grid.columns, 64); // 640 / 10
+        assert_eq!(grid.rows, 18); // 360 / 20
+    }
+
+    #[test]
+    fn per_pane_instances_have_correct_positions() {
+        let atlas = test_atlas();
+        let rect = crate::pane::Rect::new(100.0, 200.0, 30.0, 40.0);
+        let grid = GridDimensions::from_pane_rect(&rect, 10.0, 20.0);
+        assert_eq!(grid.columns, 3);
+        assert_eq!(grid.rows, 2);
+        let cells: Vec<GridCell> = (0..grid.total_cells())
+            .map(|_| GridCell::empty(test_bg()))
+            .collect();
+        let instances = generate_instances(&grid, &cells, &atlas);
+        // Positions are in grid-local coordinates (0-based col/row)
+        assert_eq!(instances[0].position, [0.0, 0.0]);
+        assert_eq!(instances[1].position, [1.0, 0.0]);
+        assert_eq!(instances[2].position, [2.0, 0.0]);
+        assert_eq!(instances[3].position, [0.0, 1.0]);
+    }
+
+    #[test]
+    fn two_panes_produce_separate_instance_vecs() {
+        let atlas = test_atlas();
+        let rect_a = crate::pane::Rect::new(0.0, 0.0, 30.0, 20.0);
+        let rect_b = crate::pane::Rect::new(30.0, 0.0, 20.0, 20.0);
+        let grid_a = GridDimensions::from_pane_rect(&rect_a, 10.0, 20.0);
+        let grid_b = GridDimensions::from_pane_rect(&rect_b, 10.0, 20.0);
+
+        let cells_a: Vec<GridCell> = (0..grid_a.total_cells())
+            .map(|_| GridCell::new('A', test_fg(), test_bg()))
+            .collect();
+        let cells_b: Vec<GridCell> = (0..grid_b.total_cells())
+            .map(|_| GridCell::new('B', test_fg(), test_bg()))
+            .collect();
+
+        let inst_a = generate_instances(&grid_a, &cells_a, &atlas);
+        let inst_b = generate_instances(&grid_b, &cells_b, &atlas);
+
+        assert_eq!(inst_a.len(), 3); // 3 cols x 1 row
+        assert_eq!(inst_b.len(), 2); // 2 cols x 1 row
+                                     // They should be independent
+        assert_ne!(inst_a.len(), inst_b.len());
     }
 }

@@ -91,7 +91,7 @@ impl DamageTracker {
 /// and diffing against the current frame.
 pub struct DamageState {
     prev_cells: Option<Vec<GridCell>>,
-    cols: usize,
+    pub(crate) cols: usize,
     force_full: bool,
 }
 
@@ -138,6 +138,47 @@ impl DamageState {
     pub fn resize(&mut self, cols: usize) {
         self.cols = cols;
         self.prev_cells = None;
+    }
+}
+
+/// Manages per-pane damage states for multi-pane rendering.
+///
+/// Each pane gets its own independent DamageState, identified by PaneId.
+/// Panes can be added/removed dynamically as splits/closes occur.
+pub struct PaneDamageMap {
+    states: std::collections::HashMap<crate::pane::PaneId, DamageState>,
+}
+
+impl PaneDamageMap {
+    /// Create a new empty PaneDamageMap.
+    pub fn new() -> Self {
+        Self {
+            states: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Get or create the DamageState for a pane. New panes start with full damage.
+    pub fn get_or_create(&mut self, pane_id: crate::pane::PaneId, cols: usize) -> &mut DamageState {
+        self.states
+            .entry(pane_id)
+            .or_insert_with(|| DamageState::new(cols))
+    }
+
+    /// Remove the DamageState for a closed pane.
+    pub fn remove(&mut self, pane_id: crate::pane::PaneId) {
+        self.states.remove(&pane_id);
+    }
+
+    /// Force full damage on all panes (e.g., after window resize).
+    pub fn force_full_damage_all(&mut self) {
+        for state in self.states.values_mut() {
+            state.force_full_damage();
+        }
+    }
+
+    /// Number of tracked panes.
+    pub fn pane_count(&self) -> usize {
+        self.states.len()
     }
 }
 
@@ -209,10 +250,12 @@ impl FrameMetrics {
         if n == 0 {
             return (Duration::ZERO, Duration::ZERO, Duration::ZERO);
         }
-        let avg = |times: &[Duration]| {
-            times.iter().sum::<Duration>() / n as u32
-        };
-        (avg(&self.diff_times), avg(&self.update_times), avg(&self.total_times))
+        let avg = |times: &[Duration]| times.iter().sum::<Duration>() / n as u32;
+        (
+            avg(&self.diff_times),
+            avg(&self.update_times),
+            avg(&self.total_times),
+        )
     }
 }
 
@@ -445,7 +488,7 @@ mod tests {
         let mut cells_b = cells_a.clone();
         cells_b[0] = GridCell::new('B', white(), black());
         let _ = state.process_frame(&cells_b); // second frame: row 0 dirty
-        // Third frame same as cells_b → no dirty
+                                               // Third frame same as cells_b → no dirty
         let dirty = state.process_frame(&cells_b);
         assert_eq!(dirty, vec![false, false, false]);
     }
@@ -470,7 +513,10 @@ mod tests {
         state.force_full_damage();
         let dirty = state.process_frame(&cells); // same cells but forced
         assert_eq!(dirty.len(), 3);
-        assert!(dirty.iter().all(|&d| d), "forced full damage should be all dirty");
+        assert!(
+            dirty.iter().all(|&d| d),
+            "forced full damage should be all dirty"
+        );
     }
 
     // ── Full-damage event trigger tests ──────────────────────────────
@@ -486,7 +532,10 @@ mod tests {
         let new_cells = make_grid(6, 2, 'A');
         let dirty = state.process_frame(&new_cells);
         assert_eq!(dirty.len(), 2);
-        assert!(dirty.iter().all(|&d| d), "resize should trigger full damage");
+        assert!(
+            dirty.iter().all(|&d| d),
+            "resize should trigger full damage"
+        );
     }
 
     #[test]
@@ -497,7 +546,10 @@ mod tests {
         // Simulate theme change: same grid but force full repaint
         state.force_full_damage();
         let dirty = state.process_frame(&cells);
-        assert!(dirty.iter().all(|&d| d), "theme change should trigger full damage");
+        assert!(
+            dirty.iter().all(|&d| d),
+            "theme change should trigger full damage"
+        );
     }
 
     #[test]
@@ -511,7 +563,10 @@ mod tests {
         let new_cells = make_grid(5, 4, 'A');
         let dirty = state.process_frame(&new_cells);
         assert_eq!(dirty.len(), 4);
-        assert!(dirty.iter().all(|&d| d), "font size change should trigger full damage");
+        assert!(
+            dirty.iter().all(|&d| d),
+            "font size change should trigger full damage"
+        );
     }
 
     #[test]
@@ -523,7 +578,10 @@ mod tests {
         state.force_full_damage();
         let cells_b = make_grid(4, 3, 'B');
         let dirty = state.process_frame(&cells_b);
-        assert!(dirty.iter().all(|&d| d), "scroll should trigger full damage");
+        assert!(
+            dirty.iter().all(|&d| d),
+            "scroll should trigger full damage"
+        );
     }
 
     #[test]
@@ -533,9 +591,12 @@ mod tests {
         let _ = state.process_frame(&cells);
         state.force_full_damage();
         let _ = state.process_frame(&cells); // consumes the force flag
-        // Next frame with same data should be clean
+                                             // Next frame with same data should be clean
         let dirty = state.process_frame(&cells);
-        assert!(dirty.iter().all(|&d| !d), "force flag should reset after one frame");
+        assert!(
+            dirty.iter().all(|&d| !d),
+            "force flag should reset after one frame"
+        );
     }
 
     // ── FrameMetrics tests ───────────────────────────────────────────
@@ -604,5 +665,97 @@ mod tests {
         assert_eq!(avg_diff, Duration::ZERO);
         assert_eq!(avg_update, Duration::ZERO);
         assert_eq!(avg_total, Duration::ZERO);
+    }
+
+    // ── PaneDamageMap tests ─────────────────────────────────────────
+
+    use crate::pane::PaneId;
+
+    #[test]
+    fn pane_damage_each_pane_has_independent_state() {
+        let mut map = PaneDamageMap::new();
+        let id_a = PaneId(100);
+        let id_b = PaneId(200);
+
+        let cells_a = make_grid(4, 3, 'A');
+        let cells_b = make_grid(4, 3, 'B');
+
+        // First frame for both: all dirty
+        let dirty_a = map.get_or_create(id_a, 4).process_frame(&cells_a);
+        let dirty_b = map.get_or_create(id_b, 4).process_frame(&cells_b);
+        assert!(dirty_a.iter().all(|&d| d));
+        assert!(dirty_b.iter().all(|&d| d));
+
+        // Second frame: same data → no dirty
+        let dirty_a = map.get_or_create(id_a, 4).process_frame(&cells_a);
+        let dirty_b = map.get_or_create(id_b, 4).process_frame(&cells_b);
+        assert!(dirty_a.iter().all(|&d| !d));
+        assert!(dirty_b.iter().all(|&d| !d));
+    }
+
+    #[test]
+    fn pane_damage_change_in_pane_a_does_not_mark_pane_b_dirty() {
+        let mut map = PaneDamageMap::new();
+        let id_a = PaneId(100);
+        let id_b = PaneId(200);
+
+        let cells = make_grid(4, 3, 'A');
+        let _ = map.get_or_create(id_a, 4).process_frame(&cells);
+        let _ = map.get_or_create(id_b, 4).process_frame(&cells);
+
+        // Change pane A only
+        let mut changed = cells.clone();
+        changed[0] = GridCell::new('X', white(), black());
+        let dirty_a = map.get_or_create(id_a, 4).process_frame(&changed);
+        let dirty_b = map.get_or_create(id_b, 4).process_frame(&cells);
+
+        assert!(dirty_a[0]); // Pane A row 0 is dirty
+        assert!(dirty_b.iter().all(|&d| !d)); // Pane B is clean
+    }
+
+    #[test]
+    fn pane_damage_force_full_damage_all() {
+        let mut map = PaneDamageMap::new();
+        let id_a = PaneId(100);
+        let id_b = PaneId(200);
+
+        let cells = make_grid(4, 3, 'A');
+        let _ = map.get_or_create(id_a, 4).process_frame(&cells);
+        let _ = map.get_or_create(id_b, 4).process_frame(&cells);
+
+        // Force all dirty (simulates resize)
+        map.force_full_damage_all();
+
+        let dirty_a = map.get_or_create(id_a, 4).process_frame(&cells);
+        let dirty_b = map.get_or_create(id_b, 4).process_frame(&cells);
+        assert!(dirty_a.iter().all(|&d| d));
+        assert!(dirty_b.iter().all(|&d| d));
+    }
+
+    #[test]
+    fn pane_damage_new_pane_starts_with_full_damage() {
+        let mut map = PaneDamageMap::new();
+        let id = PaneId(100);
+        let cells = make_grid(4, 3, 'A');
+
+        // First frame for a new pane is always fully dirty
+        let dirty = map.get_or_create(id, 4).process_frame(&cells);
+        assert!(dirty.iter().all(|&d| d));
+    }
+
+    #[test]
+    fn pane_damage_remove_cleans_up() {
+        let mut map = PaneDamageMap::new();
+        let id = PaneId(100);
+        let cells = make_grid(4, 3, 'A');
+        let _ = map.get_or_create(id, 4).process_frame(&cells);
+        assert_eq!(map.pane_count(), 1);
+
+        map.remove(id);
+        assert_eq!(map.pane_count(), 0);
+
+        // Re-adding should start fresh (full damage)
+        let dirty = map.get_or_create(id, 4).process_frame(&cells);
+        assert!(dirty.iter().all(|&d| d));
     }
 }

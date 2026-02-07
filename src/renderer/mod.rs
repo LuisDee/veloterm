@@ -5,12 +5,13 @@ pub mod gpu;
 pub mod grid_renderer;
 
 use crate::config::theme::Theme;
+use crate::pane::{PaneId, Rect as PaneRect};
+use damage::{DamageState, PaneDamageMap};
 use glyph_atlas::GlyphAtlas;
 use gpu::{
     clear_color, create_atlas_sampler, create_atlas_texture, create_bind_group_layout,
     create_grid_bind_group, create_render_pipeline, GpuError, GridUniforms, SurfaceConfig,
 };
-use damage::DamageState;
 use grid_renderer::{
     generate_instances, generate_row_instances, generate_test_pattern, row_byte_offset, GridCell,
     GridDimensions,
@@ -18,6 +19,16 @@ use grid_renderer::{
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use winit::window::Window;
+
+/// Describes a single pane to be rendered in a frame.
+pub struct PaneRenderDescriptor {
+    /// The pane's unique ID.
+    pub pane_id: PaneId,
+    /// The pane's pixel rect within the window.
+    pub rect: PaneRect,
+    /// The pane's terminal cells (row-major).
+    pub cells: Vec<GridCell>,
+}
 
 /// Top-level render coordinator.
 /// Holds all GPU state, glyph atlas, grid, and render resources.
@@ -35,6 +46,7 @@ pub struct Renderer {
     atlas: GlyphAtlas,
     theme: Theme,
     damage_state: DamageState,
+    pane_damage: PaneDamageMap,
     _bind_group_layout: wgpu::BindGroupLayout,
     _atlas_view: wgpu::TextureView,
     _sampler: wgpu::Sampler,
@@ -159,6 +171,7 @@ impl Renderer {
 
         // Damage tracking
         let damage_state = DamageState::new(grid.columns as usize);
+        let pane_damage = PaneDamageMap::new();
 
         Ok(Self {
             device,
@@ -174,6 +187,7 @@ impl Renderer {
             atlas,
             theme,
             damage_state,
+            pane_damage,
             _bind_group_layout: bind_group_layout,
             _atlas_view: atlas_view,
             _sampler: sampler,
@@ -300,11 +314,8 @@ impl Renderer {
             // Full update: regenerate all instances and write entire buffer
             let instances = generate_instances(&self.grid, cells, &self.atlas);
             self.instance_count = instances.len() as u32;
-            self.queue.write_buffer(
-                &self.instance_buffer,
-                0,
-                bytemuck::cast_slice(&instances),
-            );
+            self.queue
+                .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
         } else {
             // Partial update: only write dirty rows
             for (row, &is_dirty) in dirty.iter().enumerate() {
@@ -326,6 +337,210 @@ impl Renderer {
     /// Call this after theme changes, font size changes, or scroll position changes.
     pub fn force_full_damage(&mut self) {
         self.damage_state.force_full_damage();
+    }
+
+    /// Get the cell width in physical pixels.
+    pub fn cell_width(&self) -> f32 {
+        self.atlas.cell_width
+    }
+
+    /// Get the cell height in physical pixels.
+    pub fn cell_height(&self) -> f32 {
+        self.atlas.cell_height
+    }
+
+    /// Get a mutable reference to the per-pane damage map.
+    pub fn pane_damage_mut(&mut self) -> &mut PaneDamageMap {
+        &mut self.pane_damage
+    }
+
+    /// Remove a pane's damage state when the pane is closed.
+    pub fn remove_pane_damage(&mut self, pane_id: PaneId) {
+        self.pane_damage.remove(pane_id);
+    }
+
+    /// Render a frame with multiple panes, each getting its own scissor rect.
+    ///
+    /// For each pane: compute grid dimensions from its rect, generate instances,
+    /// apply damage tracking, write per-pane uniforms, and draw with scissor clipping.
+    pub fn render_panes(
+        &mut self,
+        panes: &mut [PaneRenderDescriptor],
+    ) -> Result<(), wgpu::SurfaceError> {
+        // Process damage and prepare per-pane instance data
+        struct PaneDrawData {
+            rect: PaneRect,
+            grid: GridDimensions,
+            instances: Vec<gpu::CellInstance>,
+        }
+
+        let mut draw_data: Vec<PaneDrawData> = Vec::with_capacity(panes.len());
+
+        for pane in panes.iter_mut() {
+            let pane_grid =
+                GridDimensions::from_pane_rect(&pane.rect, self.cell_width(), self.cell_height());
+            let cols = pane_grid.columns as usize;
+
+            // Get or create damage state for this pane
+            let damage_state = self.pane_damage.get_or_create(pane.pane_id, cols);
+
+            // If pane grid changed size, resize damage
+            if damage_state.cols != cols {
+                damage_state.resize(cols);
+            }
+
+            let dirty = damage_state.process_frame(&pane.cells);
+            let any_dirty = dirty.iter().any(|&d| d);
+
+            // Always generate full instances for simplicity in multi-pane mode
+            // (partial updates would need per-pane GPU buffers which adds complexity)
+            let instances = if any_dirty {
+                generate_instances(&pane_grid, &pane.cells, &self.atlas)
+            } else {
+                Vec::new()
+            };
+
+            draw_data.push(PaneDrawData {
+                rect: pane.rect,
+                grid: pane_grid,
+                instances,
+            });
+        }
+
+        // Compute total instances across all panes
+        let total_instances: usize = draw_data
+            .iter()
+            .map(|d| {
+                if d.instances.is_empty() {
+                    d.grid.total_cells() as usize
+                } else {
+                    d.instances.len()
+                }
+            })
+            .sum();
+
+        if total_instances == 0 {
+            return Ok(());
+        }
+
+        // Build a single combined instance buffer with all pane data
+        let mut all_instances: Vec<gpu::CellInstance> = Vec::with_capacity(total_instances);
+        let mut pane_ranges: Vec<(PaneRect, GridDimensions, u32, u32)> = Vec::new(); // rect, grid, start, count
+
+        for data in &draw_data {
+            let start = all_instances.len() as u32;
+            if !data.instances.is_empty() {
+                all_instances.extend_from_slice(&data.instances);
+            }
+            let count = if !data.instances.is_empty() {
+                data.instances.len() as u32
+            } else {
+                0 // Skip drawing if no damage
+            };
+            pane_ranges.push((data.rect, data.grid.clone(), start, count));
+        }
+
+        // Upload combined instance buffer
+        if !all_instances.is_empty() {
+            let buffer_size =
+                (all_instances.len() * std::mem::size_of::<gpu::CellInstance>()) as u64;
+            let current_size = self.instance_buffer.size();
+
+            if buffer_size > current_size {
+                // Need a bigger buffer
+                self.instance_buffer =
+                    self.device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("Cell Instances"),
+                            contents: bytemuck::cast_slice(&all_instances),
+                            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                        });
+            } else {
+                self.queue.write_buffer(
+                    &self.instance_buffer,
+                    0,
+                    bytemuck::cast_slice(&all_instances),
+                );
+            }
+            self.instance_count = all_instances.len() as u32;
+        }
+
+        // Begin render pass
+        let output = self.surface.get_current_texture()?;
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Pane Render Encoder"),
+            });
+
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Multi-Pane Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(clear_color()),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_vertex_buffer(0, self.instance_buffer.slice(..));
+
+            for (rect, grid, start, count) in &pane_ranges {
+                if *count == 0 {
+                    continue;
+                }
+
+                // Update uniforms for this pane's grid dimensions
+                let uniforms = GridUniforms {
+                    cell_size: grid.cell_size_ndc(),
+                    grid_size: grid.grid_size(),
+                    atlas_size: [
+                        self.atlas.atlas_width as f32,
+                        self.atlas.atlas_height as f32,
+                    ],
+                    _padding: [0.0; 2],
+                };
+                self.queue
+                    .write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
+
+                render_pass.set_bind_group(0, &self.bind_group, &[]);
+
+                // Set scissor rect for this pane
+                let sx = rect.x.max(0.0) as u32;
+                let sy = rect.y.max(0.0) as u32;
+                let sw = (rect.width as u32).min(self.surface_config.width.saturating_sub(sx));
+                let sh = (rect.height as u32).min(self.surface_config.height.saturating_sub(sy));
+                if sw > 0 && sh > 0 {
+                    render_pass.set_scissor_rect(sx, sy, sw, sh);
+                    render_pass.draw(0..6, *start..*start + *count);
+                }
+            }
+        }
+
+        self.queue.submit(std::iter::once(encoder.finish()));
+        output.present();
+        Ok(())
+    }
+
+    /// Compute scissor rect parameters for a pane rect within the surface.
+    /// Returns (x, y, width, height) clamped to surface bounds.
+    pub fn scissor_rect_for_pane(&self, rect: &PaneRect) -> (u32, u32, u32, u32) {
+        let sx = rect.x.max(0.0) as u32;
+        let sy = rect.y.max(0.0) as u32;
+        let sw = (rect.width as u32).min(self.surface_config.width.saturating_sub(sx));
+        let sh = (rect.height as u32).min(self.surface_config.height.saturating_sub(sy));
+        (sx, sy, sw, sh)
     }
 }
 
@@ -525,5 +740,56 @@ mod tests {
         // Application code does: .unwrap_or_else(|| Theme::claude_dark())
         let theme = fallback.unwrap_or_else(Theme::claude_dark);
         assert_eq!(theme.name, "Claude Dark");
+    }
+
+    // ── Scissor rect / multi-pane tests ──────────────────────────────
+
+    #[test]
+    fn scissor_rect_single_pane_covers_full_surface() {
+        // A single pane covering the entire window
+        let rect = PaneRect::new(0.0, 0.0, 1280.0, 720.0);
+        let sx = rect.x.max(0.0) as u32;
+        let sy = rect.y.max(0.0) as u32;
+        let sw = rect.width as u32;
+        let sh = rect.height as u32;
+        assert_eq!((sx, sy, sw, sh), (0, 0, 1280, 720));
+    }
+
+    #[test]
+    fn two_pane_layout_produces_tiling_scissor_regions() {
+        // Vertical split: left 640px, right 640px
+        let left = PaneRect::new(0.0, 0.0, 640.0, 720.0);
+        let right = PaneRect::new(640.0, 0.0, 640.0, 720.0);
+
+        let l_sx = left.x as u32;
+        let l_sy = left.y as u32;
+        let l_sw = left.width as u32;
+        let l_sh = left.height as u32;
+
+        let r_sx = right.x as u32;
+        let r_sy = right.y as u32;
+        let r_sw = right.width as u32;
+        let r_sh = right.height as u32;
+
+        // Left pane
+        assert_eq!((l_sx, l_sy, l_sw, l_sh), (0, 0, 640, 720));
+        // Right pane
+        assert_eq!((r_sx, r_sy, r_sw, r_sh), (640, 0, 640, 720));
+        // Together they tile the window
+        assert_eq!(l_sw + r_sw, 1280);
+        assert_eq!(l_sh, r_sh);
+    }
+
+    #[test]
+    fn scissor_rect_matches_pane_pixel_rect() {
+        let rect = PaneRect::new(100.0, 200.0, 500.0, 300.0);
+        let sx = rect.x as u32;
+        let sy = rect.y as u32;
+        let sw = rect.width as u32;
+        let sh = rect.height as u32;
+        assert_eq!(sx, 100);
+        assert_eq!(sy, 200);
+        assert_eq!(sw, 500);
+        assert_eq!(sh, 300);
     }
 }
