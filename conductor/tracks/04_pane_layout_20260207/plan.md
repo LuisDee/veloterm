@@ -1,6 +1,6 @@
 # Plan: Pane Layout Engine
 
-## Phase 1: PaneTree Data Structure & Layout Calculation
+## Phase 1: PaneTree Data Structure & Layout Calculation [checkpoint: 96b1b92]
 
 - [x] Task 1: Implement PaneId, SplitDirection, Rect, and PaneNode types <!-- 12fda83 -->
   - [x] Write tests: PaneId uniqueness from generator, SplitDirection variants, Rect construction and contains_point, PaneNode leaf creation, PaneNode split creation
@@ -16,7 +16,7 @@
 
 - [x] Task: Conductor - User Manual Verification 'Phase 1: PaneTree Data Structure & Layout Calculation' (Protocol in workflow.md)
 
-## Phase 2: Focus Navigation & Zoom
+## Phase 2: Focus Navigation & Zoom [checkpoint: 96b1b92]
 
 - [x] Task 1: Implement directional focus navigation <!-- 12fda83 -->
   - [x] Write tests: focus right from left pane moves to right pane, focus left from right pane moves to left pane, focus down from top pane moves to bottom pane, focus up from bottom pane moves to top pane, focus in direction with no neighbor stays on current pane, focus navigation in 3-pane layout picks spatially nearest pane
@@ -30,19 +30,19 @@
 
 ## Phase 3: Pane-Aware Rendering
 
-- [ ] Task 1: Add per-pane grid dimensions and instance data generation
-  - [ ] Write tests: pane grid dimensions computed from pane rect and cell size, per-pane instances have correct positions within pane bounds, two panes produce separate instance vecs with correct counts
-  - [ ] Implement helpers to compute GridDimensions from a pane Rect, and generate instances scoped to a pane's grid
+- [x] Task 1: Add per-pane grid dimensions and instance data generation <!-- a3eaa03 -->
+  - [x] Write tests: pane grid dimensions computed from pane rect and cell size, per-pane instances have correct positions within pane bounds, two panes produce separate instance vecs with correct counts
+  - [x] Implement helpers to compute GridDimensions from a pane Rect, and generate instances scoped to a pane's grid
 
-- [ ] Task 2: Implement multi-pane render loop with scissor rects
-  - [ ] Write tests: scissor rect matches pane pixel rect, single pane scissor covers full surface, two-pane layout produces two scissor regions that tile the window
-  - [ ] Modify Renderer to accept a list of pane render descriptors (rect, cells) and render each with appropriate scissor rect and per-pane uniforms
+- [x] Task 2: Implement multi-pane render loop with scissor rects <!-- a3eaa03 -->
+  - [x] Write tests: scissor rect matches pane pixel rect, single pane scissor covers full surface, two-pane layout produces two scissor regions that tile the window
+  - [x] Modify Renderer to accept a list of pane render descriptors (rect, cells) and render each with appropriate scissor rect and per-pane uniforms
 
-- [ ] Task 3: Add per-pane DamageState tracking
-  - [ ] Write tests: each pane has independent damage state, change in pane A does not mark pane B dirty, resize triggers full damage on all panes, new pane starts with full damage
-  - [ ] Give each pane its own DamageState, wire into the render loop
+- [x] Task 3: Add per-pane DamageState tracking <!-- a3eaa03 -->
+  - [x] Write tests: each pane has independent damage state, change in pane A does not mark pane B dirty, resize triggers full damage on all panes, new pane starts with full damage
+  - [x] Give each pane its own DamageState, wire into the render loop
 
-- [ ] Task: Conductor - User Manual Verification 'Phase 3: Pane-Aware Rendering' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 3: Pane-Aware Rendering' (Protocol in workflow.md)
 
 ## Phase 4: Integration — Wire PaneTree into App Event Loop
 
