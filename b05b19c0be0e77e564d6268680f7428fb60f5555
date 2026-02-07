@@ -1,0 +1,24 @@
+Phase 5 Checkpoint Verification: Cursor Rendering
+
+Scope: git diff --name-only 7b9e49b..b05b19c
+  - conductor/tracks/core_terminal_emulation_20260207/plan.md
+  - src/renderer/cursor.rs (NEW)
+  - src/renderer/gpu.rs (PartialEq derive added to CellInstance)
+  - src/renderer/mod.rs (cursor submodule added)
+
+Quality Gates:
+  - 227 tests pass (cargo test --lib)
+  - clippy: clean (cargo clippy --lib)
+  - fmt: clean (cargo fmt --check)
+
+Verification:
+  1. CursorStyle enum: Block, Beam, Underline
+  2. CursorState manages position, style, focus, blink timer
+  3. Flag encoding: bit 1=is_cursor, bits 2-3=shape (block/beam/underline/hollow)
+  4. Blink interval: 500ms toggle via Instant-based timer
+  5. Unfocused window shows hollow block cursor regardless of configured style
+  6. Refocusing restores original cursor style
+  7. to_cell_instance() generates CellInstance with cursor colors and flags
+  8. Returns None when cursor not visible or blink-off
+  9. Default impl added for CursorState (clippy clean)
+  10. 25 new tests covering all cursor rendering paths
