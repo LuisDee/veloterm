@@ -120,17 +120,19 @@ pub fn apply_dim(color: Color) -> Color {
     Color::new(color.r * 0.66, color.g * 0.66, color.b * 0.66, color.a)
 }
 
-/// Extract GridCell data from a Terminal for the entire visible grid.
+/// Extract GridCell data from a Terminal for the current viewport.
+/// When scrolled up, reads from scrollback history; at bottom, reads the active screen.
 pub fn extract_grid_cells(terminal: &super::Terminal) -> Vec<GridCell> {
     let term = terminal.inner();
     let grid = term.grid();
     let cols = grid.columns();
     let rows = grid.screen_lines();
+    let offset = grid.display_offset() as i32;
     let mut cells = Vec::with_capacity(cols * rows);
 
     for row in 0..rows {
         for col in 0..cols {
-            let point = Point::new(Line(row as i32), Column(col));
+            let point = Point::new(Line(row as i32 - offset), Column(col));
             let cell = &grid[point];
             let ch = cell.c;
             let cell_flags = cell.flags;
@@ -448,5 +450,35 @@ mod tests {
         term.feed(b"X");
         let cells = extract_grid_cells(&term);
         assert_eq!(cells[0].flags & CELL_FLAG_STRIKETHROUGH, 0);
+    }
+
+    // ── Viewport-aware extraction ────────────────────────────────────
+
+    #[test]
+    fn extract_viewport_shows_scrollback_content() {
+        let mut term = Terminal::new(10, 3, 10_000);
+        // Feed 6 lines: "L0" through "L5" with newlines
+        for i in 0..6 {
+            term.feed(format!("L{}\r\n", i).as_bytes());
+        }
+        // Final state: screen=[L4, L5, ""], history=[L0, L1, L2, L3]
+        // Scroll up 2: viewport row 0 → Line(-2)=L2, row 1 → Line(-1)=L3, row 2 → Line(0)=L4
+        term.scroll_up(2);
+        let cells = extract_grid_cells(&term);
+        // First row should show "L2"
+        assert_eq!(cells[0].ch, 'L');
+        assert_eq!(cells[1].ch, '2');
+    }
+
+    #[test]
+    fn extract_viewport_at_bottom_shows_latest() {
+        let mut term = Terminal::new(10, 3, 10_000);
+        for i in 0..6 {
+            term.feed(format!("L{}\r\n", i).as_bytes());
+        }
+        // Not scrolled: screen shows [L4, L5, ""]
+        let cells = extract_grid_cells(&term);
+        assert_eq!(cells[0].ch, 'L');
+        assert_eq!(cells[1].ch, '4');
     }
 }

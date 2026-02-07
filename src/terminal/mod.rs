@@ -3,7 +3,7 @@
 pub mod grid_bridge;
 
 use alacritty_terminal::event::VoidListener;
-use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line, Point};
 use alacritty_terminal::term::Config;
 use alacritty_terminal::vte::ansi;
@@ -79,6 +79,41 @@ impl Terminal {
         let content = self.term.renderable_content();
         let cursor = content.cursor;
         (cursor.point.line.0 as usize, cursor.point.column.0)
+    }
+
+    /// Get the current display offset (0 = bottom, increases when scrolled up).
+    pub fn display_offset(&self) -> usize {
+        self.term.grid().display_offset()
+    }
+
+    /// Get the number of lines in scrollback history.
+    pub fn history_size(&self) -> usize {
+        self.term.grid().history_size()
+    }
+
+    /// Scroll up (toward history) by the given number of lines.
+    pub fn scroll_up(&mut self, lines: i32) {
+        self.term.scroll_display(Scroll::Delta(lines));
+    }
+
+    /// Scroll down (toward bottom) by the given number of lines.
+    pub fn scroll_down(&mut self, lines: i32) {
+        self.term.scroll_display(Scroll::Delta(-lines));
+    }
+
+    /// Scroll up by one page (screen height).
+    pub fn scroll_page_up(&mut self) {
+        self.term.scroll_display(Scroll::PageUp);
+    }
+
+    /// Scroll down by one page (screen height).
+    pub fn scroll_page_down(&mut self) {
+        self.term.scroll_display(Scroll::PageDown);
+    }
+
+    /// Snap the viewport to the bottom (most recent output).
+    pub fn snap_to_bottom(&mut self) {
+        self.term.scroll_display(Scroll::Bottom);
     }
 }
 
@@ -156,5 +191,86 @@ mod tests {
         let mut term = Terminal::new(80, 24, 10_000);
         term.feed(b"Hello\r\n");
         assert_eq!(term.cursor_position(), (1, 0));
+    }
+
+    // ── Scrollback and viewport ────────────────────────────────────────
+
+    /// Helper: feed numbered lines to overflow the screen into scrollback.
+    fn feed_overflow_lines(term: &mut Terminal, total_lines: usize) {
+        for i in 0..total_lines {
+            term.feed(format!("line{}\r\n", i).as_bytes());
+        }
+    }
+
+    #[test]
+    fn display_offset_starts_at_zero() {
+        let term = Terminal::new(80, 24, 10_000);
+        assert_eq!(term.display_offset(), 0);
+    }
+
+    #[test]
+    fn history_size_starts_at_zero() {
+        let term = Terminal::new(80, 24, 10_000);
+        assert_eq!(term.history_size(), 0);
+    }
+
+    #[test]
+    fn scrollback_accumulates_lines() {
+        let mut term = Terminal::new(80, 5, 10_000);
+        feed_overflow_lines(&mut term, 10);
+        assert!(term.history_size() > 0);
+    }
+
+    #[test]
+    fn scroll_up_increases_display_offset() {
+        let mut term = Terminal::new(80, 5, 10_000);
+        feed_overflow_lines(&mut term, 10);
+        term.scroll_up(1);
+        assert_eq!(term.display_offset(), 1);
+    }
+
+    #[test]
+    fn scroll_down_decreases_display_offset() {
+        let mut term = Terminal::new(80, 5, 10_000);
+        feed_overflow_lines(&mut term, 10);
+        term.scroll_up(3);
+        term.scroll_down(1);
+        assert_eq!(term.display_offset(), 2);
+    }
+
+    #[test]
+    fn scroll_page_up_scrolls_by_page() {
+        let mut term = Terminal::new(80, 5, 10_000);
+        feed_overflow_lines(&mut term, 20);
+        term.scroll_page_up();
+        assert!(term.display_offset() > 0);
+    }
+
+    #[test]
+    fn scroll_page_down_reduces_offset() {
+        let mut term = Terminal::new(80, 5, 10_000);
+        feed_overflow_lines(&mut term, 20);
+        term.scroll_page_up();
+        let offset_after_up = term.display_offset();
+        term.scroll_page_down();
+        assert!(term.display_offset() < offset_after_up);
+    }
+
+    #[test]
+    fn snap_to_bottom_resets_offset() {
+        let mut term = Terminal::new(80, 5, 10_000);
+        feed_overflow_lines(&mut term, 10);
+        term.scroll_up(3);
+        assert!(term.display_offset() > 0);
+        term.snap_to_bottom();
+        assert_eq!(term.display_offset(), 0);
+    }
+
+    #[test]
+    fn scroll_up_clamped_to_history() {
+        let mut term = Terminal::new(80, 5, 10_000);
+        feed_overflow_lines(&mut term, 10);
+        term.scroll_up(99999);
+        assert!(term.display_offset() <= term.history_size());
     }
 }
