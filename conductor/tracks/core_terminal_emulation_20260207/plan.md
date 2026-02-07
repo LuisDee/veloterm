@@ -59,7 +59,7 @@
 
 - [x] Task: Conductor - User Manual Verification 'Grid Bridge — Terminal State to GPU Renderer' (Protocol in workflow.md) <!-- 79a38ce -->
 
-## Phase 4: Keyboard Input Pipeline
+## Phase 4: Keyboard Input Pipeline [checkpoint: 7b9e49b]
 
 - [x] Task: Write tests for keyboard input translation <!-- 4b91c0b -->
   - Write tests for printable character encoding (ASCII and UTF-8)
@@ -77,7 +77,7 @@
   - Integrate with the event loop in `main.rs`
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Conductor - User Manual Verification 'Keyboard Input Pipeline' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Keyboard Input Pipeline' (Protocol in workflow.md) <!-- 7b9e49b -->
 
 ## Phase 5: Cursor Rendering
 
