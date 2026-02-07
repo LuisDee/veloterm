@@ -163,12 +163,12 @@
   - Handle window resize: reconfigure surface, recalculate grid, re-render
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Write tests for clean shutdown
+- [x] Task: Write tests for clean shutdown <!-- d2c0322 -->
   - Write tests for proper resource cleanup (GPU device, surface, buffers)
   - Write tests for window close event handling
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement clean shutdown and final integration
+- [x] Task: Implement clean shutdown and final integration <!-- d2c0322 -->
   - Handle window close event → exit event loop cleanly
   - Drop GPU resources in correct order
   - Add env_logger initialization for debug output
