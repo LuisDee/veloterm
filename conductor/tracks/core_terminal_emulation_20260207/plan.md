@@ -187,7 +187,7 @@
 
 - [x] Task: Conductor - User Manual Verification 'Clipboard Integration' (Protocol in workflow.md) <!-- 272b1e8 -->
 
-## Phase 10: Window Resize, Shell Exit, and Integration Polish [checkpoint: aa946a9]
+## Phase 10: Window Resize, Shell Exit, and Integration Polish [checkpoint: 640ac00]
 
 - [x] Task: Write tests for resize and shell exit handling <!-- 40706b1 -->
   - Write tests for window resize → PTY size update via `TIOCSWINSZ`
@@ -205,4 +205,4 @@
   - Ensure UTF-8 multi-byte and wide character (CJK) rendering correctness
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Conductor - User Manual Verification 'Window Resize, Shell Exit, and Integration Polish' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Window Resize, Shell Exit, and Integration Polish' (Protocol in workflow.md) <!-- 640ac00 -->

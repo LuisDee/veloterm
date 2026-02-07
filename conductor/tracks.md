@@ -10,5 +10,5 @@ _Link: [./conductor/tracks/window_gpu_pipeline_20260207/](./conductor/tracks/win
 
 ---
 
-## [ ] Track: Core Terminal Emulation
+## [x] Track: Core Terminal Emulation
 *Link: [./conductor/tracks/core_terminal_emulation_20260207/](./conductor/tracks/core_terminal_emulation_20260207/)*
