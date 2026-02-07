@@ -52,13 +52,13 @@
   - Clear screen to Claude Dark background color (`#1A1816`)
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Write tests for render pipeline creation
+- [x] Task: Write tests for render pipeline creation <!-- d474a3e -->
   - Write tests for shader compilation (grid.wgsl)
   - Write tests for pipeline layout (bind groups, vertex buffers)
   - Write tests for vertex buffer layout matching CellInstance struct
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement render pipeline and shaders
+- [x] Task: Implement render pipeline and shaders <!-- d474a3e -->
   - Create `shaders/grid.wgsl` with vertex and fragment shaders
   - Vertex shader: expand vertex index to quad corners, apply cell position and size
   - Fragment shader: sample glyph atlas texture, blend fg/bg colors based on glyph alpha
