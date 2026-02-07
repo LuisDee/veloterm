@@ -1,0 +1,24 @@
+Phase 5 Checkpoint Verification — Render Orchestration and Polish
+
+Quality Gates:
+- cargo test: 128 passed, 0 failed
+- cargo clippy -- -D warnings: clean
+- cargo fmt --check: clean
+
+Manual Verification:
+- Window opens with correct title "VeloTerm" at 1280x720
+- GPU adapter selected (Apple M3 Pro, Metal backend)
+- Glyph atlas: 512x512, cell: 7.8x21.0
+- Test pattern renders correctly:
+  - "VeloTerm v0.1.0" header in accent orange
+  - Full ASCII printable range (all 95 glyphs readable)
+  - "claude@anthropic ~ $" prompt with correct colors
+  - Alternating #.#. checkerboard pattern
+- Window resize recalculates grid and re-renders
+- Clean shutdown on window close (no panics, resources dropped)
+
+Key fixes in this phase:
+- Glyph coverage: color.a() instead of color.r() (cosmic-text alpha channel)
+- Slot boundary clamping prevents glyph bleed
+- Nearest filtering sampler for pixel-perfect atlas sampling
+- Atlas minimum 512x512 for UV precision at 1x scale
