@@ -1,0 +1,22 @@
+Phase 6 Checkpoint Verification: ANSI Color and SGR Attribute Support
+
+Scope: git diff --name-only b05b19c..161b1b8
+  - conductor/tracks/core_terminal_emulation_20260207/plan.md
+  - src/terminal/grid_bridge.rs (SGR attribute handling)
+  - src/renderer/grid_renderer.rs (GridCell flags, flag propagation)
+
+Quality Gates:
+  - 242 tests pass (cargo test --lib)
+  - clippy: clean (cargo clippy --lib)
+  - fmt: clean (cargo fmt --check)
+
+Verification:
+  1. Bold + named color (0-7) → bright variant (8-15) via bold_brighten_named()
+  2. Already-bright and special colors unchanged when bold
+  3. Dim/faint → 33% RGB reduction via apply_dim(), alpha preserved
+  4. Inverse → fg/bg swapped in extract_grid_cells()
+  5. Underline flag propagated: cell.flags UNDERLINE → CELL_FLAG_UNDERLINE (bit 4)
+  6. Strikethrough flag propagated: cell.flags STRIKEOUT → CELL_FLAG_STRIKETHROUGH (bit 5)
+  7. GridCell.flags merged into CellInstance.flags in generate_instances()
+  8. 16 named ANSI colors and 256-color palette unchanged (from Phase 3)
+  9. 15 new tests covering all SGR attribute paths
