@@ -1,9 +1,10 @@
 // Grid bridge: converts alacritty_terminal grid state to renderer GridCell data.
 
 use crate::config::theme::Color;
-use crate::renderer::grid_renderer::GridCell;
+use crate::renderer::grid_renderer::{GridCell, CELL_FLAG_STRIKETHROUGH, CELL_FLAG_UNDERLINE};
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line, Point};
+use alacritty_terminal::term::cell::Flags as CellFlags;
 use alacritty_terminal::vte::ansi::Color as AnsiColor;
 use alacritty_terminal::vte::ansi::NamedColor;
 
@@ -98,6 +99,27 @@ pub fn convert_color(ansi: AnsiColor, _default: Color) -> Color {
     }
 }
 
+/// Map a normal named color to its bright variant when bold is active.
+/// Already-bright colors and special colors (Foreground, Background) are unchanged.
+pub fn bold_brighten_named(name: NamedColor) -> NamedColor {
+    match name {
+        NamedColor::Black => NamedColor::BrightBlack,
+        NamedColor::Red => NamedColor::BrightRed,
+        NamedColor::Green => NamedColor::BrightGreen,
+        NamedColor::Yellow => NamedColor::BrightYellow,
+        NamedColor::Blue => NamedColor::BrightBlue,
+        NamedColor::Magenta => NamedColor::BrightMagenta,
+        NamedColor::Cyan => NamedColor::BrightCyan,
+        NamedColor::White => NamedColor::BrightWhite,
+        other => other,
+    }
+}
+
+/// Reduce color intensity for the DIM/faint attribute (~33% reduction).
+pub fn apply_dim(color: Color) -> Color {
+    Color::new(color.r * 0.66, color.g * 0.66, color.b * 0.66, color.a)
+}
+
 /// Extract GridCell data from a Terminal for the entire visible grid.
 pub fn extract_grid_cells(terminal: &super::Terminal) -> Vec<GridCell> {
     let term = terminal.inner();
@@ -111,9 +133,41 @@ pub fn extract_grid_cells(terminal: &super::Terminal) -> Vec<GridCell> {
             let point = Point::new(Line(row as i32), Column(col));
             let cell = &grid[point];
             let ch = cell.c;
-            let fg = convert_color(cell.fg, DEFAULT_FG);
-            let bg = convert_color(cell.bg, DEFAULT_BG);
-            cells.push(GridCell::new(ch, fg, bg));
+            let cell_flags = cell.flags;
+
+            // Convert base colors, applying bold→bright for named colors
+            let mut fg = if cell_flags.contains(CellFlags::BOLD) {
+                match cell.fg {
+                    AnsiColor::Named(name) => ansi_named_color(bold_brighten_named(name)),
+                    other => convert_color(other, DEFAULT_FG),
+                }
+            } else {
+                convert_color(cell.fg, DEFAULT_FG)
+            };
+            let mut bg = convert_color(cell.bg, DEFAULT_BG);
+
+            // Apply dim: reduce fg intensity
+            if cell_flags.contains(CellFlags::DIM) {
+                fg = apply_dim(fg);
+            }
+
+            // Apply inverse: swap fg and bg
+            if cell_flags.contains(CellFlags::INVERSE) {
+                std::mem::swap(&mut fg, &mut bg);
+            }
+
+            // Propagate underline and strikethrough flags
+            let mut flags = 0u32;
+            if cell_flags.intersects(CellFlags::UNDERLINE) {
+                flags |= CELL_FLAG_UNDERLINE;
+            }
+            if cell_flags.contains(CellFlags::STRIKEOUT) {
+                flags |= CELL_FLAG_STRIKETHROUGH;
+            }
+
+            let mut grid_cell = GridCell::new(ch, fg, bg);
+            grid_cell.flags = flags;
+            cells.push(grid_cell);
         }
     }
 
@@ -279,5 +333,120 @@ mod tests {
         let term = Terminal::new(80, 24, 10_000);
         let cells = extract_grid_cells(&term);
         assert!((cells[0].bg.r - DEFAULT_BG.r).abs() < 0.01);
+    }
+
+    // ── Bold → bright color mapping ────────────────────────────────
+
+    #[test]
+    fn bold_brighten_red_to_bright_red() {
+        assert_eq!(bold_brighten_named(NamedColor::Red), NamedColor::BrightRed);
+    }
+
+    #[test]
+    fn bold_brighten_black_to_bright_black() {
+        assert_eq!(
+            bold_brighten_named(NamedColor::Black),
+            NamedColor::BrightBlack
+        );
+    }
+
+    #[test]
+    fn bold_brighten_white_to_bright_white() {
+        assert_eq!(
+            bold_brighten_named(NamedColor::White),
+            NamedColor::BrightWhite
+        );
+    }
+
+    #[test]
+    fn bold_brighten_already_bright_unchanged() {
+        assert_eq!(
+            bold_brighten_named(NamedColor::BrightRed),
+            NamedColor::BrightRed
+        );
+    }
+
+    #[test]
+    fn extract_bold_red_text_uses_bright_color() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        term.feed(b"\x1b[1;31mX");
+        let cells = extract_grid_cells(&term);
+        let bright_red = ansi_named_color(NamedColor::BrightRed);
+        assert!((cells[0].fg.r - bright_red.r).abs() < 0.01);
+        assert!((cells[0].fg.g - bright_red.g).abs() < 0.01);
+    }
+
+    // ── Dim/faint attribute ────────────────────────────────────────
+
+    #[test]
+    fn apply_dim_reduces_rgb() {
+        let original = Color::new(0.9, 0.6, 0.3, 1.0);
+        let dimmed = apply_dim(original);
+        assert!(dimmed.r < original.r);
+        assert!(dimmed.g < original.g);
+        assert!(dimmed.b < original.b);
+    }
+
+    #[test]
+    fn apply_dim_preserves_alpha() {
+        let original = Color::new(0.9, 0.6, 0.3, 1.0);
+        let dimmed = apply_dim(original);
+        assert_eq!(dimmed.a, original.a);
+    }
+
+    #[test]
+    fn extract_dim_text_has_reduced_fg() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        term.feed(b"\x1b[2mX");
+        let cells = extract_grid_cells(&term);
+        assert!(cells[0].fg.r < DEFAULT_FG.r);
+    }
+
+    // ── Inverse attribute ──────────────────────────────────────────
+
+    #[test]
+    fn extract_inverse_swaps_fg_bg() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        term.feed(b"\x1b[7mX");
+        let cells = extract_grid_cells(&term);
+        // After inverse: fg becomes the background color, bg becomes the fg color
+        assert!((cells[0].fg.r - DEFAULT_BG.r).abs() < 0.01);
+        assert!((cells[0].bg.r - DEFAULT_FG.r).abs() < 0.01);
+    }
+
+    // ── Underline flag propagation ─────────────────────────────────
+
+    #[test]
+    fn extract_underline_sets_flag() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        term.feed(b"\x1b[4mX");
+        let cells = extract_grid_cells(&term);
+        assert_ne!(cells[0].flags & CELL_FLAG_UNDERLINE, 0);
+    }
+
+    #[test]
+    fn extract_no_underline_clears_flag() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        term.feed(b"X");
+        let cells = extract_grid_cells(&term);
+        assert_eq!(cells[0].flags & CELL_FLAG_UNDERLINE, 0);
+    }
+
+    // ── Strikethrough flag propagation ─────────────────────────────
+
+    #[test]
+    fn extract_strikethrough_sets_flag() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        term.feed(b"\x1b[9mX");
+        let cells = extract_grid_cells(&term);
+        assert_ne!(cells[0].flags & CELL_FLAG_STRIKETHROUGH, 0);
+    }
+
+    #[test]
+    fn extract_no_strikethrough_clears_flag() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        term.feed(b"X");
+        let cells = extract_grid_cells(&term);
+        assert_eq!(cells[0].flags & CELL_FLAG_STRIKETHROUGH, 0);
     }
 }

@@ -4,6 +4,10 @@ use crate::config::theme::Color;
 use crate::renderer::glyph_atlas::GlyphAtlas;
 use crate::renderer::gpu::CellInstance;
 
+/// Cell attribute flags (bits 4+ to avoid conflict with renderer-internal flags 0-3).
+pub const CELL_FLAG_UNDERLINE: u32 = 0x10; // bit 4
+pub const CELL_FLAG_STRIKETHROUGH: u32 = 0x20; // bit 5
+
 /// A single cell in the terminal grid.
 #[derive(Debug, Clone, Copy)]
 pub struct GridCell {
@@ -13,12 +17,19 @@ pub struct GridCell {
     pub fg: Color,
     /// Background color.
     pub bg: Color,
+    /// Cell attribute flags (underline, strikethrough, etc.).
+    pub flags: u32,
 }
 
 impl GridCell {
     /// Create a new grid cell.
     pub fn new(ch: char, fg: Color, bg: Color) -> Self {
-        Self { ch, fg, bg }
+        Self {
+            ch,
+            fg,
+            bg,
+            flags: 0,
+        }
     }
 
     /// Create an empty cell with the given background color.
@@ -27,6 +38,7 @@ impl GridCell {
             ch: ' ',
             fg: Color::new(1.0, 1.0, 1.0, 1.0),
             bg,
+            flags: 0,
         }
     }
 }
@@ -128,7 +140,7 @@ pub fn generate_instances(
             atlas_uv,
             fg_color: [cell.fg.r, cell.fg.g, cell.fg.b, cell.fg.a],
             bg_color: [cell.bg.r, cell.bg.g, cell.bg.b, cell.bg.a],
-            flags: if has_glyph { 1 } else { 0 },
+            flags: (if has_glyph { 1 } else { 0 }) | cell.flags,
             _padding: [0; 3],
         });
     }
@@ -431,6 +443,28 @@ mod tests {
         let instances = generate_instances(&grid, &cells, &atlas);
         assert_eq!(instances[0].flags & 1, 0);
         assert_eq!(instances[0].atlas_uv, [0.0, 0.0, 0.0, 0.0]);
+    }
+
+    // ── Cell flag propagation ─────────────────────────────────────
+
+    #[test]
+    fn generate_instances_propagates_underline_flag() {
+        let atlas = test_atlas();
+        let grid = test_grid(1, 1);
+        let mut cell = GridCell::new('X', test_fg(), test_bg());
+        cell.flags = CELL_FLAG_UNDERLINE;
+        let instances = generate_instances(&grid, &[cell], &atlas);
+        assert_ne!(instances[0].flags & CELL_FLAG_UNDERLINE, 0);
+    }
+
+    #[test]
+    fn generate_instances_propagates_strikethrough_flag() {
+        let atlas = test_atlas();
+        let grid = test_grid(1, 1);
+        let mut cell = GridCell::new('X', test_fg(), test_bg());
+        cell.flags = CELL_FLAG_STRIKETHROUGH;
+        let instances = generate_instances(&grid, &[cell], &atlas);
+        assert_ne!(instances[0].flags & CELL_FLAG_STRIKETHROUGH, 0);
     }
 
     // ── Test pattern generation ─────────────────────────────────────
