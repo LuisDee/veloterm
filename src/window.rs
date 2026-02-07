@@ -40,6 +40,8 @@ impl WindowConfig {
             .with_title(self.title.clone())
             .with_inner_size(LogicalSize::new(self.width, self.height))
             .with_resizable(self.resizable)
+            .with_decorations(true)
+            .with_fullscreen(None)
     }
 }
 
