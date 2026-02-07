@@ -1,0 +1,21 @@
+Phase 4 Checkpoint Verification: Keyboard Input Pipeline
+
+Scope: git diff --name-only 79a38ce..7b9e49b
+  - conductor/tracks/core_terminal_emulation_20260207/plan.md
+  - src/input/mod.rs (NEW)
+  - src/lib.rs (added input submodule)
+
+Quality Gates:
+  - 202 tests pass (cargo test --lib)
+  - clippy: clean (cargo clippy --lib)
+  - fmt: clean (cargo fmt --check)
+
+Verification:
+  1. Printable ASCII/UTF-8 characters pass through as bytes
+  2. Special keys: Enter→\r, Backspace→0x7F, Tab→\t, Escape→\x1b
+  3. Arrow keys map to CSI sequences (\x1b[A/B/C/D)
+  4. Ctrl+A..Z produce control bytes 0x01..0x1A
+  5. F1-F4 use SS3 format, F5-F12 use CSI ~ format
+  6. Navigation keys: Home/End/Insert/Delete/PageUp/PageDown all mapped
+  7. Key releases and modifier-only presses correctly return None
+  8. 39 new tests covering all key translation paths
