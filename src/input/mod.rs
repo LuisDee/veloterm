@@ -1,0 +1,364 @@
+// Keyboard input translation: converts winit KeyEvents to terminal byte sequences.
+
+use winit::event::ElementState;
+use winit::keyboard::{Key, ModifiersState, NamedKey};
+
+/// Translate a winit key event into terminal byte sequences to send to the PTY.
+///
+/// Returns `None` if the key event should not produce any output (e.g. modifier-only
+/// keys, key releases, or unhandled keys).
+pub fn translate_key(
+    logical_key: &Key,
+    text: Option<&str>,
+    state: ElementState,
+    modifiers: ModifiersState,
+) -> Option<Vec<u8>> {
+    // Only handle key presses, not releases
+    if state == ElementState::Released {
+        return None;
+    }
+
+    match logical_key {
+        Key::Character(s) => {
+            // Ctrl+letter → control byte
+            if modifiers.control_key() {
+                if let Some(ch) = s.chars().next() {
+                    if let Some(byte) = ctrl_key_byte(ch) {
+                        return Some(vec![byte]);
+                    }
+                }
+            }
+            // Use the text field if available, otherwise the logical key string
+            let t = text.unwrap_or(s.as_ref());
+            Some(t.as_bytes().to_vec())
+        }
+        Key::Named(named) => named_key_bytes(*named, modifiers),
+        _ => None,
+    }
+}
+
+/// Translate a Ctrl+key combination to a control byte (0x01..=0x1A).
+/// Returns `None` if the character is not a letter a-z/A-Z.
+fn ctrl_key_byte(ch: char) -> Option<u8> {
+    let lower = ch.to_ascii_lowercase();
+    if lower.is_ascii_lowercase() {
+        Some(lower as u8 - b'a' + 1)
+    } else {
+        None
+    }
+}
+
+/// Translate a named key (Enter, Backspace, etc.) to terminal bytes.
+fn named_key_bytes(key: NamedKey, _modifiers: ModifiersState) -> Option<Vec<u8>> {
+    match key {
+        // Basic control keys
+        NamedKey::Enter => Some(b"\r".to_vec()),
+        NamedKey::Backspace => Some(vec![0x7f]),
+        NamedKey::Tab => Some(b"\t".to_vec()),
+        NamedKey::Escape => Some(b"\x1b".to_vec()),
+
+        // Arrow keys (normal mode CSI sequences)
+        NamedKey::ArrowUp => Some(b"\x1b[A".to_vec()),
+        NamedKey::ArrowDown => Some(b"\x1b[B".to_vec()),
+        NamedKey::ArrowRight => Some(b"\x1b[C".to_vec()),
+        NamedKey::ArrowLeft => Some(b"\x1b[D".to_vec()),
+
+        // Navigation keys
+        NamedKey::Home => Some(b"\x1b[H".to_vec()),
+        NamedKey::End => Some(b"\x1b[F".to_vec()),
+        NamedKey::Insert => Some(b"\x1b[2~".to_vec()),
+        NamedKey::Delete => Some(b"\x1b[3~".to_vec()),
+        NamedKey::PageUp => Some(b"\x1b[5~".to_vec()),
+        NamedKey::PageDown => Some(b"\x1b[6~".to_vec()),
+
+        // Function keys (F1-F4: SS3 format, F5-F12: CSI ~ format)
+        NamedKey::F1 => Some(b"\x1bOP".to_vec()),
+        NamedKey::F2 => Some(b"\x1bOQ".to_vec()),
+        NamedKey::F3 => Some(b"\x1bOR".to_vec()),
+        NamedKey::F4 => Some(b"\x1bOS".to_vec()),
+        NamedKey::F5 => Some(b"\x1b[15~".to_vec()),
+        NamedKey::F6 => Some(b"\x1b[17~".to_vec()),
+        NamedKey::F7 => Some(b"\x1b[18~".to_vec()),
+        NamedKey::F8 => Some(b"\x1b[19~".to_vec()),
+        NamedKey::F9 => Some(b"\x1b[20~".to_vec()),
+        NamedKey::F10 => Some(b"\x1b[21~".to_vec()),
+        NamedKey::F11 => Some(b"\x1b[23~".to_vec()),
+        NamedKey::F12 => Some(b"\x1b[24~".to_vec()),
+
+        // Modifier-only keys produce no output
+        NamedKey::Shift | NamedKey::Control | NamedKey::Alt | NamedKey::Super => None,
+
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Helper: create a pressed key event translation
+    fn press(key: Key, text: Option<&str>, mods: ModifiersState) -> Option<Vec<u8>> {
+        translate_key(&key, text, ElementState::Pressed, mods)
+    }
+
+    fn no_mods() -> ModifiersState {
+        ModifiersState::empty()
+    }
+
+    // ── Printable character encoding ────────────────────────────────
+
+    #[test]
+    fn ascii_letter_a() {
+        let result = press(Key::Character("a".into()), Some("a"), no_mods());
+        assert_eq!(result, Some(b"a".to_vec()));
+    }
+
+    #[test]
+    fn ascii_letter_uppercase_a() {
+        let result = press(Key::Character("A".into()), Some("A"), ModifiersState::SHIFT);
+        assert_eq!(result, Some(b"A".to_vec()));
+    }
+
+    #[test]
+    fn ascii_digit() {
+        let result = press(Key::Character("5".into()), Some("5"), no_mods());
+        assert_eq!(result, Some(b"5".to_vec()));
+    }
+
+    #[test]
+    fn ascii_symbol() {
+        let result = press(Key::Character("@".into()), Some("@"), no_mods());
+        assert_eq!(result, Some(b"@".to_vec()));
+    }
+
+    #[test]
+    fn utf8_multibyte_char() {
+        let result = press(
+            Key::Character("\u{00e9}".into()),
+            Some("\u{00e9}"),
+            no_mods(),
+        );
+        assert_eq!(result, Some("\u{00e9}".as_bytes().to_vec()));
+    }
+
+    #[test]
+    fn space_key() {
+        let result = press(Key::Character(" ".into()), Some(" "), no_mods());
+        assert_eq!(result, Some(b" ".to_vec()));
+    }
+
+    // ── Key release produces no output ──────────────────────────────
+
+    #[test]
+    fn key_release_produces_none() {
+        let result = translate_key(
+            &Key::Character("a".into()),
+            Some("a"),
+            ElementState::Released,
+            no_mods(),
+        );
+        assert_eq!(result, None);
+    }
+
+    // ── Special key translation ─────────────────────────────────────
+
+    #[test]
+    fn enter_key() {
+        let result = press(Key::Named(NamedKey::Enter), None, no_mods());
+        assert_eq!(result, Some(b"\r".to_vec()));
+    }
+
+    #[test]
+    fn backspace_key() {
+        let result = press(Key::Named(NamedKey::Backspace), None, no_mods());
+        assert_eq!(result, Some(vec![0x7f]));
+    }
+
+    #[test]
+    fn tab_key() {
+        let result = press(Key::Named(NamedKey::Tab), None, no_mods());
+        assert_eq!(result, Some(b"\t".to_vec()));
+    }
+
+    #[test]
+    fn escape_key() {
+        let result = press(Key::Named(NamedKey::Escape), None, no_mods());
+        assert_eq!(result, Some(b"\x1b".to_vec()));
+    }
+
+    // ── Arrow keys → ANSI escape sequences ──────────────────────────
+
+    #[test]
+    fn arrow_up() {
+        let result = press(Key::Named(NamedKey::ArrowUp), None, no_mods());
+        assert_eq!(result, Some(b"\x1b[A".to_vec()));
+    }
+
+    #[test]
+    fn arrow_down() {
+        let result = press(Key::Named(NamedKey::ArrowDown), None, no_mods());
+        assert_eq!(result, Some(b"\x1b[B".to_vec()));
+    }
+
+    #[test]
+    fn arrow_right() {
+        let result = press(Key::Named(NamedKey::ArrowRight), None, no_mods());
+        assert_eq!(result, Some(b"\x1b[C".to_vec()));
+    }
+
+    #[test]
+    fn arrow_left() {
+        let result = press(Key::Named(NamedKey::ArrowLeft), None, no_mods());
+        assert_eq!(result, Some(b"\x1b[D".to_vec()));
+    }
+
+    // ── Control key combinations ────────────────────────────────────
+
+    #[test]
+    fn ctrl_c() {
+        let result = press(Key::Character("c".into()), None, ModifiersState::CONTROL);
+        assert_eq!(result, Some(vec![0x03]));
+    }
+
+    #[test]
+    fn ctrl_d() {
+        let result = press(Key::Character("d".into()), None, ModifiersState::CONTROL);
+        assert_eq!(result, Some(vec![0x04]));
+    }
+
+    #[test]
+    fn ctrl_z() {
+        let result = press(Key::Character("z".into()), None, ModifiersState::CONTROL);
+        assert_eq!(result, Some(vec![0x1a]));
+    }
+
+    #[test]
+    fn ctrl_a() {
+        let result = press(Key::Character("a".into()), None, ModifiersState::CONTROL);
+        assert_eq!(result, Some(vec![0x01]));
+    }
+
+    #[test]
+    fn ctrl_l() {
+        let result = press(Key::Character("l".into()), None, ModifiersState::CONTROL);
+        assert_eq!(result, Some(vec![0x0c]));
+    }
+
+    // ── Function keys ───────────────────────────────────────────────
+
+    #[test]
+    fn f1_key() {
+        let result = press(Key::Named(NamedKey::F1), None, no_mods());
+        assert_eq!(result, Some(b"\x1bOP".to_vec()));
+    }
+
+    #[test]
+    fn f2_key() {
+        let result = press(Key::Named(NamedKey::F2), None, no_mods());
+        assert_eq!(result, Some(b"\x1bOQ".to_vec()));
+    }
+
+    #[test]
+    fn f3_key() {
+        let result = press(Key::Named(NamedKey::F3), None, no_mods());
+        assert_eq!(result, Some(b"\x1bOR".to_vec()));
+    }
+
+    #[test]
+    fn f4_key() {
+        let result = press(Key::Named(NamedKey::F4), None, no_mods());
+        assert_eq!(result, Some(b"\x1bOS".to_vec()));
+    }
+
+    #[test]
+    fn f5_key() {
+        let result = press(Key::Named(NamedKey::F5), None, no_mods());
+        assert_eq!(result, Some(b"\x1b[15~".to_vec()));
+    }
+
+    #[test]
+    fn f12_key() {
+        let result = press(Key::Named(NamedKey::F12), None, no_mods());
+        assert_eq!(result, Some(b"\x1b[24~".to_vec()));
+    }
+
+    // ── Navigation keys ─────────────────────────────────────────────
+
+    #[test]
+    fn home_key() {
+        let result = press(Key::Named(NamedKey::Home), None, no_mods());
+        assert_eq!(result, Some(b"\x1b[H".to_vec()));
+    }
+
+    #[test]
+    fn end_key() {
+        let result = press(Key::Named(NamedKey::End), None, no_mods());
+        assert_eq!(result, Some(b"\x1b[F".to_vec()));
+    }
+
+    #[test]
+    fn delete_key() {
+        let result = press(Key::Named(NamedKey::Delete), None, no_mods());
+        assert_eq!(result, Some(b"\x1b[3~".to_vec()));
+    }
+
+    #[test]
+    fn insert_key() {
+        let result = press(Key::Named(NamedKey::Insert), None, no_mods());
+        assert_eq!(result, Some(b"\x1b[2~".to_vec()));
+    }
+
+    #[test]
+    fn page_up_key() {
+        let result = press(Key::Named(NamedKey::PageUp), None, no_mods());
+        assert_eq!(result, Some(b"\x1b[5~".to_vec()));
+    }
+
+    #[test]
+    fn page_down_key() {
+        let result = press(Key::Named(NamedKey::PageDown), None, no_mods());
+        assert_eq!(result, Some(b"\x1b[6~".to_vec()));
+    }
+
+    // ── Modifier-only keys produce no output ────────────────────────
+
+    #[test]
+    fn shift_alone_produces_none() {
+        let result = press(Key::Named(NamedKey::Shift), None, ModifiersState::SHIFT);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn control_alone_produces_none() {
+        let result = press(Key::Named(NamedKey::Control), None, ModifiersState::CONTROL);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn alt_alone_produces_none() {
+        let result = press(Key::Named(NamedKey::Alt), None, ModifiersState::ALT);
+        assert_eq!(result, None);
+    }
+
+    // ── ctrl_key_byte helper ────────────────────────────────────────
+
+    #[test]
+    fn ctrl_byte_lowercase_a() {
+        assert_eq!(ctrl_key_byte('a'), Some(0x01));
+    }
+
+    #[test]
+    fn ctrl_byte_uppercase_a() {
+        assert_eq!(ctrl_key_byte('A'), Some(0x01));
+    }
+
+    #[test]
+    fn ctrl_byte_z() {
+        assert_eq!(ctrl_key_byte('z'), Some(0x1a));
+    }
+
+    #[test]
+    fn ctrl_byte_non_letter() {
+        assert_eq!(ctrl_key_byte('5'), None);
+    }
+}
