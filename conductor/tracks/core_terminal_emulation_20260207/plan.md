@@ -170,14 +170,14 @@
 
 ## Phase 9: Clipboard Integration
 
-- [ ] Task: Write tests for clipboard operations
+- [x] Task: Write tests for clipboard operations <!-- 144a2c6 -->
   - Write tests for copy-selected-text-to-clipboard (Cmd+C / Ctrl+Shift+C)
   - Write tests for paste-from-clipboard-to-PTY (Cmd+V / Ctrl+Shift+V)
   - Write tests for platform-appropriate keybinding detection (macOS vs Linux)
   - Write tests for paste with bracketed paste mode escape sequences
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement clipboard integration
+- [x] Task: Implement clipboard integration <!-- 144a2c6 -->
   - Add `arboard` dependency to `Cargo.toml`
   - Implement copy: extract selected text → write to system clipboard via `arboard`
   - Implement paste: read from system clipboard → write to PTY as keystrokes
