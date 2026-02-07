@@ -130,12 +130,12 @@
   - Render frame: clear background → draw background quads → draw foreground glyphs
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Write tests for static test pattern content
+- [x] Task: Write tests for static test pattern content <!-- cd8b359 -->
   - Write tests for test pattern generation (VeloTerm header, ASCII range, prompt line, checkerboard)
   - Write tests for correct color assignment per test pattern element (accent for header, prompt colors, primary for text)
   - Run tests and confirm they fail (Red phase)
 
-- [ ] Task: Implement static test pattern display
+- [x] Task: Implement static test pattern display <!-- cd8b359 -->
   - Fill grid with test pattern:
     - Row 0: "VeloTerm v0.1.0" in accent color (#E89171)
     - Row 1: Empty
