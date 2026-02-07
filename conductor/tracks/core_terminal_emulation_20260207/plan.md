@@ -20,7 +20,7 @@
 
 - [x] Task: Conductor - User Manual Verification 'PTY Spawning and Raw I/O' (Protocol in workflow.md) <!-- 66f48c4 -->
 
-## Phase 2: Terminal State Machine Integration
+## Phase 2: Terminal State Machine Integration [checkpoint: a6dd41a]
 
 - [x] Task: Write tests for alacritty_terminal integration <!-- d88ecce -->
   - Write tests for `Term` creation with correct grid dimensions
@@ -37,7 +37,7 @@
   - Expose grid state, cursor position, and dirty flags
   - Run tests and confirm they pass (Green phase)
 
-- [ ] Task: Conductor - User Manual Verification 'Terminal State Machine Integration' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Terminal State Machine Integration' (Protocol in workflow.md) <!-- a6dd41a -->
 
 ## Phase 3: Grid Bridge — Terminal State to GPU Renderer
 
