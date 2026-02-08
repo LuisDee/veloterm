@@ -5,12 +5,13 @@ use std::sync::Arc;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{ElementState, MouseButton, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 
 use crate::config::theme::Theme;
-use crate::config::types::Config;
+use crate::config::types::{Config, ConfigDelta};
+use crate::config::watcher::UserEvent;
 use crate::input::{
     match_app_command, match_pane_command, match_tab_command, match_search_command,
     should_open_search, AppCommand, InputMode, PaneCommand, SearchCommand, TabCommand,
@@ -102,6 +103,7 @@ pub struct App {
     search_state: SearchState,
     current_font_size: f32,
     default_font_size: f32,
+    event_proxy: Option<EventLoopProxy<UserEvent>>,
 }
 
 impl App {
@@ -122,6 +124,7 @@ impl App {
             search_state: SearchState::default(),
             current_font_size: font_size,
             default_font_size: font_size,
+            event_proxy: None,
         }
     }
 
@@ -255,6 +258,58 @@ impl App {
         self.resize_all_panes(w, h);
         if let Some(window) = &self.window {
             window.request_redraw();
+        }
+    }
+
+    fn handle_config_reload(&mut self, new_config: Config, delta: ConfigDelta) {
+        log::info!("Config reloaded (font_changed={}, padding_changed={})",
+            delta.font_changed, delta.padding_changed);
+
+        if delta.font_changed {
+            let new_size = new_config.font.size as f32;
+            let new_family = new_config.font.family.clone();
+            let new_lh = new_config.font.line_height as f32;
+
+            self.current_font_size = new_size;
+            self.default_font_size = new_size;
+
+            if let Some(renderer) = &mut self.renderer {
+                renderer.rebuild_atlas(new_size, &new_family, new_lh);
+            }
+        }
+
+        if delta.padding_changed {
+            if let (Some(renderer), Some(window)) = (&mut self.renderer, &self.window) {
+                let scale = window.scale_factor() as f32;
+                let pad = &new_config.padding;
+                renderer.set_padding(
+                    pad.top as f32 * scale,
+                    pad.bottom as f32 * scale,
+                    pad.left as f32 * scale,
+                    pad.right as f32 * scale,
+                );
+            }
+        }
+
+        self.app_config = new_config;
+
+        if delta.font_changed || delta.padding_changed {
+            let (w, h) = self.window_size();
+            self.resize_all_panes(w, h);
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+        }
+
+        if delta.colors_changed {
+            if let Some(renderer) = &mut self.renderer {
+                let _theme = Theme::from_name(&self.app_config.colors.theme)
+                    .unwrap_or_else(Theme::claude_dark);
+                renderer.pane_damage_mut().force_full_damage_all();
+            }
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
         }
     }
 
@@ -951,15 +1006,64 @@ impl App {
     }
 
     /// Run the application event loop. This blocks until the window is closed.
-    pub fn run(self) -> Result<(), Box<dyn std::error::Error>> {
-        let event_loop = EventLoop::new()?;
-        let mut app = self;
-        event_loop.run_app(&mut app)?;
+    pub fn run(mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
+        let proxy = event_loop.create_proxy();
+        self.event_proxy = Some(proxy.clone());
+
+        // Start config file watcher (best-effort — non-fatal if it fails)
+        let _config_watcher = Self::start_config_watcher(&self.app_config, proxy);
+
+        event_loop.run_app(&mut self)?;
         Ok(())
+    }
+
+    /// Start watching the config file and send reload events via the proxy.
+    fn start_config_watcher(
+        config: &Config,
+        proxy: EventLoopProxy<UserEvent>,
+    ) -> Option<crate::config::watcher::ConfigWatcher> {
+        let config_path = Self::config_file_path();
+        if !config_path.exists() {
+            log::info!("No config file at {}, skipping watcher", config_path.display());
+            return None;
+        }
+        match crate::config::watcher::ConfigWatcher::new(
+            &config_path,
+            config.clone(),
+            move |new_config, delta| {
+                let _ = proxy.send_event(UserEvent::ConfigReloaded(new_config, delta));
+            },
+        ) {
+            Ok(w) => {
+                log::info!("Config watcher started for {}", config_path.display());
+                Some(w)
+            }
+            Err(e) => {
+                log::warn!("Failed to start config watcher: {e}");
+                None
+            }
+        }
+    }
+
+    /// Get the config file path (~/.config/veloterm/config.toml).
+    fn config_file_path() -> std::path::PathBuf {
+        let home = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+        home.join(".config").join("veloterm").join("config.toml")
     }
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler<UserEvent> for App {
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
+        match event {
+            UserEvent::ConfigReloaded(new_config, delta) => {
+                self.handle_config_reload(new_config, delta);
+            }
+        }
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
@@ -2332,5 +2436,52 @@ blink = false
         let app = App::new(WindowConfig::default(), Config::default());
         assert_eq!(app.current_font_size, 13.0);
         assert_eq!(app.default_font_size, 13.0);
+    }
+
+    // ── Config hot-reload ────────────────────────────────────────
+
+    #[test]
+    fn config_reload_font_updates_app_state() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        assert_eq!(app.current_font_size, 13.0);
+
+        let mut new_config = Config::default();
+        new_config.font.size = 20.0;
+        new_config.font.family = "Menlo".to_string();
+        let delta = app.app_config.diff(&new_config);
+
+        app.handle_config_reload(new_config.clone(), delta);
+        assert_eq!(app.current_font_size, 20.0);
+        assert_eq!(app.default_font_size, 20.0);
+        assert_eq!(app.app_config.font.family, "Menlo");
+    }
+
+    #[test]
+    fn config_reload_padding_updates_config() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        assert_eq!(app.app_config.padding.top, 12.0);
+
+        let mut new_config = Config::default();
+        new_config.padding.top = 24.0;
+        new_config.padding.left = 16.0;
+        let delta = app.app_config.diff(&new_config);
+        assert!(delta.padding_changed);
+
+        app.handle_config_reload(new_config, delta);
+        assert_eq!(app.app_config.padding.top, 24.0);
+        assert_eq!(app.app_config.padding.left, 16.0);
+    }
+
+    #[test]
+    fn config_reload_no_changes_preserves_state() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        let original_size = app.current_font_size;
+
+        let new_config = Config::default();
+        let delta = app.app_config.diff(&new_config);
+        assert!(delta.is_empty());
+
+        app.handle_config_reload(new_config, delta);
+        assert_eq!(app.current_font_size, original_size);
     }
 }
