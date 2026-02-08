@@ -223,7 +223,7 @@ impl App {
     fn handle_tab_command(
         &mut self,
         command: TabCommand,
-        event_loop: &ActiveEventLoop,
+        _event_loop: &ActiveEventLoop,
     ) {
         let (width, height) = self.window_size();
 

@@ -75,19 +75,20 @@
 - [x] Handle tab click → select_tab, "+" click → new_tab
 - [x] Write integration tests for mouse-driven tab operations
 
-### Task 3.4: Tab title rendering
-- [ ] Render tab titles using glyph atlas text (reuse GridRenderer text capabilities)
-- [ ] Default title: "Shell" (or shell process name if available)
-- [ ] Truncate long titles with ellipsis to fit tab width
+### Task 3.4: Tab title rendering (deferred)
+- [ ] ~~Render tab titles using glyph atlas text (reuse GridRenderer text capabilities)~~
+- [x] Default title: "Shell" stored in Tab struct
+- [ ] ~~Truncate long titles with ellipsis to fit tab width~~
+- Note: Overlay pipeline only supports colored rectangles. Text rendering in tab bar requires extending the overlay shader to support textured quads. Deferred to a future track. Tab bar is functional via colored backgrounds + click interaction.
 
-### Task 3.5: Visual Validation
-- [ ] Run application and validate via screenshots:
-  - [ ] Tab bar visible at top of window
-  - [ ] Active tab visually distinct from inactive tabs
-  - [ ] New tab creation via Ctrl+Shift+T
-  - [ ] Tab switching via click and keyboard
-  - [ ] Tab close behavior
-  - [ ] Multiple tabs with pane splits inside
+### Task 3.5: Visual Validation <!-- aa7df7b -->
+- [x] Run application and validate via screenshots:
+  - [x] Tab bar visible at top of window
+  - [x] Active tab visually distinct from inactive tabs
+  - [x] New tab creation via Ctrl+Shift+T
+  - [x] Tab switching via Ctrl+Shift+1 keyboard shortcut
+  - [x] Tab close (Ctrl+Shift+W on single-pane tab closes tab)
+  - [x] Multiple tabs with pane splits inside
 
 ### Phase 3 Completion
 - [ ] Phase completion verification and checkpointing
