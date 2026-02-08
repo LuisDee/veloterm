@@ -36,6 +36,9 @@ crossbeam-channel = "0.5"
 # Link Detection
 linkify = "0.10"
 
+# Search
+regex = "1"
+
 # Configuration
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
