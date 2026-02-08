@@ -27,7 +27,7 @@ struct CellInstance {
     @location(3) bg_color: vec4<f32>,   // background RGBA
     @location(4) flags: u32,            // bit 0: has_glyph, bit 1: is_cursor,
                                         // bits 2-3: cursor shape (00=block, 01=beam, 10=underline, 11=hollow)
-                                        // bit 4: underline, bit 5: strikethrough
+                                        // bit 4: underline, bit 5: strikethrough, bit 6: selected
 };
 
 struct VertexOutput {
@@ -42,6 +42,7 @@ struct VertexOutput {
     @location(7) is_cursor: f32,        // 1.0 if cursor flag set
     @location(8) cursor_shape: f32,     // 0=block, 1=beam, 2=underline, 3=hollow
     @location(9) cell_x_frac: f32,      // 0.0 at left, 1.0 at right
+    @location(10) is_selected: f32,     // 1.0 if selected flag set
 };
 
 @vertex
@@ -81,6 +82,7 @@ fn vs_main(
     out.strikethrough = f32((cell.flags >> 5u) & 1u);
     out.is_cursor = f32((cell.flags >> 1u) & 1u);
     out.cursor_shape = f32((cell.flags >> 2u) & 3u);
+    out.is_selected = f32((cell.flags >> 6u) & 1u);
     return out;
 }
 
@@ -117,26 +119,34 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
+    // Selection: swap fg and bg colors
+    var fg = in.fg_color.rgb;
+    var bg = in.bg_color.rgb;
+    if in.is_selected > 0.5 {
+        fg = in.bg_color.rgb;
+        bg = in.fg_color.rgb;
+    }
+
     var color: vec3<f32>;
 
     if in.has_glyph < 0.5 {
         // No glyph — start with background color
-        color = in.bg_color.rgb;
+        color = bg;
     } else {
         // Sample glyph alpha from atlas
         let glyph_alpha = textureSample(atlas_texture, atlas_sampler, in.uv).r;
         // Blend: background behind, foreground glyph on top
-        color = mix(in.bg_color.rgb, in.fg_color.rgb, glyph_alpha);
+        color = mix(bg, fg, glyph_alpha);
     }
 
     // Underline: draw a line at the bottom ~7% of the cell (roughly 1-2px at typical sizes)
     if in.underline > 0.5 && in.cell_y_frac > 0.9 {
-        color = in.fg_color.rgb;
+        color = fg;
     }
 
     // Strikethrough: draw a line at the vertical center ~7% band
     if in.strikethrough > 0.5 && in.cell_y_frac > 0.46 && in.cell_y_frac < 0.54 {
-        color = in.fg_color.rgb;
+        color = fg;
     }
 
     return vec4<f32>(color, 1.0);

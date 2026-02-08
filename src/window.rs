@@ -1341,6 +1341,7 @@ impl ApplicationHandler<UserEvent> for App {
                             log::warn!("PTY write error: {e}");
                         }
                         state.cursor.on_keystroke();
+                        state.mouse_selection.clear_selection();
                     }
                 }
             }
@@ -1369,6 +1370,29 @@ impl ApplicationHandler<UserEvent> for App {
                             .interaction
                             .on_cursor_moved(position.x as f32, content_y);
                         self.apply_interaction_effect(effect);
+                    }
+
+                    // Update text selection drag on focused pane
+                    if let Some(renderer) = &self.renderer {
+                        let cell_width = renderer.cell_width();
+                        let cell_height = renderer.cell_height();
+                        let padding = renderer.padding();
+                        let focused_pane = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                        if let Some(state) = self.pane_states.get_mut(&focused_pane) {
+                            if state.mouse_selection.is_dragging {
+                                let local_x = position.x as f32 - padding[2];
+                                let local_y = content_y - padding[0];
+                                let cols = state.terminal.columns();
+                                let rows = state.terminal.rows();
+                                let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal);
+                                state.mouse_selection.on_mouse_drag(
+                                    local_x, local_y, cell_width, cell_height, cols, rows, &cells,
+                                );
+                                if let Some(window) = &self.window {
+                                    window.request_redraw();
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1413,6 +1437,42 @@ impl ApplicationHandler<UserEvent> for App {
                         if self.handle_link_click(cursor_pos.0, content_y) {
                             return; // Link click consumed the event
                         }
+                    }
+
+                    // Handle text selection on focused pane
+                    if let Some(renderer) = &self.renderer {
+                        let cell_width = renderer.cell_width();
+                        let cell_height = renderer.cell_height();
+                        let padding = renderer.padding();
+                        let focused_pane = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                        if let Some(state) = self.pane_states.get_mut(&focused_pane) {
+                            let cols = state.terminal.columns();
+                            let rows = state.terminal.rows();
+                            // Convert from content-space to pane-local coords (subtract padding)
+                            let local_x = cursor_pos.0 - padding[2]; // subtract left padding
+                            let local_y = cursor_pos.1 - padding[0]; // subtract top padding
+                            match btn_state {
+                                ElementState::Pressed => {
+                                    let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal);
+                                    if self.modifiers.shift_key() {
+                                        let (crow, ccol) = state.terminal.cursor_position();
+                                        state.mouse_selection.on_shift_click(
+                                            local_x, local_y, cell_width, cell_height, cols, rows, crow, ccol,
+                                        );
+                                    } else {
+                                        state.mouse_selection.on_mouse_press(
+                                            local_x, local_y, cell_width, cell_height, cols, rows, &cells,
+                                        );
+                                    }
+                                }
+                                ElementState::Released => {
+                                    state.mouse_selection.on_mouse_release();
+                                }
+                            }
+                        }
+                    }
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
                     }
 
                     // Click below tab bar — route to pane interaction
@@ -1528,6 +1588,12 @@ impl ApplicationHandler<UserEvent> for App {
                                 theme.search_match,
                                 theme.search_match_active,
                             );
+                        }
+
+                        // Apply mouse selection highlight flags
+                        if let Some(ref sel) = state.mouse_selection.active_selection {
+                            let cols = state.terminal.columns();
+                            crate::input::selection::apply_selection_flags(&mut cells, sel, cols);
                         }
 
                         // Offset rect by tab bar height for screen-space rendering
