@@ -58,6 +58,63 @@ pub fn match_pane_command(
     }
 }
 
+/// A tab management command triggered by a keybinding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabCommand {
+    NewTab,
+    NextTab,
+    PrevTab,
+    SelectTab(usize),
+    MoveTabLeft,
+    MoveTabRight,
+}
+
+/// Check if a key event matches a tab command keybinding.
+///
+/// Hardcoded defaults (Ctrl+Shift prefix):
+/// - Ctrl+Shift+T: new tab
+/// - Ctrl+Shift+Tab / Ctrl+Shift+PageDown: next tab
+/// - Ctrl+Shift+PageUp: previous tab
+/// - Ctrl+Shift+1..9: select tab by number
+/// - Ctrl+Shift+{ / }: move tab left/right
+pub fn match_tab_command(
+    logical_key: &Key,
+    modifiers: ModifiersState,
+) -> Option<TabCommand> {
+    let ctrl_shift = modifiers.control_key() && modifiers.shift_key();
+    if !ctrl_shift {
+        return None;
+    }
+
+    match logical_key {
+        Key::Character(s) => {
+            let lower = s.to_lowercase();
+            match lower.as_str() {
+                "t" => Some(TabCommand::NewTab),
+                "{" => Some(TabCommand::MoveTabLeft),
+                "}" => Some(TabCommand::MoveTabRight),
+                "1" => Some(TabCommand::SelectTab(0)),
+                "2" => Some(TabCommand::SelectTab(1)),
+                "3" => Some(TabCommand::SelectTab(2)),
+                "4" => Some(TabCommand::SelectTab(3)),
+                "5" => Some(TabCommand::SelectTab(4)),
+                "6" => Some(TabCommand::SelectTab(5)),
+                "7" => Some(TabCommand::SelectTab(6)),
+                "8" => Some(TabCommand::SelectTab(7)),
+                "9" => Some(TabCommand::SelectTab(8)),
+                _ => None,
+            }
+        }
+        Key::Named(named) => match named {
+            NamedKey::Tab => Some(TabCommand::NextTab),
+            NamedKey::PageUp => Some(TabCommand::PrevTab),
+            NamedKey::PageDown => Some(TabCommand::NextTab),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Translate a winit key event into terminal byte sequences to send to the PTY.
 ///
 /// Returns `None` if the key event should not produce any output (e.g. modifier-only
@@ -542,6 +599,74 @@ mod tests {
     #[test]
     fn pane_cmd_unbound_key_with_ctrl_shift_no_match() {
         let result = match_pane_command(&Key::Character("x".into()), ctrl_shift());
+        assert_eq!(result, None);
+    }
+
+    // ── Tab command matching ─────────────────────────────────────
+
+    #[test]
+    fn tab_cmd_new_tab() {
+        let result = match_tab_command(&Key::Character("T".into()), ctrl_shift());
+        assert_eq!(result, Some(TabCommand::NewTab));
+    }
+
+    #[test]
+    fn tab_cmd_new_tab_lowercase() {
+        let result = match_tab_command(&Key::Character("t".into()), ctrl_shift());
+        assert_eq!(result, Some(TabCommand::NewTab));
+    }
+
+    #[test]
+    fn tab_cmd_next_tab_via_tab_key() {
+        let result = match_tab_command(&Key::Named(NamedKey::Tab), ctrl_shift());
+        assert_eq!(result, Some(TabCommand::NextTab));
+    }
+
+    #[test]
+    fn tab_cmd_next_tab_via_pagedown() {
+        let result = match_tab_command(&Key::Named(NamedKey::PageDown), ctrl_shift());
+        assert_eq!(result, Some(TabCommand::NextTab));
+    }
+
+    #[test]
+    fn tab_cmd_prev_tab_via_pageup() {
+        let result = match_tab_command(&Key::Named(NamedKey::PageUp), ctrl_shift());
+        assert_eq!(result, Some(TabCommand::PrevTab));
+    }
+
+    #[test]
+    fn tab_cmd_select_tab_1() {
+        let result = match_tab_command(&Key::Character("1".into()), ctrl_shift());
+        assert_eq!(result, Some(TabCommand::SelectTab(0)));
+    }
+
+    #[test]
+    fn tab_cmd_select_tab_9() {
+        let result = match_tab_command(&Key::Character("9".into()), ctrl_shift());
+        assert_eq!(result, Some(TabCommand::SelectTab(8)));
+    }
+
+    #[test]
+    fn tab_cmd_move_tab_left() {
+        let result = match_tab_command(&Key::Character("{".into()), ctrl_shift());
+        assert_eq!(result, Some(TabCommand::MoveTabLeft));
+    }
+
+    #[test]
+    fn tab_cmd_move_tab_right() {
+        let result = match_tab_command(&Key::Character("}".into()), ctrl_shift());
+        assert_eq!(result, Some(TabCommand::MoveTabRight));
+    }
+
+    #[test]
+    fn tab_cmd_no_match_without_ctrl_shift() {
+        let result = match_tab_command(&Key::Character("t".into()), no_mods());
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn tab_cmd_no_match_unbound_key() {
+        let result = match_tab_command(&Key::Character("x".into()), ctrl_shift());
         assert_eq!(result, None);
     }
 }
