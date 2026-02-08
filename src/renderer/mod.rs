@@ -10,7 +10,9 @@ use damage::{DamageState, PaneDamageMap};
 use glyph_atlas::GlyphAtlas;
 use gpu::{
     clear_color, create_atlas_sampler, create_atlas_texture, create_bind_group_layout,
-    create_grid_bind_group, create_render_pipeline, GpuError, GridUniforms, SurfaceConfig,
+    create_grid_bind_group, create_overlay_bind_group_layout, create_overlay_pipeline,
+    create_render_pipeline, GpuError, GridUniforms, OverlayInstance, OverlayUniforms,
+    SurfaceConfig,
 };
 use grid_renderer::{
     generate_instances, generate_row_instances, generate_test_pattern, row_byte_offset, GridCell,
@@ -50,6 +52,12 @@ pub struct Renderer {
     _bind_group_layout: wgpu::BindGroupLayout,
     _atlas_view: wgpu::TextureView,
     _sampler: wgpu::Sampler,
+    // Overlay pipeline for UI chrome (dividers, focus overlays)
+    overlay_pipeline: wgpu::RenderPipeline,
+    overlay_bind_group: wgpu::BindGroup,
+    overlay_uniform_buffer: wgpu::Buffer,
+    overlay_instance_buffer: Option<wgpu::Buffer>,
+    overlay_instance_count: u32,
 }
 
 impl Renderer {
@@ -175,6 +183,28 @@ impl Renderer {
             &sampler,
         );
 
+        // Overlay pipeline
+        let overlay_bind_group_layout = create_overlay_bind_group_layout(&device);
+        let overlay_pipeline = create_overlay_pipeline(&device, format, &overlay_bind_group_layout);
+        let overlay_uniforms = OverlayUniforms {
+            surface_size: [clamped_width as f32, clamped_height as f32],
+            _padding: [0.0; 2],
+        };
+        let overlay_uniform_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Overlay Uniforms"),
+                contents: bytemuck::bytes_of(&overlay_uniforms),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+        let overlay_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Overlay Bind Group"),
+            layout: &overlay_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: overlay_uniform_buffer.as_entire_binding(),
+            }],
+        });
+
         // Damage tracking
         let damage_state = DamageState::new(grid.columns as usize);
         let pane_damage = PaneDamageMap::new();
@@ -197,6 +227,11 @@ impl Renderer {
             _bind_group_layout: bind_group_layout,
             _atlas_view: atlas_view,
             _sampler: sampler,
+            overlay_pipeline,
+            overlay_bind_group,
+            overlay_uniform_buffer,
+            overlay_instance_buffer: None,
+            overlay_instance_count: 0,
         })
     }
 
@@ -294,6 +329,17 @@ impl Renderer {
                 contents: bytemuck::cast_slice(&instances),
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             });
+
+        // Update overlay uniforms with new surface size
+        let overlay_uniforms = OverlayUniforms {
+            surface_size: [width as f32, height as f32],
+            _padding: [0.0; 2],
+        };
+        self.queue.write_buffer(
+            &self.overlay_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&overlay_uniforms),
+        );
     }
 
     /// Get a reference to the grid dimensions.
@@ -363,6 +409,45 @@ impl Renderer {
     /// Remove a pane's damage state when the pane is closed.
     pub fn remove_pane_damage(&mut self, pane_id: PaneId) {
         self.pane_damage.remove(pane_id);
+    }
+
+    /// Upload overlay quads (dividers, focus overlays) to GPU buffer.
+    /// Call this before render_panes() each frame with overlay data.
+    pub fn update_overlays(&mut self, quads: &[crate::pane::divider::OverlayQuad]) {
+        if quads.is_empty() {
+            self.overlay_instance_count = 0;
+            return;
+        }
+
+        let instances: Vec<OverlayInstance> = quads
+            .iter()
+            .map(|q| OverlayInstance {
+                rect: [q.rect.x, q.rect.y, q.rect.width, q.rect.height],
+                color: q.color,
+            })
+            .collect();
+
+        self.overlay_instance_count = instances.len() as u32;
+
+        let buffer_size =
+            (instances.len() * std::mem::size_of::<OverlayInstance>()) as u64;
+
+        match &self.overlay_instance_buffer {
+            Some(buf) if buf.size() >= buffer_size => {
+                self.queue
+                    .write_buffer(buf, 0, bytemuck::cast_slice(&instances));
+            }
+            _ => {
+                self.overlay_instance_buffer = Some(
+                    self.device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("Overlay Instances"),
+                            contents: bytemuck::cast_slice(&instances),
+                            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                        }),
+                );
+            }
+        }
     }
 
     /// Render a frame with multiple panes, each getting its own scissor rect.
@@ -530,6 +615,23 @@ impl Renderer {
                 if sw > 0 && sh > 0 {
                     render_pass.set_scissor_rect(sx, sy, sw, sh);
                     render_pass.draw(0..6, *start..*start + *count);
+                }
+            }
+
+            // Draw UI overlays (dividers, focus dimming) on top of pane content
+            if self.overlay_instance_count > 0 {
+                if let Some(ref overlay_buf) = self.overlay_instance_buffer {
+                    // Reset scissor to full surface for overlay drawing
+                    render_pass.set_scissor_rect(
+                        0,
+                        0,
+                        self.surface_config.width,
+                        self.surface_config.height,
+                    );
+                    render_pass.set_pipeline(&self.overlay_pipeline);
+                    render_pass.set_bind_group(0, &self.overlay_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, overlay_buf.slice(..));
+                    render_pass.draw(0..6, 0..self.overlay_instance_count);
                 }
             }
         }

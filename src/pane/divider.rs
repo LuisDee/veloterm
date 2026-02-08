@@ -1,6 +1,7 @@
 // Divider geometry: compute divider rects from the pane tree layout.
 
 use super::{PaneNode, Rect, SplitDirection};
+use crate::config::theme::Color;
 
 /// Information about a single divider bar between panes.
 #[derive(Debug, Clone, PartialEq)]
@@ -44,6 +45,60 @@ pub fn hit_test_divider(point: (f32, f32), dividers: &[DividerInfo], margin: f32
         }
     }
     None
+}
+
+/// A UI overlay quad: a colored rectangle at a pixel position.
+/// Pure data structure — no GPU dependency. Used for dividers and focus overlays.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OverlayQuad {
+    /// Rectangle in physical pixels.
+    pub rect: Rect,
+    /// RGBA color.
+    pub color: [f32; 4],
+}
+
+/// Generate overlay quads for divider bars.
+/// Returns one quad per divider, colored with the appropriate theme color.
+/// If `hovered_index` matches a divider, uses `hover_color` instead.
+pub fn generate_divider_quads(
+    dividers: &[DividerInfo],
+    border_color: &Color,
+    hover_color: &Color,
+    hovered_index: Option<usize>,
+) -> Vec<OverlayQuad> {
+    dividers
+        .iter()
+        .enumerate()
+        .map(|(i, d)| {
+            let color = if Some(i) == hovered_index {
+                [hover_color.r, hover_color.g, hover_color.b, hover_color.a]
+            } else {
+                [border_color.r, border_color.g, border_color.b, border_color.a]
+            };
+            OverlayQuad {
+                rect: d.rect,
+                color,
+            }
+        })
+        .collect()
+}
+
+/// Generate overlay quads for unfocused pane dimming.
+/// Returns one translucent quad per unfocused pane rect.
+pub fn generate_unfocused_overlay_quads(
+    layout: &[(super::PaneId, Rect)],
+    focused_id: super::PaneId,
+    bg_color: &Color,
+    dim_alpha: f32,
+) -> Vec<OverlayQuad> {
+    layout
+        .iter()
+        .filter(|(id, _)| *id != focused_id)
+        .map(|(_, rect)| OverlayQuad {
+            rect: *rect,
+            color: [bg_color.r, bg_color.g, bg_color.b, dim_alpha],
+        })
+        .collect()
 }
 
 /// Calculate divider rects from the pane tree.
@@ -409,5 +464,119 @@ mod tests {
         assert_eq!(on, Some(0));
         let off = hit_test_divider((637.0, 360.0), &dividers, 0.0);
         assert_eq!(off, None);
+    }
+
+    // ── Divider quad generation tests ────────────────────────────────
+
+    fn border_color() -> Color {
+        Color { r: 0.24, g: 0.22, b: 0.20, a: 1.0 }
+    }
+
+    fn hover_color() -> Color {
+        Color { r: 0.80, g: 0.60, b: 0.40, a: 1.0 }
+    }
+
+    #[test]
+    fn divider_quads_empty_for_no_dividers() {
+        let quads = generate_divider_quads(&[], &border_color(), &hover_color(), None);
+        assert!(quads.is_empty());
+    }
+
+    #[test]
+    fn divider_quads_one_per_divider() {
+        let dividers = make_vertical_dividers();
+        let quads = generate_divider_quads(&dividers, &border_color(), &hover_color(), None);
+        assert_eq!(quads.len(), 1);
+    }
+
+    #[test]
+    fn divider_quad_uses_border_color_when_not_hovered() {
+        let dividers = make_vertical_dividers();
+        let bc = border_color();
+        let quads = generate_divider_quads(&dividers, &bc, &hover_color(), None);
+        assert_eq!(quads[0].color, [bc.r, bc.g, bc.b, bc.a]);
+    }
+
+    #[test]
+    fn divider_quad_uses_hover_color_when_hovered() {
+        let dividers = make_vertical_dividers();
+        let hc = hover_color();
+        let quads = generate_divider_quads(&dividers, &border_color(), &hc, Some(0));
+        assert_eq!(quads[0].color, [hc.r, hc.g, hc.b, hc.a]);
+    }
+
+    #[test]
+    fn divider_quad_rect_matches_divider_info() {
+        let dividers = make_vertical_dividers();
+        let quads = generate_divider_quads(&dividers, &border_color(), &hover_color(), None);
+        assert_eq!(quads[0].rect, dividers[0].rect);
+    }
+
+    #[test]
+    fn only_hovered_divider_gets_hover_color() {
+        let root = PaneNode::split(
+            SplitDirection::Vertical,
+            0.5,
+            PaneNode::leaf(PaneId(1)),
+            PaneNode::split(
+                SplitDirection::Horizontal,
+                0.5,
+                PaneNode::leaf(PaneId(2)),
+                PaneNode::leaf(PaneId(3)),
+            ),
+        );
+        let dividers = calculate_dividers(&root, Rect::new(0.0, 0.0, 1280.0, 720.0), 20.0);
+        let bc = border_color();
+        let hc = hover_color();
+        let quads = generate_divider_quads(&dividers, &bc, &hc, Some(1));
+        // First divider: border color
+        assert_eq!(quads[0].color, [bc.r, bc.g, bc.b, bc.a]);
+        // Second divider: hover color
+        assert_eq!(quads[1].color, [hc.r, hc.g, hc.b, hc.a]);
+    }
+
+    // ── Unfocused pane overlay tests ─────────────────────────────────
+
+    #[test]
+    fn no_overlay_for_single_pane() {
+        let layout = vec![(PaneId(1), Rect::new(0.0, 0.0, 1280.0, 720.0))];
+        let quads = generate_unfocused_overlay_quads(&layout, PaneId(1), &border_color(), 0.3);
+        assert!(quads.is_empty());
+    }
+
+    #[test]
+    fn overlay_for_unfocused_pane_in_two_pane_layout() {
+        let layout = vec![
+            (PaneId(1), Rect::new(0.0, 0.0, 640.0, 720.0)),
+            (PaneId(2), Rect::new(640.0, 0.0, 640.0, 720.0)),
+        ];
+        let bg = Color { r: 0.1, g: 0.09, b: 0.08, a: 1.0 };
+        let quads = generate_unfocused_overlay_quads(&layout, PaneId(1), &bg, 0.3);
+        assert_eq!(quads.len(), 1);
+        assert_eq!(quads[0].rect, Rect::new(640.0, 0.0, 640.0, 720.0));
+        assert_eq!(quads[0].color[3], 0.3); // dim alpha
+    }
+
+    #[test]
+    fn overlay_covers_all_unfocused_panes() {
+        let layout = vec![
+            (PaneId(1), Rect::new(0.0, 0.0, 640.0, 720.0)),
+            (PaneId(2), Rect::new(640.0, 0.0, 640.0, 360.0)),
+            (PaneId(3), Rect::new(640.0, 360.0, 640.0, 360.0)),
+        ];
+        let bg = Color { r: 0.1, g: 0.09, b: 0.08, a: 1.0 };
+        let quads = generate_unfocused_overlay_quads(&layout, PaneId(1), &bg, 0.3);
+        assert_eq!(quads.len(), 2);
+    }
+
+    #[test]
+    fn overlay_uses_bg_color_with_dim_alpha() {
+        let layout = vec![
+            (PaneId(1), Rect::new(0.0, 0.0, 640.0, 720.0)),
+            (PaneId(2), Rect::new(640.0, 0.0, 640.0, 720.0)),
+        ];
+        let bg = Color { r: 0.5, g: 0.4, b: 0.3, a: 1.0 };
+        let quads = generate_unfocused_overlay_quads(&layout, PaneId(2), &bg, 0.25);
+        assert_eq!(quads[0].color, [0.5, 0.4, 0.3, 0.25]);
     }
 }
