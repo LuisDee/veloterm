@@ -457,7 +457,7 @@ impl ViState {
             row -= 1;
             col = ctx.line_len(row).saturating_sub(1);
         } else if col > 0 {
-            col -= 1;
+            col = col.saturating_sub(1);
         }
 
         // Skip non-word characters backward
