@@ -3190,17 +3190,17 @@ blink = false
     #[test]
     fn config_reload_padding_updates_config() {
         let mut app = App::new(WindowConfig::default(), Config::default());
-        assert_eq!(app.app_config.padding.top, 12.0);
+        assert_eq!(app.app_config.padding.top, 16.0);
 
         let mut new_config = Config::default();
         new_config.padding.top = 24.0;
-        new_config.padding.left = 16.0;
+        new_config.padding.left = 20.0;
         let delta = app.app_config.diff(&new_config);
         assert!(delta.padding_changed);
 
         app.handle_config_reload(new_config, delta);
         assert_eq!(app.app_config.padding.top, 24.0);
-        assert_eq!(app.app_config.padding.left, 16.0);
+        assert_eq!(app.app_config.padding.left, 20.0);
     }
 
     #[test]

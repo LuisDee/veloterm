@@ -185,10 +185,10 @@ struct RawPaddingConfig {
 impl Default for RawPaddingConfig {
     fn default() -> Self {
         Self {
-            top: 12.0,
-            bottom: 12.0,
-            left: 12.0,
-            right: 12.0,
+            top: 16.0,
+            bottom: 16.0,
+            left: 16.0,
+            right: 16.0,
         }
     }
 }
@@ -317,10 +317,10 @@ impl Default for FontConfig {
 impl Default for PaddingConfig {
     fn default() -> Self {
         Self {
-            top: 12.0,
-            bottom: 12.0,
-            left: 12.0,
-            right: 12.0,
+            top: 16.0,
+            bottom: 16.0,
+            left: 16.0,
+            right: 16.0,
         }
     }
 }
@@ -519,10 +519,10 @@ display_family = "Georgia"
 
 [padding]
 # Terminal content padding in pixels
-top = 12.0
-bottom = 12.0
-left = 12.0
-right = 12.0
+top = 16.0
+bottom = 16.0
+left = 16.0
+right = 16.0
 
 [colors]
 # Theme: "claude_dark", "claude_light", or "claude_warm"
@@ -637,10 +637,10 @@ mod tests {
     #[test]
     fn default_padding() {
         let config = Config::default();
-        assert_eq!(config.padding.top, 12.0);
-        assert_eq!(config.padding.bottom, 12.0);
-        assert_eq!(config.padding.left, 12.0);
-        assert_eq!(config.padding.right, 12.0);
+        assert_eq!(config.padding.top, 16.0);
+        assert_eq!(config.padding.bottom, 16.0);
+        assert_eq!(config.padding.left, 16.0);
+        assert_eq!(config.padding.right, 16.0);
     }
 
     #[test]
@@ -738,7 +738,7 @@ size = 18.0
         assert!(config.cursor.blink);
         assert_eq!(config.scrollback.lines, 10_000);
         assert_eq!(config.performance.fps_limit, 60);
-        assert_eq!(config.padding.top, 12.0);
+        assert_eq!(config.padding.top, 16.0);
     }
 
     #[test]
@@ -748,7 +748,7 @@ size = 18.0
         assert_eq!(config.font.family, "JetBrains Mono");
         assert_eq!(config.font.line_height, 1.5);
         assert_eq!(config.colors.theme, "claude_dark");
-        assert_eq!(config.padding.top, 12.0);
+        assert_eq!(config.padding.top, 16.0);
     }
 
     #[test]
