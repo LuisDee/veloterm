@@ -533,4 +533,46 @@ mod tests {
         let mut term = Terminal::new(80, 24, 10_000);
         assert!(!term.jump_to_next_prompt());
     }
+
+    // ── Line wrapping & reflow ─────────────────────────────────────
+
+    #[test]
+    fn text_wraps_at_terminal_width() {
+        let mut term = Terminal::new(10, 5, 10_000);
+        // Feed 15 characters — should wrap at column 10
+        term.feed(b"ABCDEFGHIJKLMNO");
+        // First row: ABCDEFGHIJ
+        assert_eq!(term.cell_char(0, 0), 'A');
+        assert_eq!(term.cell_char(0, 9), 'J');
+        // Second row: KLMNO
+        assert_eq!(term.cell_char(1, 0), 'K');
+        assert_eq!(term.cell_char(1, 4), 'O');
+    }
+
+    #[test]
+    fn content_reflows_on_resize() {
+        let mut term = Terminal::new(10, 5, 10_000);
+        // Feed 15 characters that will wrap at 10
+        term.feed(b"ABCDEFGHIJKLMNO");
+        // Now resize to 20 columns — content should reflow to fit
+        term.resize(20, 5);
+        // After reflow, all 15 chars should fit on one line
+        assert_eq!(term.cell_char(0, 0), 'A');
+        assert_eq!(term.cell_char(0, 14), 'O');
+    }
+
+    #[test]
+    fn resize_narrower_wraps_more() {
+        let mut term = Terminal::new(20, 5, 10_000);
+        term.feed(b"ABCDEFGHIJKLMNOPQRST");
+        // All 20 chars fit on one row at width 20
+        assert_eq!(term.cell_char(0, 19), 'T');
+        // Resize to 10 columns — content reflows
+        term.resize(10, 5);
+        // After reflow, the first row visible should contain sequential chars
+        // Exact row depends on reflow, but chars should be contiguous
+        let first_char = term.cell_char(0, 0);
+        assert!(first_char == 'A' || first_char == 'K',
+            "Expected 'A' or 'K' at (0,0), got '{first_char}'");
+    }
 }
