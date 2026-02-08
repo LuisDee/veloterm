@@ -157,18 +157,43 @@ pub enum TabCommand {
 
 /// Check if a key event matches a tab command keybinding.
 ///
-/// Hardcoded defaults (Ctrl+Shift prefix):
-/// - Ctrl+Shift+T: new tab
+/// Platform-aware shortcuts:
+/// - Ctrl+Shift+T / Cmd+T (macOS): new tab
 /// - Ctrl+Shift+Tab / Ctrl+Shift+PageDown: next tab
 /// - Ctrl+Shift+PageUp: previous tab
-/// - Ctrl+Shift+1..9: select tab by number
+/// - Ctrl+Shift+1..9 / Cmd+1..9 (macOS): select tab by number
 /// - Ctrl+Shift+{ / }: move tab left/right
+/// - Cmd+Shift+[ / ] (macOS): previous/next tab
 pub fn match_tab_command(
     logical_key: &Key,
     modifiers: ModifiersState,
 ) -> Option<TabCommand> {
     let ctrl_shift = modifiers.control_key() && modifiers.shift_key();
-    if !ctrl_shift {
+
+    // macOS: Cmd+key (no Shift, no Ctrl) for T, 1-9
+    let cmd_only = cfg!(target_os = "macos")
+        && modifiers.super_key()
+        && !modifiers.control_key()
+        && !modifiers.shift_key();
+
+    // macOS: Cmd+Shift+key (no Ctrl) for [ and ]
+    let cmd_shift = cfg!(target_os = "macos")
+        && modifiers.super_key()
+        && modifiers.shift_key()
+        && !modifiers.control_key();
+
+    // Cmd+Shift+[ / ] for prev/next tab (macOS)
+    if cmd_shift {
+        if let Key::Character(s) = logical_key {
+            match s.as_ref() {
+                "[" | "{" => return Some(TabCommand::PrevTab),
+                "]" | "}" => return Some(TabCommand::NextTab),
+                _ => {}
+            }
+        }
+    }
+
+    if !ctrl_shift && !cmd_only {
         return None;
     }
 
@@ -177,8 +202,8 @@ pub fn match_tab_command(
             let lower = s.to_lowercase();
             match lower.as_str() {
                 "t" => Some(TabCommand::NewTab),
-                "{" => Some(TabCommand::MoveTabLeft),
-                "}" => Some(TabCommand::MoveTabRight),
+                "{" if ctrl_shift => Some(TabCommand::MoveTabLeft),
+                "}" if ctrl_shift => Some(TabCommand::MoveTabRight),
                 "1" => Some(TabCommand::SelectTab(0)),
                 "2" => Some(TabCommand::SelectTab(1)),
                 "3" => Some(TabCommand::SelectTab(2)),
@@ -191,7 +216,7 @@ pub fn match_tab_command(
                 _ => None,
             }
         }
-        Key::Named(named) => match named {
+        Key::Named(named) if ctrl_shift => match named {
             NamedKey::Tab => Some(TabCommand::NextTab),
             NamedKey::PageUp => Some(TabCommand::PrevTab),
             NamedKey::PageDown => Some(TabCommand::NextTab),
@@ -851,6 +876,107 @@ mod tests {
     fn tab_cmd_no_match_unbound_key() {
         let result = match_tab_command(&Key::Character("x".into()), ctrl_shift());
         assert_eq!(result, None);
+    }
+
+    // ── Tab command: macOS Cmd bindings ────────────────────────────
+
+    /// Helper: macOS Cmd modifier (Super key only).
+    fn cmd_mod() -> ModifiersState {
+        ModifiersState::SUPER
+    }
+
+    /// Helper: macOS Cmd+Shift modifier.
+    fn cmd_shift_mod() -> ModifiersState {
+        ModifiersState::SUPER | ModifiersState::SHIFT
+    }
+
+    #[test]
+    fn tab_cmd_new_tab_cmd_t_macos() {
+        let result = match_tab_command(&Key::Character("t".into()), cmd_mod());
+        if cfg!(target_os = "macos") {
+            assert_eq!(result, Some(TabCommand::NewTab));
+        } else {
+            assert_eq!(result, None);
+        }
+    }
+
+    #[test]
+    fn tab_cmd_select_tab_cmd_1_macos() {
+        let result = match_tab_command(&Key::Character("1".into()), cmd_mod());
+        if cfg!(target_os = "macos") {
+            assert_eq!(result, Some(TabCommand::SelectTab(0)));
+        } else {
+            assert_eq!(result, None);
+        }
+    }
+
+    #[test]
+    fn tab_cmd_select_tab_cmd_9_macos() {
+        let result = match_tab_command(&Key::Character("9".into()), cmd_mod());
+        if cfg!(target_os = "macos") {
+            assert_eq!(result, Some(TabCommand::SelectTab(8)));
+        } else {
+            assert_eq!(result, None);
+        }
+    }
+
+    #[test]
+    fn tab_cmd_prev_tab_cmd_shift_bracket_macos() {
+        let result = match_tab_command(&Key::Character("[".into()), cmd_shift_mod());
+        if cfg!(target_os = "macos") {
+            assert_eq!(result, Some(TabCommand::PrevTab));
+        } else {
+            assert_eq!(result, None);
+        }
+    }
+
+    #[test]
+    fn tab_cmd_next_tab_cmd_shift_bracket_macos() {
+        let result = match_tab_command(&Key::Character("]".into()), cmd_shift_mod());
+        if cfg!(target_os = "macos") {
+            assert_eq!(result, Some(TabCommand::NextTab));
+        } else {
+            assert_eq!(result, None);
+        }
+    }
+
+    #[test]
+    fn tab_cmd_prev_tab_cmd_shift_brace_macos() {
+        // Shift+[ produces { on some layouts
+        let result = match_tab_command(&Key::Character("{".into()), cmd_shift_mod());
+        if cfg!(target_os = "macos") {
+            assert_eq!(result, Some(TabCommand::PrevTab));
+        } else {
+            assert_eq!(result, None);
+        }
+    }
+
+    #[test]
+    fn tab_cmd_next_tab_cmd_shift_brace_macos() {
+        // Shift+] produces } on some layouts
+        let result = match_tab_command(&Key::Character("}".into()), cmd_shift_mod());
+        if cfg!(target_os = "macos") {
+            assert_eq!(result, Some(TabCommand::NextTab));
+        } else {
+            assert_eq!(result, None);
+        }
+    }
+
+    #[test]
+    fn tab_cmd_cmd_only_does_not_match_named_keys() {
+        // Cmd+Tab should NOT match (OS handles it)
+        let result = match_tab_command(&Key::Named(NamedKey::Tab), cmd_mod());
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn tab_cmd_ctrl_shift_still_works_with_cmd_bindings() {
+        // Backward compat: Ctrl+Shift+T still works
+        let result = match_tab_command(&Key::Character("T".into()), ctrl_shift());
+        assert_eq!(result, Some(TabCommand::NewTab));
+        // Ctrl+Shift+1 still works
+        let result = match_tab_command(&Key::Character("1".into()), ctrl_shift());
+        assert_eq!(result, Some(TabCommand::SelectTab(0)));
     }
 
     // ── Search command matching (2.3) ───────────────────────────────
