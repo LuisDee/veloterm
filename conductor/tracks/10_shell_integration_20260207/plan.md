@@ -79,48 +79,48 @@ Build on shell state to enable prompt jumping and command duration tracking.
 
 ---
 
-## Phase 3: Notifications, Tab Titles & Shell Scripts
+## Phase 3: Notifications, Tab Titles & Shell Scripts [checkpoint: PENDING]
 
 In-app notification badges, CWD-driven tab titles, and shell integration scripts.
 
-### 3.1 Write tests for long-running command notification
-- [ ] Test notification triggered when command > threshold in non-focused pane
-- [ ] Test no notification for focused pane
-- [ ] Test no notification when duration < threshold
-- [ ] Test notification badge set on correct tab
-- [ ] Test badge clears when tab/pane receives focus
-- [ ] Test notification respects config enable/disable toggle
+### 3.1 Write tests for long-running command notification <!-- e731fec -->
+- [x] Test notification triggered when command > threshold in non-focused pane
+- [x] Test no notification for focused pane
+- [x] Test no notification when duration < threshold
+- [x] Test notification badge set on correct tab
+- [x] Test badge clears when tab/pane receives focus
+- [x] Test notification respects config enable/disable toggle
 
-### 3.2 Implement long-running command notification
-- [ ] Add `has_notification` badge flag to Tab struct
-- [ ] On command completion in non-focused pane, check duration vs threshold
-- [ ] Set badge flag on owning tab
-- [ ] Clear badge on tab focus/switch
-- [ ] Render badge indicator in tab bar UI
-- [ ] Mark damage on tab bar when badge changes
+### 3.2 Implement long-running command notification <!-- e731fec -->
+- [x] Add `has_notification` badge flag to Tab struct
+- [x] On command completion in non-focused pane, check duration vs threshold
+- [x] Set badge flag on owning tab
+- [x] Clear badge on tab focus/switch
+- [x] Render badge indicator in tab bar UI
+- [x] Mark damage on tab bar when badge changes
 
-### 3.3 Write tests for tab title from CWD
-- [ ] Test CWD change updates tab title to directory name
-- [ ] Test explicit OSC 0/2 title takes priority over CWD
-- [ ] Test CWD title only updates for active pane in tab
-- [ ] Test title reverts to CWD when OSC title is cleared
+### 3.3 Write tests for tab title from CWD <!-- e731fec -->
+- [x] Test CWD change updates tab title to directory name
+- [x] Test explicit OSC 0/2 title takes priority over CWD
+- [x] Test CWD title only updates for active pane in tab
+- [x] Test title reverts to CWD when OSC title is cleared
 
-### 3.4 Implement tab title from CWD
-- [ ] On OSC 7 CWD change, extract last path component
-- [ ] Update tab title via TabManager if pane is active and no explicit title set
-- [ ] Track whether title was set explicitly (OSC 0/2) vs derived from CWD
+### 3.4 Implement tab title from CWD <!-- e731fec -->
+- [x] On OSC 7 CWD change, extract last path component
+- [x] Update tab title via TabManager if pane is active and no explicit title set
+- [x] Track whether title was set explicitly (OSC 0/2) vs derived from CWD
 
-### 3.5 Write tests for shell integration scripts
-- [ ] Test bash script emits correct OSC 133 sequences (parse expected output)
-- [ ] Test zsh script emits correct OSC 133 sequences
-- [ ] Test fish script emits correct OSC 133 sequences
-- [ ] Test all scripts emit OSC 7 with CWD
-- [ ] Test scripts don't interfere with existing PROMPT_COMMAND/precmd
+### 3.5 Write tests for shell integration scripts <!-- 53d6fd5 -->
+- [x] Test bash script emits correct OSC 133 sequences (parse expected output)
+- [x] Test zsh script emits correct OSC 133 sequences
+- [x] Test fish script emits correct OSC 133 sequences
+- [x] Test all scripts emit OSC 7 with CWD
+- [x] Test scripts don't interfere with existing PROMPT_COMMAND/precmd
 
-### 3.6 Implement shell integration scripts
-- [ ] Create `shell/bash-integration.sh` with OSC 133 + OSC 7 emission
-- [ ] Create `shell/zsh-integration.sh` with precmd/preexec hooks
-- [ ] Create `shell/fish-integration.fish` with fish event handlers
-- [ ] Ensure scripts are non-destructive (append to existing hooks, don't replace)
+### 3.6 Implement shell integration scripts <!-- 53d6fd5 -->
+- [x] Create `shell/bash-integration.sh` with OSC 133 + OSC 7 emission
+- [x] Create `shell/zsh-integration.sh` with precmd/preexec hooks
+- [x] Create `shell/fish-integration.fish` with fish event handlers
+- [x] Ensure scripts are non-destructive (append to existing hooks, don't replace)
 
 ### Phase 3 Completion: Verification and Checkpointing
