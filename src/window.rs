@@ -112,6 +112,10 @@ pub struct App {
     event_proxy: Option<EventLoopProxy<UserEvent>>,
     screenshot_requested: bool,
     hovered_tab: Option<usize>,
+    /// Tab drag state for drag-to-reorder.
+    tab_drag_index: Option<usize>,
+    tab_drag_start_x: f32,
+    tab_drag_active: bool,
 }
 
 impl App {
@@ -135,6 +139,9 @@ impl App {
             event_proxy: None,
             screenshot_requested: false,
             hovered_tab: None,
+            tab_drag_index: None,
+            tab_drag_start_x: 0.0,
+            tab_drag_active: false,
         }
     }
 
@@ -1563,6 +1570,24 @@ impl ApplicationHandler<UserEvent> for App {
                             window.request_redraw();
                         }
                     }
+                    // Tab drag-to-reorder: activate after 5px movement, swap on hover
+                    if let Some(drag_idx) = self.tab_drag_index {
+                        let dx = (position.x as f32 - self.tab_drag_start_x).abs();
+                        if !self.tab_drag_active && dx > 5.0 {
+                            self.tab_drag_active = true;
+                        }
+                        if self.tab_drag_active && tw > 0.0 {
+                            let target = (position.x as f32 / tw) as usize;
+                            let target = target.min(self.tab_manager.tab_count().saturating_sub(1));
+                            if target != drag_idx {
+                                self.tab_manager.move_tab(drag_idx, target);
+                                self.tab_drag_index = Some(target);
+                                if let Some(window) = &self.window {
+                                    window.request_redraw();
+                                }
+                            }
+                        }
+                    }
                     // Reset pane interaction cursor and link hover
                     if self.link_hover_active {
                         self.link_hover_active = false;
@@ -1654,6 +1679,12 @@ impl ApplicationHandler<UserEvent> for App {
                 let cursor_pos = self.interaction.cursor_pos();
                 let raw_y = cursor_pos.1 + TAB_BAR_HEIGHT; // reconstruct raw y
 
+                // End tab drag on any mouse release
+                if btn_state == ElementState::Released && self.tab_drag_index.is_some() {
+                    self.tab_drag_index = None;
+                    self.tab_drag_active = false;
+                }
+
                 if raw_y < TAB_BAR_HEIGHT {
                     // Click in tab bar
                     if btn_state == ElementState::Pressed {
@@ -1672,6 +1703,10 @@ impl ApplicationHandler<UserEvent> for App {
                                         TabCommand::SelectTab(idx),
                                         event_loop,
                                     );
+                                    // Begin drag tracking
+                                    self.tab_drag_index = Some(idx);
+                                    self.tab_drag_start_x = cursor_pos.0;
+                                    self.tab_drag_active = false;
                                 }
                                 TabBarAction::CloseTab(idx) => {
                                     // Close specific tab by index

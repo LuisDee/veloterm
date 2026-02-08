@@ -534,4 +534,34 @@ mod tests {
         // Should be SelectTab, not CloseTab, since close button is hidden
         assert_eq!(result, Some(TabBarAction::SelectTab(1)));
     }
+
+    // ── Drag target calculation ────────────────────────────────────
+
+    #[test]
+    fn drag_target_index_from_cursor_x() {
+        let tw = tab_width(1280.0, 3);
+        // Cursor at middle of tab 0 → index 0
+        assert_eq!((tw * 0.5 / tw) as usize, 0);
+        // Cursor at middle of tab 1 → index 1
+        assert_eq!((tw * 1.5 / tw) as usize, 1);
+        // Cursor at middle of tab 2 → index 2
+        assert_eq!((tw * 2.5 / tw) as usize, 2);
+    }
+
+    #[test]
+    fn move_tab_preserves_active_tracking() {
+        setup();
+        let mut mgr = TabManager::new();
+        mgr.set_title(0, "A");
+        let _ = mgr.new_tab();
+        mgr.set_title(1, "B");
+        let _ = mgr.new_tab();
+        mgr.set_title(2, "C");
+        // Active is 2 (C), drag it to position 0
+        mgr.move_tab(2, 0);
+        assert_eq!(mgr.active_tab().title, "C");
+        assert_eq!(mgr.active_index(), 0);
+        assert_eq!(mgr.tabs()[1].title, "A");
+        assert_eq!(mgr.tabs()[2].title, "B");
+    }
 }
