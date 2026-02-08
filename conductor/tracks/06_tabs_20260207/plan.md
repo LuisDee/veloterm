@@ -52,7 +52,7 @@
 ### Phase 2 Completion
 - [x] Phase completion verification and checkpointing
 
-## Phase 3: App Integration & Visual Validation
+## Phase 3: App Integration & Visual Validation [checkpoint: 3f6b5bd]
 
 ### Task 3.1: Wire TabManager into App <!-- aa7df7b -->
 - [x] Replace `App.pane_tree: PaneTree` with `App.tab_manager: TabManager`
