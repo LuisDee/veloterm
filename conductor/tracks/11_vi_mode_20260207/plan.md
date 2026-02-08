@@ -73,20 +73,20 @@
 - `n` jumps to next match, `N` to previous (direction-aware: / = forward, ? = backward)
 - **Tests:** Search forward/backward, n/N navigation, wrapping, cancel behavior
 
-### 3.2 [ ] Implement vi cursor rendering and CELL_FLAG_VI_CURSOR
+### 3.2 [x] Implement vi cursor rendering and CELL_FLAG_VI_CURSOR <!-- ab24dc6 -->
 - Add `CELL_FLAG_VI_CURSOR` constant to grid_renderer
 - In vi-mode, mark the cell at vi cursor position with this flag
 - Renderer draws vi cursor as a distinct block overlay (e.g., inverted colors)
 - Vi cursor is independent of terminal cursor
 - **Tests:** Flag applied at correct position, flag cleared on mode exit, no interference with selection flags
 
-### 3.3 [ ] Implement mode indicator in status bar
+### 3.3 [x] Implement mode indicator in status bar <!-- 94c0c50 -->
 - Render mode text at the bottom of the pane: "-- NORMAL --", "-- VISUAL --", "-- VISUAL LINE --", "-- VISUAL BLOCK --"
 - During search, show "/ <query>" or "? <query>"
 - Status bar only visible when vi-mode is active
 - **Tests:** Correct text for each mode, search prompt display, hidden when not in vi-mode
 
-### 3.4 [ ] Integration: wire vi-mode into main event loop
+### 3.4 [x] Integration: wire vi-mode into main event loop <!-- e8c74bb -->
 - In the main event loop, when a pane is in vi-mode, route keyboard input to the vi handler
 - Ensure PTY receives no input while vi-mode is active
 - Ensure per-pane independence (multiple panes, only focused pane affected)
