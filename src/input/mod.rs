@@ -246,6 +246,51 @@ pub fn should_toggle_vi_mode(
     matches!(logical_key, Key::Named(NamedKey::Space))
 }
 
+/// An application-level command triggered by a keybinding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppCommand {
+    IncreaseFontSize,
+    DecreaseFontSize,
+    ResetFontSize,
+}
+
+/// Return the platform-appropriate "primary" modifier.
+/// macOS uses Super (Cmd), others use Ctrl.
+fn is_primary_modifier(modifiers: ModifiersState) -> bool {
+    if cfg!(target_os = "macos") {
+        modifiers.super_key() && !modifiers.control_key() && !modifiers.shift_key()
+    } else {
+        modifiers.control_key() && !modifiers.super_key() && !modifiers.shift_key()
+    }
+}
+
+/// Check if a key event matches an application command keybinding.
+///
+/// Platform-aware shortcuts:
+/// - Cmd+= / Cmd+Plus (macOS) or Ctrl+= / Ctrl+Plus (Linux): increase font size
+/// - Cmd+Minus (macOS) or Ctrl+Minus (Linux): decrease font size
+/// - Cmd+0 (macOS) or Ctrl+0 (Linux): reset font size
+pub fn match_app_command(
+    logical_key: &Key,
+    modifiers: ModifiersState,
+) -> Option<AppCommand> {
+    if !is_primary_modifier(modifiers) {
+        return None;
+    }
+
+    match logical_key {
+        Key::Character(s) => {
+            match s.as_ref() {
+                "=" | "+" => Some(AppCommand::IncreaseFontSize),
+                "-" => Some(AppCommand::DecreaseFontSize),
+                "0" => Some(AppCommand::ResetFontSize),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Translate a winit key event into terminal byte sequences to send to the PTY.
 ///
 /// Returns `None` if the key event should not produce any output (e.g. modifier-only
@@ -1027,5 +1072,59 @@ mod tests {
     #[test]
     fn input_mode_defaults_to_normal() {
         assert_eq!(InputMode::default(), InputMode::Normal);
+    }
+
+    // ── App command matching (font size) ─────────────────────────
+
+    /// Helper: platform primary modifier (Super on macOS, Ctrl on Linux).
+    fn primary_mod() -> ModifiersState {
+        if cfg!(target_os = "macos") {
+            ModifiersState::SUPER
+        } else {
+            ModifiersState::CONTROL
+        }
+    }
+
+    #[test]
+    fn app_cmd_increase_font_equals() {
+        let result = match_app_command(&Key::Character("=".into()), primary_mod());
+        assert_eq!(result, Some(AppCommand::IncreaseFontSize));
+    }
+
+    #[test]
+    fn app_cmd_increase_font_plus() {
+        let result = match_app_command(&Key::Character("+".into()), primary_mod());
+        assert_eq!(result, Some(AppCommand::IncreaseFontSize));
+    }
+
+    #[test]
+    fn app_cmd_decrease_font() {
+        let result = match_app_command(&Key::Character("-".into()), primary_mod());
+        assert_eq!(result, Some(AppCommand::DecreaseFontSize));
+    }
+
+    #[test]
+    fn app_cmd_reset_font() {
+        let result = match_app_command(&Key::Character("0".into()), primary_mod());
+        assert_eq!(result, Some(AppCommand::ResetFontSize));
+    }
+
+    #[test]
+    fn app_cmd_no_match_without_modifier() {
+        let result = match_app_command(&Key::Character("=".into()), no_mods());
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn app_cmd_no_match_wrong_modifier() {
+        // Ctrl+Shift should not trigger app commands
+        let result = match_app_command(&Key::Character("=".into()), ctrl_shift());
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn app_cmd_no_match_unbound_key() {
+        let result = match_app_command(&Key::Character("a".into()), primary_mod());
+        assert_eq!(result, None);
     }
 }
