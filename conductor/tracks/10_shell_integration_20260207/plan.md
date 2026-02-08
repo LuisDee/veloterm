@@ -46,34 +46,34 @@ Core infrastructure: custom event listener, shell state struct, OSC 133/7/0 pars
 
 ---
 
-## Phase 2: Prompt Navigation & Command Timing
+## Phase 2: Prompt Navigation & Command Timing [checkpoint: PENDING]
 
 Build on shell state to enable prompt jumping and command duration tracking.
 
-### 2.1 Write tests for prompt navigation
-- [ ] Test jump to previous prompt from middle of scrollback
-- [ ] Test jump to next prompt from middle of scrollback
-- [ ] Test jump to previous prompt when already at first prompt (no-op)
-- [ ] Test jump to next prompt when already at last prompt (no-op)
-- [ ] Test prompt navigation with no prompts recorded (no-op)
-- [ ] Test prompt navigation respects current viewport position
+### 2.1 Write tests for prompt navigation <!-- 3164e36 -->
+- [x] Test jump to previous prompt from middle of scrollback
+- [x] Test jump to next prompt from middle of scrollback
+- [x] Test jump to previous prompt when already at first prompt (no-op)
+- [x] Test jump to next prompt when already at last prompt (no-op)
+- [x] Test prompt navigation with no prompts recorded (no-op)
+- [x] Test prompt navigation respects current viewport position
 
-### 2.2 Implement prompt navigation
-- [ ] Add `previous_prompt()` and `next_prompt()` methods to ShellState
-- [ ] Integrate prompt navigation with Terminal's scroll position
-- [ ] Add keybinding actions for prompt navigation (Ctrl+Shift+Up/Down)
-- [ ] Wire keybindings through existing input handling in window.rs
+### 2.2 Implement prompt navigation <!-- 3164e36 -->
+- [x] Add `previous_prompt()` and `next_prompt()` methods to ShellState
+- [x] Integrate prompt navigation with Terminal's scroll position
+- [x] Add keybinding actions for prompt navigation (Ctrl+Shift+P/N)
+- [x] Wire keybindings through existing input handling in window.rs
 
-### 2.3 Write tests for command timing
-- [ ] Test command duration calculation (end - start)
-- [ ] Test command history stores last N commands with timing
-- [ ] Test timing data accessible per-pane
-- [ ] Test multiple sequential commands each tracked independently
+### 2.3 Write tests for command timing <!-- 3164e36 -->
+- [x] Test command duration calculation (end - start)
+- [x] Test command history stores last N commands with timing
+- [x] Test timing data accessible per-pane
+- [x] Test multiple sequential commands each tracked independently
 
-### 2.4 Implement command timing
-- [ ] Add `CommandRecord` struct (start, end, duration, exit_status)
-- [ ] Store command history in ShellState (bounded VecDeque)
-- [ ] Update timing on OSC 133;B (start) and OSC 133;D (end) events
+### 2.4 Implement command timing <!-- 3164e36 -->
+- [x] Add `CommandRecord` struct (start, end, duration, exit_status)
+- [x] Store command history in ShellState (bounded VecDeque)
+- [x] Update timing on OSC 133;B (start) and OSC 133;D (end) events
 
 ### Phase 2 Completion: Verification and Checkpointing
 
