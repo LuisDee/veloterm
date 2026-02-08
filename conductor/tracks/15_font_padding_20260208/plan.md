@@ -65,7 +65,7 @@
 - [ ] On size change: rebuild atlas → recalculate all pane grid dimensions → resize all PTYs → trigger full redraw
 - [ ] Write tests: size increase/decrease math, boundary clamping, reset to default
 
-### Task 3.3: Config hot-reload for font and padding
+### Task 3.3: Config hot-reload for font and padding [x] <!-- 7364012 -->
 - [ ] Wire config watcher `font_changed` delta to trigger atlas rebuild + grid recalculation
 - [ ] Wire config watcher `padding_changed` delta to trigger grid recalculation + redraw
 - [ ] Invalid font names: log warning, fall back to next in chain
