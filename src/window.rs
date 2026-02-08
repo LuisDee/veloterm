@@ -87,6 +87,8 @@ pub struct PaneState {
     pub vi_state: Option<crate::vi_mode::ViState>,
     /// Per-pane cursor state for rendering and blink.
     pub cursor: crate::renderer::cursor::CursorState,
+    /// Per-pane mouse selection state (click counting, drag, active selection).
+    pub mouse_selection: crate::input::mouse::MouseSelectionState,
 }
 
 /// Main application state implementing the winit event loop handler.
@@ -173,7 +175,7 @@ impl App {
                 if !self.app_config.cursor.blink {
                     cursor.set_blink_rate(0);
                 }
-                self.pane_states.insert(pane_id, PaneState { terminal, pty, vi_state: None, cursor });
+                self.pane_states.insert(pane_id, PaneState { terminal, pty, vi_state: None, cursor, mouse_selection: crate::input::mouse::MouseSelectionState::new() });
             }
             Err(e) => {
                 log::error!("Failed to spawn PTY for pane {:?}: {e}", pane_id);
@@ -2313,6 +2315,7 @@ blink = false
                 pty: crate::pty::PtySession::new(&crate::pty::default_shell(), 80, 24).unwrap(),
                 vi_state: None,
                 cursor: crate::renderer::cursor::CursorState::new(),
+                mouse_selection: crate::input::mouse::MouseSelectionState::new(),
             },
         );
 
@@ -2341,6 +2344,7 @@ blink = false
                 pty: crate::pty::PtySession::new(&crate::pty::default_shell(), 80, 24).unwrap(),
                 vi_state: None,
                 cursor: crate::renderer::cursor::CursorState::new(),
+                mouse_selection: crate::input::mouse::MouseSelectionState::new(),
             },
         );
 
@@ -2574,6 +2578,7 @@ blink = false
                 pty: crate::pty::PtySession::new(&crate::pty::default_shell(), 80, 24).unwrap(),
                 vi_state: None,
                 cursor: crate::renderer::cursor::CursorState::new(),
+                mouse_selection: crate::input::mouse::MouseSelectionState::new(),
             },
         );
 
@@ -2602,6 +2607,7 @@ blink = false
                 pty: crate::pty::PtySession::new(&crate::pty::default_shell(), 80, 24).unwrap(),
                 vi_state: None,
                 cursor: crate::renderer::cursor::CursorState::new(),
+                mouse_selection: crate::input::mouse::MouseSelectionState::new(),
             },
         );
 
@@ -2626,6 +2632,7 @@ blink = false
                 pty: crate::pty::PtySession::new(&crate::pty::default_shell(), 80, 24).unwrap(),
                 vi_state: None,
                 cursor: crate::renderer::cursor::CursorState::new(),
+                mouse_selection: crate::input::mouse::MouseSelectionState::new(),
             },
         );
 

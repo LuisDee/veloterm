@@ -1,6 +1,7 @@
 // Keyboard input translation: converts winit KeyEvents to terminal byte sequences.
 
 pub mod clipboard;
+pub mod mouse;
 pub mod selection;
 
 use std::collections::HashMap;
