@@ -12,7 +12,7 @@
 - [ ] Add `padding_changed` flag to `ConfigDelta`
 - [ ] Write tests: parsing, defaults, validation (min 8px size, padding >= 0, line_height 0.5–3.0)
 
-### Task 1.2: Font family resolution with fallback chain
+### Task 1.2: Font family resolution with fallback chain [x] <!-- b986645 -->
 - [ ] Modify `GlyphAtlas::new()` to accept font family name and line_height multiplier parameters
 - [ ] Implement font family resolution: try configured family → fallback chain → system monospace
 - [ ] Bundle JetBrains Mono as `include_bytes!()` compiled-in resource
@@ -20,7 +20,7 @@
 - [ ] Update line_height calculation to use configurable multiplier (default 1.5x, was hardcoded 1.6x)
 - [ ] Write tests: fallback chain resolution, bundled font loads, cell dimensions with custom line_height
 
-### Task 1.3: Wire font config through renderer
+### Task 1.3: Wire font config through renderer [x] <!-- b986645 -->
 - [ ] Update `Renderer::new()` to accept `&Config` (or font family + size + line_height) instead of just `font_size`
 - [ ] Pass font family and line_height from config to `GlyphAtlas::new()`
 - [ ] Update `window.rs` renderer creation to pass config
