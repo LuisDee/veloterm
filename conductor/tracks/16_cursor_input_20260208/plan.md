@@ -50,7 +50,7 @@
 - Verify no regressions in existing key translation
 - Add any missing edge case tests
 
-### Task 2.3: Final integration and visual validation [ ]
+### Task 2.3: Final integration and visual validation [x] <!-- 9f81b81 -->
 - Run full test suite — all existing + new tests pass
 - Build and run application — verify cursor renders at correct position
 - Verify cursor blinks at ~500ms by default
