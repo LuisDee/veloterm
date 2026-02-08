@@ -5,25 +5,25 @@
 Restructure the Theme struct and update claude_dark to reference values.
 
 ### Task 1.1: Extend Theme struct with reference fields
-- [ ] Add new fields: `surface`, `surface_raised`, `terminal_bg`, `text_secondary`, `text_dim`, `border_subtle`, `blue`
-- [ ] Rename `text_primary` → `text`, `pane_background` → `terminal_bg`, `text_muted` → `text_secondary`
-- [ ] Keep `accent_hover`, `prompt`, `selection`, `search_match`, `search_match_active` (still needed)
-- [ ] Update all three theme constructors with values for new fields
-- [ ] TDD: tests for new field values on claude_dark matching exact reference hex
+- [x] Add new fields: `surface`, `surface_raised`, `terminal_bg`, `text_secondary`, `text_dim`, `border_subtle`, `blue` <!-- 3a1042a -->
+- [x] Rename `text_primary` → `text`, `pane_background` → `terminal_bg`, `text_muted` → `text_secondary` <!-- 3a1042a -->
+- [x] Keep `accent_hover`, `prompt`, `selection`, `search_match`, `search_match_active` (still needed) <!-- 3a1042a -->
+- [x] Update all three theme constructors with values for new fields <!-- 3a1042a -->
+- [x] TDD: tests for new field values on claude_dark matching exact reference hex <!-- 3a1042a -->
 
 ### Task 1.2: Update claude_dark to reference token values
-- [ ] Replace all claude_dark hex values with exact reference tokens
-- [ ] Update existing tests to assert new reference values
-- [ ] Verify claude_light and claude_warm have sensible values for new fields
-- [ ] TDD: tests asserting each claude_dark field matches reference hex exactly
+- [x] Replace all claude_dark hex values with exact reference tokens <!-- 3a1042a -->
+- [x] Update existing tests to assert new reference values <!-- 3a1042a -->
+- [x] Verify claude_light and claude_warm have sensible values for new fields <!-- 3a1042a -->
+- [x] TDD: tests asserting each claude_dark field matches reference hex exactly <!-- 3a1042a -->
 
 ### Task 1.3: Update all theme consumers for renamed fields
-- [ ] Update `grid_bridge.rs`: DEFAULT_FG → #FAF9F5, DEFAULT_BG → #181715 (FR-7)
-- [ ] Update `tab/bar.rs`: `pane_background` → `surface`, `text_muted` → `text_secondary`
-- [ ] Update `renderer/grid_renderer.rs`: `text_primary` → `text`, `text_muted` → `text_secondary`
-- [ ] Update `window.rs`: all `text_primary` → `text` references
-- [ ] Update all test assertions that reference old field names or old color values
-- [ ] TDD: verify compilation and all tests pass
+- [x] Update `grid_bridge.rs`: DEFAULT_FG → #FAF9F5, DEFAULT_BG → #181715 (FR-7) <!-- 3a1042a -->
+- [x] Update `tab/bar.rs`: `pane_background` → `surface`, `text_muted` → `text_secondary` <!-- 3a1042a -->
+- [x] Update `renderer/grid_renderer.rs`: `text_primary` → `text`, `text_muted` → `text_secondary` <!-- 3a1042a -->
+- [x] Update `window.rs`: all `text_primary` → `text` references <!-- 3a1042a -->
+- [x] Update all test assertions that reference old field names or old color values <!-- 3a1042a -->
+- [x] TDD: verify compilation and all tests pass <!-- 3a1042a -->
 
 ### Phase 1 Completion
 - [ ] Phase completion verification and checkpointing protocol
