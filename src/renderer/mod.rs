@@ -60,6 +60,8 @@ pub struct Renderer {
     overlay_instance_count: u32,
     /// Terminal content padding in physical pixels (top, bottom, left, right).
     padding: [f32; 4],
+    /// DPI scale factor used for atlas creation.
+    scale_factor: f32,
 }
 
 impl Renderer {
@@ -241,6 +243,7 @@ impl Renderer {
             overlay_instance_buffer: None,
             overlay_instance_count: 0,
             padding: [0.0; 4],
+            scale_factor,
         })
     }
 
@@ -252,6 +255,64 @@ impl Renderer {
     /// Get the current padding [top, bottom, left, right] in physical pixels.
     pub fn padding(&self) -> [f32; 4] {
         self.padding
+    }
+
+    /// Rebuild the glyph atlas with new font parameters and update all dependent GPU resources.
+    /// Call after font size, family, or line_height changes.
+    pub fn rebuild_atlas(&mut self, font_size: f32, font_family: &str, line_height_multiplier: f32) {
+        let atlas = GlyphAtlas::new(font_size, self.scale_factor, font_family, line_height_multiplier);
+        log::info!(
+            "Atlas rebuilt: {}x{} (cell: {:.1}x{:.1})",
+            atlas.atlas_width,
+            atlas.atlas_height,
+            atlas.cell_width,
+            atlas.cell_height,
+        );
+
+        // Upload new atlas texture
+        let atlas_texture = create_atlas_texture(
+            &self.device,
+            &self.queue,
+            atlas.atlas_width,
+            atlas.atlas_height,
+            &atlas.atlas_data,
+        );
+        let atlas_view = atlas_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = create_atlas_sampler(&self.device);
+
+        // Recreate bind group with new atlas texture
+        let bind_group = create_grid_bind_group(
+            &self.device,
+            &self._bind_group_layout,
+            &self.uniform_buffer,
+            &atlas_view,
+            &sampler,
+        );
+
+        // Update grid dimensions
+        let grid = GridDimensions::new(
+            self.surface_config.width,
+            self.surface_config.height,
+            atlas.cell_width,
+            atlas.cell_height,
+        );
+
+        // Update uniform buffer
+        let uniforms = GridUniforms {
+            cell_size: grid.cell_size_ndc(),
+            grid_size: grid.grid_size(),
+            atlas_size: [atlas.atlas_width as f32, atlas.atlas_height as f32],
+            _padding: [0.0; 2],
+        };
+        self.queue
+            .write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
+
+        self.atlas = atlas;
+        self.grid = grid;
+        self.bind_group = bind_group;
+        self._atlas_view = atlas_view;
+        self._sampler = sampler;
+        self.pane_damage.force_full_damage_all();
     }
 
     /// Render a frame: acquire surface texture, draw instances, present.

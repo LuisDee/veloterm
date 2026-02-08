@@ -12,8 +12,8 @@ use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 use crate::config::theme::Theme;
 use crate::config::types::Config;
 use crate::input::{
-    match_pane_command, match_tab_command, match_search_command, should_open_search,
-    InputMode, PaneCommand, SearchCommand, TabCommand,
+    match_app_command, match_pane_command, match_tab_command, match_search_command,
+    should_open_search, AppCommand, InputMode, PaneCommand, SearchCommand, TabCommand,
 };
 use crate::link::opener::open_link;
 use crate::link::LinkDetector;
@@ -100,10 +100,13 @@ pub struct App {
     link_hover_active: bool,
     input_mode: InputMode,
     search_state: SearchState,
+    current_font_size: f32,
+    default_font_size: f32,
 }
 
 impl App {
     pub fn new(config: WindowConfig, app_config: Config) -> Self {
+        let font_size = app_config.font.size as f32;
         Self {
             config,
             app_config,
@@ -117,6 +120,8 @@ impl App {
             link_hover_active: false,
             input_mode: InputMode::default(),
             search_state: SearchState::default(),
+            current_font_size: font_size,
+            default_font_size: font_size,
         }
     }
 
@@ -216,6 +221,43 @@ impl App {
     }
 
     /// Handle a shell integration command (prompt navigation).
+    /// Compute a new font size from the current size using ~10% steps, clamped to [8, 72].
+    fn compute_font_size(current: f32, command: AppCommand, default: f32) -> f32 {
+        const MIN_FONT: f32 = 8.0;
+        const MAX_FONT: f32 = 72.0;
+        let raw = match command {
+            AppCommand::IncreaseFontSize => (current * 1.1).round(),
+            AppCommand::DecreaseFontSize => (current / 1.1).round(),
+            AppCommand::ResetFontSize => default,
+        };
+        raw.clamp(MIN_FONT, MAX_FONT)
+    }
+
+    fn handle_app_command(&mut self, command: AppCommand) {
+        let new_size = Self::compute_font_size(
+            self.current_font_size,
+            command,
+            self.default_font_size,
+        );
+        if (new_size - self.current_font_size).abs() < 0.5 {
+            return; // No effective change
+        }
+        self.current_font_size = new_size;
+        log::info!("Font size changed to {new_size}px");
+
+        // Rebuild atlas and recalculate all pane dimensions
+        let font_family = self.app_config.font.family.clone();
+        let line_height = self.app_config.font.line_height as f32;
+        if let Some(renderer) = &mut self.renderer {
+            renderer.rebuild_atlas(new_size, &font_family, line_height);
+        }
+        let (w, h) = self.window_size();
+        self.resize_all_panes(w, h);
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
+
     fn handle_shell_command(&mut self, command: crate::input::ShellCommand) {
         let focused = self
             .tab_manager
@@ -1047,6 +1089,14 @@ impl ApplicationHandler for App {
                             return;
                         }
                         return; // Consume all keys in search mode
+                    }
+
+                    // Check for app-level commands (font size)
+                    if let Some(cmd) =
+                        match_app_command(&event.logical_key, self.modifiers)
+                    {
+                        self.handle_app_command(cmd);
+                        return;
                     }
 
                     // Check for tab commands first
@@ -2243,5 +2293,44 @@ blink = false
             .as_ref()
             .unwrap();
         assert_eq!(vi.cursor.col, 2);
+    }
+
+    // ── Font size computation ────────────────────────────────────
+
+    #[test]
+    fn font_size_increase_10_percent() {
+        let result = App::compute_font_size(13.0, AppCommand::IncreaseFontSize, 13.0);
+        assert_eq!(result, 14.0); // 13 * 1.1 = 14.3 → round → 14
+    }
+
+    #[test]
+    fn font_size_decrease_10_percent() {
+        let result = App::compute_font_size(13.0, AppCommand::DecreaseFontSize, 13.0);
+        assert_eq!(result, 12.0); // 13 / 1.1 = 11.8 → round → 12
+    }
+
+    #[test]
+    fn font_size_reset_to_default() {
+        let result = App::compute_font_size(20.0, AppCommand::ResetFontSize, 13.0);
+        assert_eq!(result, 13.0);
+    }
+
+    #[test]
+    fn font_size_clamps_to_min() {
+        let result = App::compute_font_size(8.0, AppCommand::DecreaseFontSize, 13.0);
+        assert_eq!(result, 8.0); // 8 / 1.1 = 7.27 → round → 7 → clamp → 8
+    }
+
+    #[test]
+    fn font_size_clamps_to_max() {
+        let result = App::compute_font_size(72.0, AppCommand::IncreaseFontSize, 13.0);
+        assert_eq!(result, 72.0); // 72 * 1.1 = 79.2 → round → 79 → clamp → 72
+    }
+
+    #[test]
+    fn font_size_tracks_in_app() {
+        let app = App::new(WindowConfig::default(), Config::default());
+        assert_eq!(app.current_font_size, 13.0);
+        assert_eq!(app.default_font_size, 13.0);
     }
 }
