@@ -11,6 +11,8 @@ pub enum SelectionType {
     Word,
     /// Triple-click line selection.
     Line,
+    /// Rectangular block selection (vi-mode Ctrl+V).
+    VisualBlock,
 }
 
 /// A text selection region defined by start and end cell coordinates.
@@ -88,6 +90,14 @@ pub fn selection_contains(selection: &Selection, row: usize, col: usize) -> bool
     if row < start.0 || row > end.0 {
         return false;
     }
+
+    if selection.selection_type == SelectionType::VisualBlock {
+        // Block selection: only cells within the column range on each row
+        let col_min = start.1.min(end.1);
+        let col_max = start.1.max(end.1);
+        return col >= col_min && col <= col_max;
+    }
+
     if start.0 == end.0 {
         // Single-line selection
         col >= start.1 && col <= end.1
@@ -129,6 +139,18 @@ pub fn apply_selection_flags(cells: &mut [GridCell], selection: &Selection, cols
     let (start, end) = normalize(selection);
     let rows = cells.len() / cols;
 
+    if selection.selection_type == SelectionType::VisualBlock {
+        let col_min = start.1.min(end.1);
+        let col_max = start.1.max(end.1);
+        for row in start.0..=end.0.min(rows - 1) {
+            let row_offset = row * cols;
+            for col in col_min..=col_max.min(cols - 1) {
+                cells[row_offset + col].flags |= CELL_FLAG_SELECTED;
+            }
+        }
+        return;
+    }
+
     for row in start.0..=end.0.min(rows - 1) {
         let col_start = if row == start.0 { start.1 } else { 0 };
         let col_end = if row == end.0 { end.1 } else { cols - 1 };
@@ -138,6 +160,47 @@ pub fn apply_selection_flags(cells: &mut [GridCell], selection: &Selection, cols
             cells[row_offset + col].flags |= CELL_FLAG_SELECTED;
         }
     }
+}
+
+/// Extract selected text from a visual-block (rectangular) selection.
+/// Each row's selected columns are extracted and joined with newlines.
+pub fn selected_text_block(cells: &[GridCell], selection: &Selection, cols: usize) -> String {
+    let (start, end) = normalize(selection);
+    let col_min = start.1.min(end.1);
+    let col_max = start.1.max(end.1);
+    let mut lines = Vec::new();
+
+    for row in start.0..=end.0 {
+        let row_offset = row * cols;
+        let mut line = String::new();
+        for col in col_min..=col_max {
+            if row_offset + col < cells.len() {
+                line.push(cells[row_offset + col].ch);
+            }
+        }
+        lines.push(line.trim_end().to_string());
+    }
+
+    lines.join("\n")
+}
+
+/// Extract selected text from a visual-line selection (full rows).
+pub fn selected_text_lines(cells: &[GridCell], selection: &Selection, cols: usize) -> String {
+    let (start, end) = normalize(selection);
+    let mut lines = Vec::new();
+
+    for row in start.0..=end.0 {
+        let row_offset = row * cols;
+        let mut line = String::new();
+        for col in 0..cols {
+            if row_offset + col < cells.len() {
+                line.push(cells[row_offset + col].ch);
+            }
+        }
+        lines.push(line.trim_end().to_string());
+    }
+
+    lines.join("\n")
 }
 
 #[cfg(test)]
@@ -350,5 +413,75 @@ mod tests {
             cell.flags &= !CELL_FLAG_SELECTED;
         }
         assert_eq!(cells[0].flags & CELL_FLAG_SELECTED, 0);
+    }
+
+    // ── Visual-block selection ──────────────────────────────────────
+
+    #[test]
+    fn visual_block_contains_only_rectangle() {
+        let sel = Selection {
+            start: (0, 2),
+            end: (2, 5),
+            selection_type: SelectionType::VisualBlock,
+        };
+        // Inside the rectangle
+        assert!(selection_contains(&sel, 0, 3));
+        assert!(selection_contains(&sel, 1, 2));
+        assert!(selection_contains(&sel, 1, 5));
+        assert!(selection_contains(&sel, 2, 4));
+        // Outside the column range
+        assert!(!selection_contains(&sel, 1, 1));
+        assert!(!selection_contains(&sel, 1, 6));
+        // Outside the row range
+        assert!(!selection_contains(&sel, 3, 3));
+    }
+
+    #[test]
+    fn visual_block_apply_flags_rectangle() {
+        let mut cells = make_row("hello world", 20);
+        cells.extend(make_row("second line!", 20));
+        cells.extend(make_row("third  line!", 20));
+        let sel = Selection {
+            start: (0, 2),
+            end: (2, 5),
+            selection_type: SelectionType::VisualBlock,
+        };
+        apply_selection_flags(&mut cells, &sel, 20);
+        // Row 0: cols 2-5 selected
+        assert_ne!(cells[2].flags & CELL_FLAG_SELECTED, 0);
+        assert_ne!(cells[5].flags & CELL_FLAG_SELECTED, 0);
+        assert_eq!(cells[1].flags & CELL_FLAG_SELECTED, 0);
+        assert_eq!(cells[6].flags & CELL_FLAG_SELECTED, 0);
+        // Row 1: cols 2-5 selected
+        assert_ne!(cells[22].flags & CELL_FLAG_SELECTED, 0);
+        assert_ne!(cells[25].flags & CELL_FLAG_SELECTED, 0);
+        assert_eq!(cells[21].flags & CELL_FLAG_SELECTED, 0);
+    }
+
+    #[test]
+    fn selected_text_block_extracts_rectangle() {
+        let mut cells = make_row("hello world", 20);
+        cells.extend(make_row("abcde fghij", 20));
+        let sel = Selection {
+            start: (0, 0),
+            end: (1, 4),
+            selection_type: SelectionType::VisualBlock,
+        };
+        let text = selected_text_block(&cells, &sel, 20);
+        assert_eq!(text, "hello\nabcde");
+    }
+
+    #[test]
+    fn selected_text_lines_full_rows() {
+        let mut cells = make_row("first line", 20);
+        cells.extend(make_row("second line", 20));
+        cells.extend(make_row("third line", 20));
+        let sel = Selection {
+            start: (0, 0),
+            end: (1, 19),
+            selection_type: SelectionType::Line,
+        };
+        let text = selected_text_lines(&cells, &sel, 20);
+        assert_eq!(text, "first line\nsecond line");
     }
 }

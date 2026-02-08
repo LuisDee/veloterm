@@ -539,6 +539,40 @@ impl ViState {
     }
 }
 
+use crate::input::selection::{Selection, SelectionType};
+
+impl ViState {
+    /// Convert the current vi-mode visual selection to a Selection for rendering.
+    /// Returns None if not in a visual mode or no anchor is set.
+    pub fn to_selection(&self) -> Option<Selection> {
+        let anchor = self.anchor?;
+        let selection_type = match self.mode {
+            ViMode::Visual => SelectionType::Range,
+            ViMode::VisualLine => SelectionType::Line,
+            ViMode::VisualBlock => SelectionType::VisualBlock,
+            ViMode::Normal => return None,
+        };
+
+        let (start, end) = match self.mode {
+            ViMode::VisualLine => {
+                // Full rows from anchor to cursor
+                let min_row = anchor.row.min(self.cursor.row);
+                let max_row = anchor.row.max(self.cursor.row);
+                ((min_row, 0), (max_row, usize::MAX))
+            }
+            _ => {
+                ((anchor.row, anchor.col), (self.cursor.row, self.cursor.col))
+            }
+        };
+
+        Some(Selection {
+            start,
+            end,
+            selection_type,
+        })
+    }
+}
+
 /// Check if a character is a word character (alphanumeric or underscore).
 fn is_word_char(ch: char) -> bool {
     ch.is_alphanumeric() || ch == '_'
@@ -1372,5 +1406,56 @@ mod tests {
         state.apply_motion(&Motion::WordBackward(1), &ctx);
         assert_eq!(state.cursor.row, 0);
         assert_eq!(state.cursor.col, 0);
+    }
+
+    // ── to_selection conversion ─────────────────────────────────────
+
+    #[test]
+    fn to_selection_returns_none_in_normal_mode() {
+        let state = ViState::new(5, 3);
+        assert_eq!(state.to_selection(), None);
+    }
+
+    #[test]
+    fn to_selection_visual_mode() {
+        let mut state = ViState::new(5, 3);
+        state.process_key('v', false); // enter Visual
+        state.cursor = CursorPos { row: 7, col: 10 };
+        let sel = state.to_selection().unwrap();
+        assert_eq!(sel.start, (5, 3));
+        assert_eq!(sel.end, (7, 10));
+        assert_eq!(sel.selection_type, SelectionType::Range);
+    }
+
+    #[test]
+    fn to_selection_visual_line_mode() {
+        let mut state = ViState::new(5, 3);
+        state.process_key('V', false); // enter Visual-Line
+        state.cursor = CursorPos { row: 8, col: 0 };
+        let sel = state.to_selection().unwrap();
+        assert_eq!(sel.start, (5, 0));
+        assert_eq!(sel.end.0, 8);
+        assert_eq!(sel.selection_type, SelectionType::Line);
+    }
+
+    #[test]
+    fn to_selection_visual_block_mode() {
+        let mut state = ViState::new(5, 3);
+        state.process_key('v', true); // Ctrl+V → Visual-Block
+        state.cursor = CursorPos { row: 8, col: 10 };
+        let sel = state.to_selection().unwrap();
+        assert_eq!(sel.start, (5, 3));
+        assert_eq!(sel.end, (8, 10));
+        assert_eq!(sel.selection_type, SelectionType::VisualBlock);
+    }
+
+    #[test]
+    fn to_selection_visual_line_reversed() {
+        let mut state = ViState::new(8, 3);
+        state.process_key('V', false);
+        state.cursor = CursorPos { row: 5, col: 0 }; // cursor above anchor
+        let sel = state.to_selection().unwrap();
+        assert_eq!(sel.start, (5, 0)); // normalized: min row first
+        assert_eq!(sel.end.0, 8);
     }
 }
