@@ -234,6 +234,18 @@ pub fn match_shell_command(
     }
 }
 
+/// Check if a key event should toggle vi-mode (default: Ctrl+Shift+Space).
+pub fn should_toggle_vi_mode(
+    logical_key: &Key,
+    modifiers: ModifiersState,
+) -> bool {
+    let ctrl_shift = modifiers.control_key() && modifiers.shift_key();
+    if !ctrl_shift {
+        return false;
+    }
+    matches!(logical_key, Key::Named(NamedKey::Space))
+}
+
 /// Translate a winit key event into terminal byte sequences to send to the PTY.
 ///
 /// Returns `None` if the key event should not produce any output (e.g. modifier-only
@@ -974,6 +986,40 @@ mod tests {
     fn shell_cmd_no_match_unbound_key() {
         let result = match_shell_command(&Key::Character("x".into()), ctrl_shift());
         assert_eq!(result, None);
+    }
+
+    // ── Vi-mode toggle ──────────────────────────────────────────
+
+    #[test]
+    fn vi_mode_toggle_ctrl_shift_space() {
+        assert!(should_toggle_vi_mode(
+            &Key::Named(NamedKey::Space),
+            ctrl_shift()
+        ));
+    }
+
+    #[test]
+    fn vi_mode_toggle_space_alone_no_match() {
+        assert!(!should_toggle_vi_mode(
+            &Key::Named(NamedKey::Space),
+            no_mods()
+        ));
+    }
+
+    #[test]
+    fn vi_mode_toggle_ctrl_only_no_match() {
+        assert!(!should_toggle_vi_mode(
+            &Key::Named(NamedKey::Space),
+            ModifiersState::CONTROL
+        ));
+    }
+
+    #[test]
+    fn vi_mode_toggle_other_key_no_match() {
+        assert!(!should_toggle_vi_mode(
+            &Key::Character("a".into()),
+            ctrl_shift()
+        ));
     }
 
     // ── InputMode default ──────────────────────────────────────────

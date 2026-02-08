@@ -16,6 +16,7 @@ pub struct Config {
     pub performance: PerformanceConfig,
     pub links: LinksConfig,
     pub shell: ShellConfig,
+    pub vi_mode: ViModeConfig,
 }
 
 /// Font configuration.
@@ -86,6 +87,24 @@ impl Default for ShellConfig {
     }
 }
 
+/// Vi-mode configuration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ViModeConfig {
+    /// Whether vi-mode is available.
+    pub enabled: bool,
+    /// Keybinding to toggle vi-mode (e.g., "ctrl+shift+space").
+    pub entry_key: String,
+}
+
+impl Default for ViModeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            entry_key: "ctrl+shift+space".to_string(),
+        }
+    }
+}
+
 /// Errors that can occur during config loading and validation.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -110,6 +129,7 @@ struct RawConfig {
     performance: RawPerformanceConfig,
     links: RawLinksConfig,
     shell: RawShellConfig,
+    vi_mode: RawViModeConfig,
 }
 
 #[derive(Deserialize)]
@@ -217,6 +237,22 @@ impl Default for RawShellConfig {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(default)]
+struct RawViModeConfig {
+    enabled: bool,
+    entry_key: String,
+}
+
+impl Default for RawViModeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            entry_key: "ctrl+shift+space".to_string(),
+        }
+    }
+}
+
 // ── Default impls ───────────────────────────────────────────────────────
 
 impl Default for FontConfig {
@@ -305,6 +341,10 @@ impl Config {
                 integration_enabled: raw.shell.integration_enabled,
                 notification_threshold_secs: raw.shell.notification_threshold_secs,
             },
+            vi_mode: ViModeConfig {
+                enabled: raw.vi_mode.enabled,
+                entry_key: raw.vi_mode.entry_key,
+            },
         };
 
         config.validate()?;
@@ -357,6 +397,7 @@ impl Config {
             performance_changed: self.performance != other.performance,
             links_changed: self.links != other.links,
             shell_changed: self.shell != other.shell,
+            vi_mode_changed: self.vi_mode != other.vi_mode,
         }
     }
 
@@ -395,6 +436,12 @@ integration_enabled = true
 # Minimum command duration (seconds) to trigger long-running notification
 notification_threshold_secs = 10
 
+[vi_mode]
+# Enable vi-mode for keyboard-driven scrollback navigation
+enabled = true
+# Keybinding to toggle vi-mode
+entry_key = "ctrl+shift+space"
+
 # [keys]
 # Keybindings as "key_combo" = "action" pairs
 # Example:
@@ -416,6 +463,7 @@ pub struct ConfigDelta {
     pub performance_changed: bool,
     pub links_changed: bool,
     pub shell_changed: bool,
+    pub vi_mode_changed: bool,
 }
 
 impl ConfigDelta {
@@ -429,6 +477,7 @@ impl ConfigDelta {
             && !self.performance_changed
             && !self.links_changed
             && !self.shell_changed
+            && !self.vi_mode_changed
     }
 }
 
@@ -611,6 +660,48 @@ notification_threshold_secs = 30
         b.shell.notification_threshold_secs = 30;
         let delta = a.diff(&b);
         assert!(delta.shell_changed);
+    }
+
+    // ── Vi-mode config tests ──────────────────────────────────────
+
+    #[test]
+    fn default_vi_mode_enabled() {
+        let config = Config::default();
+        assert!(config.vi_mode.enabled);
+    }
+
+    #[test]
+    fn default_vi_mode_entry_key() {
+        let config = Config::default();
+        assert_eq!(config.vi_mode.entry_key, "ctrl+shift+space");
+    }
+
+    #[test]
+    fn parse_vi_mode_config() {
+        let toml = r#"
+[vi_mode]
+enabled = false
+entry_key = "ctrl+space"
+"#;
+        let config = Config::from_toml(toml).unwrap();
+        assert!(!config.vi_mode.enabled);
+        assert_eq!(config.vi_mode.entry_key, "ctrl+space");
+    }
+
+    #[test]
+    fn parse_vi_mode_config_defaults() {
+        let config = Config::from_toml("").unwrap();
+        assert!(config.vi_mode.enabled);
+        assert_eq!(config.vi_mode.entry_key, "ctrl+shift+space");
+    }
+
+    #[test]
+    fn diff_detects_vi_mode_change() {
+        let a = Config::default();
+        let mut b = Config::default();
+        b.vi_mode.enabled = false;
+        let delta = a.diff(&b);
+        assert!(delta.vi_mode_changed);
     }
 
     #[test]
