@@ -111,6 +111,7 @@ pub struct App {
     default_font_size: f32,
     event_proxy: Option<EventLoopProxy<UserEvent>>,
     screenshot_requested: bool,
+    hovered_tab: Option<usize>,
 }
 
 impl App {
@@ -133,6 +134,7 @@ impl App {
             default_font_size: font_size,
             event_proxy: None,
             screenshot_requested: false,
+            hovered_tab: None,
         }
     }
 
@@ -1542,13 +1544,39 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::CursorMoved { position, .. } => {
                 let y = position.y as f32;
                 if y < TAB_BAR_HEIGHT {
-                    // In tab bar area — reset pane interaction cursor and link hover
+                    // In tab bar area — track hovered tab
+                    let (width, _) = self.window_size();
+                    let tw = crate::tab::bar::tab_width(width as f32, self.tab_manager.tab_count());
+                    let new_hovered = if tw > 0.0 && position.x >= 0.0 {
+                        let idx = (position.x as f32 / tw) as usize;
+                        if idx < self.tab_manager.tab_count() {
+                            Some(idx)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    if new_hovered != self.hovered_tab {
+                        self.hovered_tab = new_hovered;
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                    }
+                    // Reset pane interaction cursor and link hover
                     if self.link_hover_active {
                         self.link_hover_active = false;
                     }
                     let effect = self.interaction.on_cursor_moved(position.x as f32, -1.0);
                     self.apply_interaction_effect(effect);
                 } else {
+                    // Clear tab hover when cursor leaves tab bar
+                    if self.hovered_tab.is_some() {
+                        self.hovered_tab = None;
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                    }
                     let content_y = y - TAB_BAR_HEIGHT;
                     // Check for link hover when modifier is held
                     // Use focused pane's local coordinates
@@ -1635,6 +1663,8 @@ impl ApplicationHandler<UserEvent> for App {
                             raw_y,
                             width as f32,
                             self.tab_manager.tab_count(),
+                            self.tab_manager.active_index(),
+                            self.hovered_tab,
                         ) {
                             match action {
                                 TabBarAction::SelectTab(idx) => {
@@ -1642,6 +1672,27 @@ impl ApplicationHandler<UserEvent> for App {
                                         TabCommand::SelectTab(idx),
                                         event_loop,
                                     );
+                                }
+                                TabBarAction::CloseTab(idx) => {
+                                    // Close specific tab by index
+                                    let pane_ids = self.tab_manager.close_tab(idx);
+                                    if let Some(ids) = pane_ids {
+                                        for id in &ids {
+                                            self.pane_states.remove(id);
+                                            if let Some(renderer) = &mut self.renderer {
+                                                renderer.remove_pane_damage(*id);
+                                            }
+                                        }
+                                        let (w, h) = self.window_size();
+                                        self.update_interaction_layout(w, h);
+                                        if let Some(renderer) = &mut self.renderer {
+                                            renderer.pane_damage_mut().force_full_damage_all();
+                                        }
+                                    } else {
+                                        // Last tab — exit
+                                        log::info!("Last tab closed via close button, exiting");
+                                        event_loop.exit();
+                                    }
                                 }
                                 TabBarAction::NewTab => {
                                     self.handle_tab_command(
@@ -1972,6 +2023,7 @@ impl ApplicationHandler<UserEvent> for App {
                         cw,
                         ch,
                         theme,
+                        self.hovered_tab,
                     );
                     text_overlays.extend(labels);
 

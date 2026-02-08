@@ -22,10 +22,14 @@ const NEW_TAB_BUTTON_WIDTH: f32 = 28.0;
 /// Width of tab separator lines in pixels.
 const TAB_SEPARATOR_WIDTH: f32 = 1.0;
 
+/// Width of the close button hit area in pixels.
+const CLOSE_BUTTON_WIDTH: f32 = 16.0;
+
 /// Result of a tab bar hit test.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TabBarAction {
     SelectTab(usize),
+    CloseTab(usize),
     NewTab,
 }
 
@@ -118,12 +122,15 @@ pub fn generate_tab_bar_quads(
 ///
 /// Returns a Vec of (Rect, Vec<GridCell>) pairs, one per tab plus one for the "+" button.
 /// Each rect is 1 cell tall, centered vertically within the tab bar.
+/// `hovered_tab` controls close button visibility: active tab always shows it,
+/// hovered inactive tabs show it, other inactive tabs don't.
 pub fn generate_tab_label_text_cells(
     tab_manager: &TabManager,
     window_width: f32,
     cell_width: f32,
     cell_height: f32,
     theme: &Theme,
+    hovered_tab: Option<usize>,
 ) -> Vec<(Rect, Vec<GridCell>)> {
     let mut result = Vec::new();
     let count = tab_manager.tab_count();
@@ -169,10 +176,36 @@ pub fn generate_tab_label_text_cells(
 
         let mut cells = vec![GridCell::empty(bg); columns];
 
-        let label = format!("{}", i + 1);
-        let label_chars: Vec<char> = label.chars().collect();
-        let label_start = (columns.saturating_sub(label_chars.len())) / 2;
-        for (j, &ch) in label_chars.iter().enumerate() {
+        // Show close button: always on active tab, on hover for inactive tabs
+        let show_close = i == active || hovered_tab == Some(i);
+        if show_close && columns >= 3 {
+            let close_col = columns - 1;
+            let close_fg = if i == active {
+                Color::new(1.0, 1.0, 1.0, 0.7)
+            } else {
+                Color::new(theme.text_muted.r, theme.text_muted.g, theme.text_muted.b, 0.7)
+            };
+            cells[close_col] = GridCell::new('\u{00D7}', close_fg, bg); // × character
+        }
+
+        let title = &tab_manager.tabs()[i].title;
+        let label_chars: Vec<char> = title.chars().collect();
+        // Reserve space for close button if shown
+        let usable_cols = if show_close && columns >= 3 { columns - 2 } else { columns };
+        let display_chars = if label_chars.len() > usable_cols && usable_cols > 1 {
+            // Truncate with ellipsis
+            let mut truncated: Vec<char> = label_chars[..usable_cols - 1].to_vec();
+            truncated.push('\u{2026}'); // …
+            truncated
+        } else {
+            label_chars[..label_chars.len().min(usable_cols)].to_vec()
+        };
+        let label_start = if display_chars.len() < usable_cols {
+            (usable_cols - display_chars.len()) / 2
+        } else {
+            0
+        };
+        for (j, &ch) in display_chars.iter().enumerate() {
             let col = label_start + j;
             if col < columns {
                 cells[col] = GridCell::new(ch, fg, bg);
@@ -212,11 +245,15 @@ pub fn generate_tab_label_text_cells(
 
 /// Hit tests a point against the tab bar.
 /// Returns the action if the point is within the tab bar area (y < TAB_BAR_HEIGHT).
+/// `active_index` is used to determine which tab always shows the close button.
+/// `hovered_tab` determines which inactive tab shows the close button.
 pub fn hit_test_tab_bar(
     x: f32,
     y: f32,
     window_width: f32,
     tab_count: usize,
+    active_index: usize,
+    hovered_tab: Option<usize>,
 ) -> Option<TabBarAction> {
     if y >= TAB_BAR_HEIGHT {
         return None;
@@ -235,6 +272,13 @@ pub fn hit_test_tab_bar(
     if x < tabs_end && x >= 0.0 {
         let index = (x / tw) as usize;
         if index < tab_count {
+            // Check if click is on the close button (rightmost CLOSE_BUTTON_WIDTH pixels of tab)
+            let tab_right_edge = (index + 1) as f32 * tw;
+            let close_button_start = tab_right_edge - CLOSE_BUTTON_WIDTH;
+            let show_close = index == active_index || hovered_tab == Some(index);
+            if show_close && x >= close_button_start {
+                return Some(TabBarAction::CloseTab(index));
+            }
             return Some(TabBarAction::SelectTab(index));
         }
     }
@@ -334,58 +378,17 @@ mod tests {
         assert_eq!(quads[1].color[1], theme.pane_background.g);
     }
 
-    // ── hit_test_tab_bar ─────────────────────────────────────────
-
-    #[test]
-    fn hit_test_click_on_first_tab() {
-        let result = hit_test_tab_bar(10.0, 10.0, 1280.0, 3);
-        assert_eq!(result, Some(TabBarAction::SelectTab(0)));
-    }
-
-    #[test]
-    fn hit_test_click_on_second_tab() {
-        let tw = tab_width(1280.0, 3);
-        let result = hit_test_tab_bar(tw + 5.0, 10.0, 1280.0, 3);
-        assert_eq!(result, Some(TabBarAction::SelectTab(1)));
-    }
-
-    #[test]
-    fn hit_test_click_on_new_tab_button() {
-        let tw = tab_width(1280.0, 2);
-        let plus_x = 2.0 * tw; // right after tabs
-        let result = hit_test_tab_bar(plus_x + 5.0, 10.0, 1280.0, 2);
-        assert_eq!(result, Some(TabBarAction::NewTab));
-    }
-
-    #[test]
-    fn hit_test_below_tab_bar_returns_none() {
-        let result = hit_test_tab_bar(100.0, 30.0, 1280.0, 3);
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn hit_test_at_tab_bar_boundary() {
-        // y == TAB_BAR_HEIGHT should be outside
-        let result = hit_test_tab_bar(100.0, TAB_BAR_HEIGHT, 1280.0, 3);
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn hit_test_just_inside_tab_bar() {
-        let result = hit_test_tab_bar(100.0, TAB_BAR_HEIGHT - 1.0, 1280.0, 3);
-        assert_eq!(result, Some(TabBarAction::SelectTab(0)));
-    }
-
     // ── generate_tab_label_text_cells ─────────────────────────────
 
     #[test]
-    fn label_single_tab_generates_label_1() {
+    fn label_single_tab_generates_title() {
         setup();
         let mgr = TabManager::new();
         let theme = Theme::claude_dark();
-        let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme);
+        let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme, None);
         assert_eq!(labels.len(), 2); // 1 tab + "+" button
-        assert!(labels[0].1.iter().any(|c| c.ch == '1'));
+        // Default title is "Shell"
+        assert!(labels[0].1.iter().any(|c| c.ch == 'S'));
     }
 
     #[test]
@@ -393,8 +396,8 @@ mod tests {
         setup();
         let mgr = TabManager::new();
         let theme = Theme::claude_dark();
-        let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme);
-        let tab_cell = labels[0].1.iter().find(|c| c.ch == '1').unwrap();
+        let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme, None);
+        let tab_cell = labels[0].1.iter().find(|c| c.ch == 'S').unwrap();
         assert!((tab_cell.bg.r - theme.accent.r).abs() < 0.01);
         assert!((tab_cell.bg.g - theme.accent.g).abs() < 0.01);
         assert!((tab_cell.bg.b - theme.accent.b).abs() < 0.01);
@@ -406,8 +409,8 @@ mod tests {
         let mut mgr = TabManager::new();
         mgr.new_tab();
         let theme = Theme::claude_dark();
-        let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme);
-        let tab0_cell = labels[0].1.iter().find(|c| c.ch == '1').unwrap();
+        let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme, None);
+        let tab0_cell = labels[0].1.iter().find(|c| c.ch == 'S').unwrap();
         assert!((tab0_cell.bg.r - theme.pane_background.r).abs() < 0.01);
     }
 
@@ -418,11 +421,117 @@ mod tests {
         mgr.new_tab();
         mgr.new_tab();
         let theme = Theme::claude_dark();
-        let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme);
+        let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme, None);
         assert_eq!(labels.len(), 4); // 3 tabs + "+" button
-        assert!(labels[0].1.iter().any(|c| c.ch == '1'));
-        assert!(labels[1].1.iter().any(|c| c.ch == '2'));
-        assert!(labels[2].1.iter().any(|c| c.ch == '3'));
+        // All tabs have default "Shell" title
+        assert!(labels[0].1.iter().any(|c| c.ch == 'S'));
+        assert!(labels[1].1.iter().any(|c| c.ch == 'S'));
+        assert!(labels[2].1.iter().any(|c| c.ch == 'S'));
         assert!(labels[3].1.iter().any(|c| c.ch == '+'));
+    }
+
+    // ── Close button visibility ────────────────────────────────────
+
+    #[test]
+    fn close_button_always_on_active_tab() {
+        setup();
+        let mgr = TabManager::new();
+        let theme = Theme::claude_dark();
+        let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme, None);
+        // Active tab (0) should have × close button
+        assert!(labels[0].1.iter().any(|c| c.ch == '\u{00D7}'));
+    }
+
+    #[test]
+    fn close_button_on_hovered_inactive_tab() {
+        setup();
+        let mut mgr = TabManager::new();
+        mgr.new_tab(); // active is now 1
+        let theme = Theme::claude_dark();
+        // Hover over tab 0 (inactive)
+        let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme, Some(0));
+        // Tab 0 (inactive, hovered) should have × close button
+        assert!(labels[0].1.iter().any(|c| c.ch == '\u{00D7}'));
+    }
+
+    #[test]
+    fn no_close_button_on_unhovered_inactive_tab() {
+        setup();
+        let mut mgr = TabManager::new();
+        mgr.new_tab(); // active is now 1
+        let theme = Theme::claude_dark();
+        // No hover
+        let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme, None);
+        // Tab 0 (inactive, not hovered) should NOT have × close button
+        assert!(!labels[0].1.iter().any(|c| c.ch == '\u{00D7}'));
+    }
+
+    // ── Hit test with close button ─────────────────────────────────
+
+    #[test]
+    fn hit_test_click_on_first_tab() {
+        let result = hit_test_tab_bar(10.0, 10.0, 1280.0, 3, 0, None);
+        assert_eq!(result, Some(TabBarAction::SelectTab(0)));
+    }
+
+    #[test]
+    fn hit_test_click_on_second_tab() {
+        let tw = tab_width(1280.0, 3);
+        let result = hit_test_tab_bar(tw + 5.0, 10.0, 1280.0, 3, 0, None);
+        assert_eq!(result, Some(TabBarAction::SelectTab(1)));
+    }
+
+    #[test]
+    fn hit_test_click_on_new_tab_button() {
+        let tw = tab_width(1280.0, 2);
+        let plus_x = 2.0 * tw; // right after tabs
+        let result = hit_test_tab_bar(plus_x + 5.0, 10.0, 1280.0, 2, 0, None);
+        assert_eq!(result, Some(TabBarAction::NewTab));
+    }
+
+    #[test]
+    fn hit_test_below_tab_bar_returns_none() {
+        let result = hit_test_tab_bar(100.0, 30.0, 1280.0, 3, 0, None);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn hit_test_at_tab_bar_boundary() {
+        let result = hit_test_tab_bar(100.0, TAB_BAR_HEIGHT, 1280.0, 3, 0, None);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn hit_test_just_inside_tab_bar() {
+        let result = hit_test_tab_bar(100.0, TAB_BAR_HEIGHT - 1.0, 1280.0, 3, 0, None);
+        assert_eq!(result, Some(TabBarAction::SelectTab(0)));
+    }
+
+    #[test]
+    fn hit_test_close_button_on_active_tab() {
+        let tw = tab_width(1280.0, 3);
+        // Click near right edge of active tab (tab 0)
+        let x = tw - 5.0; // within CLOSE_BUTTON_WIDTH of right edge
+        let result = hit_test_tab_bar(x, 10.0, 1280.0, 3, 0, None);
+        assert_eq!(result, Some(TabBarAction::CloseTab(0)));
+    }
+
+    #[test]
+    fn hit_test_close_button_on_hovered_inactive_tab() {
+        let tw = tab_width(1280.0, 3);
+        // Click near right edge of tab 1 (inactive, hovered)
+        let x = tw * 2.0 - 5.0;
+        let result = hit_test_tab_bar(x, 10.0, 1280.0, 3, 0, Some(1));
+        assert_eq!(result, Some(TabBarAction::CloseTab(1)));
+    }
+
+    #[test]
+    fn hit_test_no_close_button_on_unhovered_inactive_tab() {
+        let tw = tab_width(1280.0, 3);
+        // Click near right edge of tab 1 (inactive, NOT hovered)
+        let x = tw * 2.0 - 5.0;
+        let result = hit_test_tab_bar(x, 10.0, 1280.0, 3, 0, None);
+        // Should be SelectTab, not CloseTab, since close button is hidden
+        assert_eq!(result, Some(TabBarAction::SelectTab(1)));
     }
 }
