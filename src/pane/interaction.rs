@@ -308,6 +308,76 @@ mod tests {
         }
     }
 
+    #[test]
+    fn drag_left_decreases_ratio() {
+        let (mut interaction, root) = setup_vertical_split();
+        let layout = layout_from_root(&root);
+        interaction.on_cursor_moved(640.0, 360.0);
+        interaction.on_mouse_press(&layout);
+        let effect = interaction.on_cursor_moved(400.0, 360.0);
+        match effect {
+            InteractionEffect::UpdateRatio { new_ratio, .. } => {
+                assert!(new_ratio < 0.5, "ratio should decrease when dragging left");
+            }
+            _ => panic!("expected UpdateRatio, got {:?}", effect),
+        }
+    }
+
+    #[test]
+    fn drag_clamped_to_min_size() {
+        let (mut interaction, root) = setup_vertical_split();
+        let layout = layout_from_root(&root);
+        interaction.on_cursor_moved(640.0, 360.0);
+        interaction.on_mouse_press(&layout);
+        // Drag to near edge — ratio should be clamped, not 0.0 or 1.0
+        let effect = interaction.on_cursor_moved(5.0, 360.0);
+        match effect {
+            InteractionEffect::UpdateRatio { new_ratio, .. } => {
+                assert!(new_ratio > 0.0, "ratio should be clamped above 0");
+                assert!(new_ratio < 0.1, "ratio should be near minimum");
+            }
+            _ => panic!("expected UpdateRatio, got {:?}", effect),
+        }
+    }
+
+    #[test]
+    fn drag_clamped_at_max_side() {
+        let (mut interaction, root) = setup_vertical_split();
+        let layout = layout_from_root(&root);
+        interaction.on_cursor_moved(640.0, 360.0);
+        interaction.on_mouse_press(&layout);
+        let effect = interaction.on_cursor_moved(1275.0, 360.0);
+        match effect {
+            InteractionEffect::UpdateRatio { new_ratio, .. } => {
+                assert!(new_ratio < 1.0, "ratio should be clamped below 1");
+                assert!(new_ratio > 0.9, "ratio should be near maximum");
+            }
+            _ => panic!("expected UpdateRatio, got {:?}", effect),
+        }
+    }
+
+    #[test]
+    fn drag_horizontal_divider() {
+        let root = PaneNode::split(
+            SplitDirection::Horizontal,
+            0.5,
+            PaneNode::leaf(PaneId(1)),
+            PaneNode::leaf(PaneId(2)),
+        );
+        let mut interaction = PaneInteraction::new();
+        interaction.update_layout(&root, Rect::new(0.0, 0.0, 1280.0, 720.0), 20.0);
+        let layout = root.calculate_layout(Rect::new(0.0, 0.0, 1280.0, 720.0), 20.0);
+        interaction.on_cursor_moved(640.0, 360.0); // hover on horizontal divider
+        interaction.on_mouse_press(&layout);
+        let effect = interaction.on_cursor_moved(640.0, 500.0); // drag down
+        match effect {
+            InteractionEffect::UpdateRatio { new_ratio, .. } => {
+                assert!(new_ratio > 0.5, "ratio should increase when dragging down");
+            }
+            _ => panic!("expected UpdateRatio, got {:?}", effect),
+        }
+    }
+
     // ── Dragging → Idle transitions ──────────────────────────────────
 
     #[test]

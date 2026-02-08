@@ -992,4 +992,40 @@ blink = false
             crate::pane::interaction::InteractionEffect::FocusPane(first_id)
         );
     }
+
+    // ── Drag-to-resize integration ──────────────────────────────────
+
+    #[test]
+    fn app_drag_to_resize_updates_pane_tree_ratio() {
+
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        app.pane_tree.split_focused(SplitDirection::Vertical);
+        app.update_interaction_layout(1000, 500);
+
+        // Simulate drag: hover → press → move
+        app.interaction.on_cursor_moved(500.0, 250.0); // hover on divider
+        let layout = app.pane_tree.calculate_layout(1000.0, 500.0);
+        app.interaction.on_mouse_press(&layout); // start drag
+        let effect = app.interaction.on_cursor_moved(300.0, 250.0); // drag left
+
+        // Apply the effect
+        app.apply_interaction_effect(effect);
+
+        // Verify the layout changed: first pane should be ~30% wide
+        let layout = app.pane_tree.calculate_layout(1000.0, 500.0);
+        let first_width = layout[0].1.width;
+        assert!(first_width < 400.0, "first pane should be narrower after drag left, got {first_width}");
+    }
+
+    // ── Overlay quads with zoom mode ────────────────────────────────
+
+    #[test]
+    fn app_overlay_quads_empty_when_zoomed() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        app.pane_tree.split_focused(SplitDirection::Vertical);
+        app.pane_tree.zoom_toggle();
+        // Even with multiple panes, zoomed mode produces no overlays
+        let quads = app.generate_overlay_quads(1280.0, 720.0);
+        assert!(quads.is_empty());
+    }
 }

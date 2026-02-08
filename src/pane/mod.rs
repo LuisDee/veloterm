@@ -683,7 +683,7 @@ mod tests {
         // Split root → [root | B]
         let b_id = tree.split_focused(SplitDirection::Vertical).unwrap();
         // Focus is B, split B → [root | [B | C]]
-        let c_id = tree.split_focused(SplitDirection::Horizontal).unwrap();
+        let _c_id = tree.split_focused(SplitDirection::Horizontal).unwrap();
         assert_eq!(tree.pane_count(), 3);
 
         // Close C (focused) → should leave [root | B]
@@ -827,9 +827,9 @@ mod tests {
         let mut tree = PaneTree::new();
         let a_id = tree.focused_pane_id();
         // Split A vertically → [A | B]
-        let b_id = tree.split_focused(SplitDirection::Vertical).unwrap();
+        let _b_id = tree.split_focused(SplitDirection::Vertical).unwrap();
         // Split B horizontally → [A | [B / C]]
-        let c_id = tree.split_focused(SplitDirection::Horizontal).unwrap();
+        let _c_id = tree.split_focused(SplitDirection::Horizontal).unwrap();
         // Focus is C (bottom-right). Go left → should go to A
         tree.focus_direction(FocusDirection::Left, 1280.0, 720.0);
         assert_eq!(tree.focused_pane_id(), a_id);
