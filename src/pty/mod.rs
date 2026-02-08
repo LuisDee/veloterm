@@ -75,6 +75,9 @@ pub fn foreground_process_name(shell_pid: u32) -> Option<String> {
         }
 
         let num_pids = actual as usize / std::mem::size_of::<i32>();
+        if num_pids == 0 {
+            return None;
+        }
         // Take the last child (most recently spawned)
         let fg_pid = pids[num_pids - 1];
 

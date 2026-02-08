@@ -116,6 +116,9 @@ pub struct App {
     tab_drag_index: Option<usize>,
     tab_drag_start_x: f32,
     tab_drag_active: bool,
+    /// Throttle foreground process name detection (FFI syscall).
+    last_process_check: std::time::Instant,
+    last_process_name: Option<String>,
 }
 
 impl App {
@@ -142,6 +145,8 @@ impl App {
             tab_drag_index: None,
             tab_drag_start_x: 0.0,
             tab_drag_active: false,
+            last_process_check: std::time::Instant::now(),
+            last_process_name: None,
         }
     }
 
@@ -239,10 +244,15 @@ impl App {
                         self.tab_manager.set_title(active_idx, &title);
                     }
                 } else {
-                    // Try foreground process name
-                    let process_title = state.pty.child_pid().and_then(|pid| {
-                        crate::pty::foreground_process_name(pid)
-                    });
+                    // Try foreground process name (throttled to 1Hz)
+                    let now = std::time::Instant::now();
+                    if now.duration_since(self.last_process_check).as_millis() >= 1000 {
+                        self.last_process_check = now;
+                        self.last_process_name = state.pty.child_pid().and_then(|pid| {
+                            crate::pty::foreground_process_name(pid)
+                        });
+                    }
+                    let process_title = self.last_process_name.clone();
 
                     if let Some(ref proc_name) = process_title {
                         if !crate::pty::is_shell_process(proc_name) {
