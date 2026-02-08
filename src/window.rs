@@ -1118,10 +1118,12 @@ impl ApplicationHandler<UserEvent> for App {
                         self.renderer = Some(renderer);
 
                         // Spawn PTY and terminal for the initial tab's pane
+                        // Use grid_dims_for_rect to account for padding
                         let initial_pane_id =
                             self.tab_manager.active_tab().pane_tree.focused_pane_id();
-                        let cols = self.renderer.as_ref().unwrap().grid().columns as u16;
-                        let rows = self.renderer.as_ref().unwrap().grid().rows as u16;
+                        let content = self.content_bounds(size.width as f32, size.height as f32);
+                        let rect = Rect::new(0.0, 0.0, content.width, content.height);
+                        let (cols, rows) = self.grid_dims_for_rect(&rect);
                         self.spawn_pane(initial_pane_id, cols, rows);
                     }
                     Err(e) => {
