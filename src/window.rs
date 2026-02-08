@@ -1543,24 +1543,52 @@ impl ApplicationHandler<UserEvent> for App {
                         self.apply_interaction_effect(effect);
                     }
 
-                    // Update text selection drag on focused pane
-                    if let Some(renderer) = &self.renderer {
-                        let cell_width = renderer.cell_width();
-                        let cell_height = renderer.cell_height();
-                        let padding = renderer.padding();
+                    // Update scrollbar drag or text selection drag on focused pane
+                    {
                         let focused_pane = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                        let padding = self.renderer.as_ref().map(|r| r.padding()).unwrap_or([0.0; 4]);
+                        let (win_w, win_h) = self.window_size();
+                        let content_bounds = self.content_bounds(win_w as f32, win_h as f32);
+                        let layout = self.tab_manager.active_tab().pane_tree.calculate_layout(content_bounds.width, content_bounds.height);
+                        let pane_rect = layout.iter().find(|(id, _)| *id == focused_pane).map(|(_, r)| *r);
+
+                        let mut scrollbar_dragging = false;
+                        // Check scrollbar drag first
                         if let Some(state) = self.pane_states.get_mut(&focused_pane) {
-                            if state.mouse_selection.is_dragging {
-                                let local_x = position.x as f32 - padding[2];
-                                let local_y = content_y - padding[0];
-                                let cols = state.terminal.columns();
-                                let rows = state.terminal.rows();
-                                let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal);
-                                state.mouse_selection.on_mouse_drag(
-                                    local_x, local_y, cell_width, cell_height, cols, rows, &cells,
-                                );
+                            if state.scroll_state.is_dragging_scrollbar {
+                                scrollbar_dragging = true;
+                                if let Some(rect) = pane_rect {
+                                    let track_height = rect.height - padding[0] - padding[1];
+                                    let history_size = state.terminal.history_size();
+                                    state.scroll_state.update_drag(content_y, track_height, history_size);
+                                    let offset = state.scroll_state.current_line_offset();
+                                    state.terminal.set_display_offset(offset);
+                                }
                                 if let Some(window) = &self.window {
                                     window.request_redraw();
+                                }
+                            }
+                        }
+                        // Fall back to text selection drag
+                        if !scrollbar_dragging {
+                            if let Some(renderer) = &self.renderer {
+                                let cell_width = renderer.cell_width();
+                                let cell_height = renderer.cell_height();
+                                let padding = renderer.padding();
+                                if let Some(state) = self.pane_states.get_mut(&focused_pane) {
+                                    if state.mouse_selection.is_dragging {
+                                        let local_x = position.x as f32 - padding[2];
+                                        let local_y = content_y - padding[0];
+                                        let cols = state.terminal.columns();
+                                        let rows = state.terminal.rows();
+                                        let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal);
+                                        state.mouse_selection.on_mouse_drag(
+                                            local_x, local_y, cell_width, cell_height, cols, rows, &cells,
+                                        );
+                                        if let Some(window) = &self.window {
+                                            window.request_redraw();
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1610,34 +1638,86 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                     }
 
-                    // Handle text selection on focused pane
-                    if let Some(renderer) = &self.renderer {
-                        let cell_width = renderer.cell_width();
-                        let cell_height = renderer.cell_height();
-                        let padding = renderer.padding();
+                    // Check for scrollbar interaction before text selection
+                    let mut scrollbar_handled = false;
+                    {
+                        let padding = self.renderer.as_ref().map(|r| r.padding()).unwrap_or([0.0; 4]);
                         let focused_pane = self.tab_manager.active_tab().pane_tree.focused_pane_id();
-                        if let Some(state) = self.pane_states.get_mut(&focused_pane) {
-                            let cols = state.terminal.columns();
-                            let rows = state.terminal.rows();
-                            // Convert from content-space to pane-local coords (subtract padding)
-                            let local_x = cursor_pos.0 - padding[2]; // subtract left padding
-                            let local_y = cursor_pos.1 - padding[0]; // subtract top padding
+                        let (width, height) = self.window_size();
+                        let content = self.content_bounds(width as f32, height as f32);
+                        let layout = self.tab_manager.active_tab().pane_tree.calculate_layout(content.width, content.height);
+                        let screen_rect = layout.iter().find(|(id, _)| *id == focused_pane).map(|(_, r)| {
+                            Rect::new(r.x, r.y + TAB_BAR_HEIGHT, r.width, r.height)
+                        });
+                        if let (Some(screen_rect), Some(state)) = (screen_rect, self.pane_states.get_mut(&focused_pane)) {
+                            let history_size = state.terminal.history_size();
+                            let visible_rows = state.terminal.rows();
+                            let display_offset = state.scroll_state.current_line_offset();
                             match btn_state {
                                 ElementState::Pressed => {
-                                    let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal);
-                                    if self.modifiers.shift_key() {
-                                        let (crow, ccol) = state.terminal.cursor_position();
-                                        state.mouse_selection.on_shift_click(
-                                            local_x, local_y, cell_width, cell_height, cols, rows, crow, ccol,
-                                        );
-                                    } else {
-                                        state.mouse_selection.on_mouse_press(
-                                            local_x, local_y, cell_width, cell_height, cols, rows, &cells,
-                                        );
+                                    let hit = crate::scroll::scrollbar_hit_test(
+                                        cursor_pos.0, cursor_pos.1,
+                                        screen_rect.x, screen_rect.y,
+                                        screen_rect.width, screen_rect.height,
+                                        padding, visible_rows, history_size, display_offset,
+                                    );
+                                    match hit {
+                                        crate::scroll::ScrollbarHit::Track(y) => {
+                                            let offset = crate::scroll::track_click_to_offset(
+                                                y, screen_rect.y, screen_rect.height,
+                                                padding, history_size,
+                                            );
+                                            state.scroll_state.set_target(offset, history_size);
+                                            state.terminal.set_display_offset(offset);
+                                            scrollbar_handled = true;
+                                        }
+                                        crate::scroll::ScrollbarHit::Thumb(y) => {
+                                            state.scroll_state.begin_drag(y);
+                                            scrollbar_handled = true;
+                                        }
+                                        crate::scroll::ScrollbarHit::None => {}
                                     }
                                 }
                                 ElementState::Released => {
-                                    state.mouse_selection.on_mouse_release();
+                                    if state.scroll_state.is_dragging_scrollbar {
+                                        state.scroll_state.end_drag();
+                                        scrollbar_handled = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Handle text selection on focused pane (if not handled by scrollbar)
+                    if !scrollbar_handled {
+                        if let Some(renderer) = &self.renderer {
+                            let cell_width = renderer.cell_width();
+                            let cell_height = renderer.cell_height();
+                            let padding = renderer.padding();
+                            let focused_pane = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                            if let Some(state) = self.pane_states.get_mut(&focused_pane) {
+                                let cols = state.terminal.columns();
+                                let rows = state.terminal.rows();
+                                // Convert from content-space to pane-local coords (subtract padding)
+                                let local_x = cursor_pos.0 - padding[2]; // subtract left padding
+                                let local_y = cursor_pos.1 - padding[0]; // subtract top padding
+                                match btn_state {
+                                    ElementState::Pressed => {
+                                        let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal);
+                                        if self.modifiers.shift_key() {
+                                            let (crow, ccol) = state.terminal.cursor_position();
+                                            state.mouse_selection.on_shift_click(
+                                                local_x, local_y, cell_width, cell_height, cols, rows, crow, ccol,
+                                            );
+                                        } else {
+                                            state.mouse_selection.on_mouse_press(
+                                                local_x, local_y, cell_width, cell_height, cols, rows, &cells,
+                                            );
+                                        }
+                                    }
+                                    ElementState::Released => {
+                                        state.mouse_selection.on_mouse_release();
+                                    }
                                 }
                             }
                         }

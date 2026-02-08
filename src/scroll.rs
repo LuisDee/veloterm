@@ -13,6 +13,12 @@ pub struct ScrollState {
     last_scroll_time: Option<Instant>,
     /// Accumulated fractional lines from pixel deltas (sub-line remainder).
     pixel_accumulator: f32,
+    /// Whether the user is currently dragging the scrollbar thumb.
+    pub is_dragging_scrollbar: bool,
+    /// Y position where the scrollbar drag started.
+    pub drag_start_y: f32,
+    /// Scroll offset when the drag started.
+    pub drag_start_offset: usize,
 }
 
 /// Animation speed: fraction of remaining distance covered per second.
@@ -32,6 +38,9 @@ impl ScrollState {
             current_offset: 0.0,
             last_scroll_time: None,
             pixel_accumulator: 0.0,
+            is_dragging_scrollbar: false,
+            drag_start_y: 0.0,
+            drag_start_offset: 0,
         }
     }
 
@@ -167,6 +176,41 @@ impl ScrollState {
     /// Mark scroll activity (e.g., from scrollbar interaction).
     pub fn touch(&mut self) {
         self.last_scroll_time = Some(Instant::now());
+    }
+
+    /// Begin a scrollbar thumb drag.
+    pub fn begin_drag(&mut self, start_y: f32) {
+        self.is_dragging_scrollbar = true;
+        self.drag_start_y = start_y;
+        self.drag_start_offset = self.target_offset;
+        self.last_scroll_time = Some(Instant::now());
+    }
+
+    /// Update during a scrollbar thumb drag.
+    /// `delta_y` is the pixel distance dragged from the start position.
+    /// `track_height` is the total scrollable track height.
+    /// Negative delta_y (dragging up) increases offset.
+    pub fn update_drag(
+        &mut self,
+        current_y: f32,
+        track_height: f32,
+        history_size: usize,
+    ) {
+        if track_height <= 0.0 || history_size == 0 {
+            return;
+        }
+        let delta_y = current_y - self.drag_start_y;
+        // Dragging down = decreasing offset (toward bottom), up = increasing (toward top)
+        let offset_delta = -(delta_y / track_height) * history_size as f32;
+        let new_offset = (self.drag_start_offset as f32 + offset_delta)
+            .round()
+            .max(0.0) as usize;
+        self.set_immediate(new_offset, history_size);
+    }
+
+    /// End a scrollbar thumb drag.
+    pub fn end_drag(&mut self) {
+        self.is_dragging_scrollbar = false;
     }
 }
 
@@ -719,5 +763,66 @@ mod tests {
     fn track_click_clamps_below_track() {
         let offset = track_click_to_offset(700.0, 0.0, 600.0, [10.0, 10.0, 10.0, 10.0], 100);
         assert_eq!(offset, 0);
+    }
+
+    // ── Drag ────────────────────────────────────────────────────────
+
+    #[test]
+    fn drag_begin_sets_state() {
+        let mut s = ScrollState::new();
+        s.set_immediate(50, 100);
+        s.begin_drag(200.0);
+        assert!(s.is_dragging_scrollbar);
+        assert_eq!(s.drag_start_y, 200.0);
+        assert_eq!(s.drag_start_offset, 50);
+    }
+
+    #[test]
+    fn drag_up_increases_offset() {
+        let mut s = ScrollState::new();
+        s.set_immediate(50, 100);
+        s.begin_drag(200.0);
+        // Drag up by 100px with a 500px track, history_size 100
+        // delta_y = 100 - 200 = -100, offset_delta = -(-100/500)*100 = +20
+        s.update_drag(100.0, 500.0, 100);
+        assert_eq!(s.target_offset(), 70);
+    }
+
+    #[test]
+    fn drag_down_decreases_offset() {
+        let mut s = ScrollState::new();
+        s.set_immediate(50, 100);
+        s.begin_drag(200.0);
+        // Drag down by 100px
+        s.update_drag(300.0, 500.0, 100);
+        assert_eq!(s.target_offset(), 30);
+    }
+
+    #[test]
+    fn drag_clamps_to_zero() {
+        let mut s = ScrollState::new();
+        s.set_immediate(10, 100);
+        s.begin_drag(200.0);
+        // Drag way down
+        s.update_drag(800.0, 500.0, 100);
+        assert_eq!(s.target_offset(), 0);
+    }
+
+    #[test]
+    fn drag_clamps_to_history() {
+        let mut s = ScrollState::new();
+        s.set_immediate(90, 100);
+        s.begin_drag(200.0);
+        // Drag way up
+        s.update_drag(-500.0, 500.0, 100);
+        assert_eq!(s.target_offset(), 100);
+    }
+
+    #[test]
+    fn drag_end_clears_state() {
+        let mut s = ScrollState::new();
+        s.begin_drag(200.0);
+        s.end_drag();
+        assert!(!s.is_dragging_scrollbar);
     }
 }
