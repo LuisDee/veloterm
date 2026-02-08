@@ -2,7 +2,7 @@
 
 ## Phase 1: Mouse Selection & Click Detection
 
-### Task 1.1: Click state machine and single-click selection start
+### Task 1.1: Click state machine and single-click selection start [x] <!-- 3c816f8 -->
 - Add `MouseSelectionState` to window.rs (or new `src/input/mouse.rs`):
   - `click_count: u8` (1=single, 2=double, 3=triple)
   - `last_click_time: Instant`
@@ -20,7 +20,7 @@
 - Selection cleared on any left click that starts a new selection
 - Write tests: click count detection (single, double, triple, timeout reset), pixel_to_cell with padding offset, selection start/update/finalize
 
-### Task 1.2: Double-click word and triple-click line selection
+### Task 1.2: Double-click word and triple-click line selection [x] <!-- 3c816f8 -->
 - On click_count=2 (double-click):
   - Call `find_word_boundaries()` to get (start_col, end_col)
   - Set selection with `SelectionType::Word`, start=(row, start_col), end=(row, end_col)
@@ -32,7 +32,7 @@
 - During drag after triple-click: extend selection to full lines
 - Write tests: double-click word selection, triple-click line selection, drag-extend-by-word, drag-extend-by-line
 
-### Task 1.3: Shift+click selection extend
+### Task 1.3: Shift+click selection extend [x] <!-- 3c816f8 -->
 - On Shift+left-click:
   - If active selection exists: extend `selection.end` to clicked cell
   - If no selection: create new Range selection from current cursor position to click
@@ -43,7 +43,7 @@
 
 ## Phase 2: Selection Rendering & Clipboard
 
-### Task 2.1: Selection rendering in shader
+### Task 2.1: Selection rendering in shader [x] <!-- 1c27749 -->
 - In grid.wgsl fragment shader: detect `CELL_FLAG_SELECTED` (bit 6)
   - Add `is_selected` to VertexOutput (extract bit 6 from flags)
   - When selected: swap fg and bg colors (invert selection rendering)
@@ -53,7 +53,7 @@
 - Verify selection highlight renders correctly via screenshot
 - Write tests: CELL_FLAG_SELECTED bit extraction in shader data, apply/clear flags cycle
 
-### Task 2.2: Cmd+C copy and Cmd+V paste
+### Task 2.2: Cmd+C copy and Cmd+V paste [x] <!-- 8727b97 -->
 - In keyboard event handler (window.rs):
   - Check `is_copy_keybinding()` before PTY write
   - If copy: extract text via `selected_text()` (or `selected_text_block`/`selected_text_lines` based on type)
@@ -65,7 +65,7 @@
   - Write bytes to active pane's PTY
 - Write tests: copy extracts correct text by selection type, paste wraps with bracketed mode, empty selection copy is no-op
 
-### Task 2.3: Cmd+A select all
+### Task 2.3: Cmd+A select all [x] <!-- 53de739 -->
 - Add `is_select_all_keybinding()` to clipboard.rs:
   - macOS: Cmd+A (Super+A), Linux: Ctrl+Shift+A
 - In keyboard handler: intercept before PTY write

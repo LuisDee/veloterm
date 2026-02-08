@@ -278,6 +278,79 @@ impl App {
         }
     }
 
+    fn handle_context_menu_action(
+        &mut self,
+        action: crate::context_menu::ContextMenuAction,
+        event_loop: &ActiveEventLoop,
+    ) {
+        use crate::context_menu::ContextMenuAction;
+        match action {
+            ContextMenuAction::Copy => {
+                let focused_id = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                if let Some(state) = self.pane_states.get_mut(&focused_id) {
+                    if let Some(ref sel) = state.mouse_selection.active_selection {
+                        let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal);
+                        let cols = state.terminal.columns();
+                        let text = match sel.selection_type {
+                            crate::input::selection::SelectionType::VisualBlock => {
+                                crate::input::selection::selected_text_block(&cells, sel, cols)
+                            }
+                            crate::input::selection::SelectionType::Line => {
+                                crate::input::selection::selected_text_lines(&cells, sel, cols)
+                            }
+                            _ => crate::input::selection::selected_text(&cells, sel, cols),
+                        };
+                        if !text.is_empty() {
+                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                let _ = clipboard.set_text(&text);
+                            }
+                        }
+                        state.mouse_selection.clear_selection();
+                    }
+                }
+            }
+            ContextMenuAction::Paste => {
+                let focused_id = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    if let Ok(text) = clipboard.get_text() {
+                        if let Some(state) = self.pane_states.get_mut(&focused_id) {
+                            let bytes = crate::input::clipboard::paste_bytes(&text, true);
+                            if let Err(e) = state.pty.write(&bytes) {
+                                log::warn!("PTY paste write error: {e}");
+                            }
+                        }
+                    }
+                }
+            }
+            ContextMenuAction::SelectAll => {
+                let focused_id = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                if let Some(state) = self.pane_states.get_mut(&focused_id) {
+                    let rows = state.terminal.rows();
+                    let cols = state.terminal.columns();
+                    state.mouse_selection.active_selection = Some(
+                        crate::input::selection::Selection {
+                            start: (0, 0),
+                            end: (rows.saturating_sub(1), cols.saturating_sub(1)),
+                            selection_type: crate::input::selection::SelectionType::Range,
+                        },
+                    );
+                }
+            }
+            ContextMenuAction::SplitVertical => {
+                self.handle_pane_command(PaneCommand::SplitVertical, event_loop);
+            }
+            ContextMenuAction::SplitHorizontal => {
+                self.handle_pane_command(PaneCommand::SplitHorizontal, event_loop);
+            }
+            ContextMenuAction::ClosePane => {
+                self.handle_pane_command(PaneCommand::ClosePane, event_loop);
+            }
+        }
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
+
     fn handle_config_reload(&mut self, new_config: Config, delta: ConfigDelta) {
         log::info!("Config reloaded (font_changed={}, padding_changed={})",
             delta.font_changed, delta.padding_changed);
@@ -1527,6 +1600,29 @@ impl ApplicationHandler<UserEvent> for App {
                         ElementState::Released => self.interaction.on_mouse_release(),
                     };
                     self.apply_interaction_effect(effect);
+                }
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Right,
+                ..
+            } => {
+                let cursor_pos = self.interaction.cursor_pos();
+                let raw_y = cursor_pos.1 + TAB_BAR_HEIGHT;
+                if raw_y >= TAB_BAR_HEIGHT {
+                    // Right-click in content area — show context menu
+                    let focused_pane = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                    let has_selection = self
+                        .pane_states
+                        .get(&focused_pane)
+                        .map_or(false, |s| s.mouse_selection.has_selection());
+                    if let Some(window) = &self.window {
+                        if let Some(action) =
+                            crate::context_menu::show_context_menu(has_selection, window)
+                        {
+                            self.handle_context_menu_action(action, event_loop);
+                        }
+                    }
                 }
             }
             WindowEvent::Resized(size) => {
