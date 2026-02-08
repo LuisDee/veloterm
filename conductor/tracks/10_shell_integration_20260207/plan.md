@@ -46,7 +46,7 @@ Core infrastructure: custom event listener, shell state struct, OSC 133/7/0 pars
 
 ---
 
-## Phase 2: Prompt Navigation & Command Timing [checkpoint: PENDING]
+## Phase 2: Prompt Navigation & Command Timing [checkpoint: 4087fa9]
 
 Build on shell state to enable prompt jumping and command duration tracking.
 
