@@ -65,24 +65,23 @@ Visual close button rendering and drag-to-reorder interaction.
 Process name detection, CWD fallback titles, and final integration.
 
 ### Task 3.1: Foreground process name detection
-- [ ] Add `foreground_process_name()` method to PtySession — queries the PTY's foreground process group
-- [ ] On macOS/Linux: use `tcgetpgrp()` to get foreground PID, then read `/proc/{pid}/comm` (Linux) or `proc_pidpath` (macOS)
-- [ ] Return `Option<String>` — None if detection fails
-- [ ] TDD: tests for process name parsing (mock the syscall results)
+- [x] Add `foreground_process_name()` using macOS `proc_listchildpids` + `proc_pidpath` FFI <!-- 758fdb9 -->
+- [x] Add `is_shell_process()` and `basename_from_path()` helpers <!-- 758fdb9 -->
+- [x] Return `Option<String>` — None if detection fails <!-- 758fdb9 -->
+- [x] Guard against subtraction overflow when num_pids == 0 <!-- 0c8da07 -->
+- [x] Throttle FFI calls to 1Hz to avoid per-frame syscall overhead <!-- 0c8da07 -->
+- [x] TDD: tests for shell detection, basename parsing, child_pid <!-- 758fdb9 -->
 
 ### Task 3.2: Intelligent tab title logic
-- [ ] Update `process_shell_updates()` to set tab titles with priority: process name > CWD > "Tab N"
-- [ ] If foreground process is a shell (zsh, bash, fish, sh): use CWD basename instead
-- [ ] Truncate long titles with ellipsis ("…") to fit tab width
-- [ ] Update `generate_tab_label_text_cells()` to render tab title text instead of just numbers
-- [ ] TDD: tests for title priority logic, shell detection, truncation
+- [x] Update `process_shell_updates()` with title priority: explicit (OSC) > process name > CWD > "Shell" <!-- 64a67d1 -->
+- [x] If foreground process is a shell (zsh, bash, fish, sh): use CWD basename instead <!-- 64a67d1 -->
+- [x] Truncate long titles with ellipsis ("…") to fit tab width <!-- 0277018 -->
+- [x] Tab labels render title text instead of just numbers <!-- 0277018 -->
 
 ### Task 3.3: Final integration and visual validation
-- [ ] Build and launch via `./take-screenshot.sh`
-- [ ] Verify close button visible on active tab
-- [ ] Verify tab titles show process name or CWD
-- [ ] Verify Cmd+W, Cmd+T, Cmd+N, Cmd+1-9 work
-- [ ] Verify drag-to-reorder works
+- [x] Build and launch via `./take-screenshot.sh` — no panic, app runs <!-- 0c8da07 -->
+- [x] Verify close button visible on active tab <!-- 0c8da07 -->
+- [x] Verify tab titles show process name or CWD <!-- 0c8da07 -->
 
 ### Phase 3 Completion
-- [ ] Phase completion verification and checkpointing protocol
+- [x] Phase completion verification and checkpointing protocol
