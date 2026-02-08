@@ -8,4 +8,5 @@ pub mod search;
 pub mod shell_integration;
 pub mod tab;
 pub mod terminal;
+pub mod vi_mode;
 pub mod window;
