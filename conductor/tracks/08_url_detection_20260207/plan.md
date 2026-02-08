@@ -2,34 +2,34 @@
 
 ## Phase 1: Link Detection Engine
 
-### Task 1.1: DetectedLink data model and LinkKind
-- [ ] Write tests for DetectedLink creation with Url and FilePath kinds
-- [ ] Write tests for link_contains(row, col) hit testing
-- [ ] Implement `DetectedLink`, `LinkKind` in `src/link/mod.rs`
-- [ ] Add `pub mod link;` to `src/lib.rs`
+### Task 1.1: DetectedLink data model and LinkKind <!-- 307fc6d -->
+- [x] Write tests for DetectedLink creation with Url and FilePath kinds
+- [x] Write tests for link_contains(row, col) hit testing
+- [x] Implement `DetectedLink`, `LinkKind` in `src/link/mod.rs`
+- [x] Add `pub mod link;` to `src/lib.rs`
 
-### Task 1.2: URL detection with linkify
-- [ ] Add `linkify` dependency to Cargo.toml
-- [ ] Write tests for detecting http:// URLs in single-line text
-- [ ] Write tests for detecting https:// URLs with paths and query strings
-- [ ] Write tests for URL boundary detection (stops at ), ], >, quotes, whitespace)
-- [ ] Write tests for no false positives on plain text
-- [ ] Implement `detect_urls(lines: &[String]) -> Vec<DetectedLink>` in `src/link/detector.rs`
+### Task 1.2: URL detection with linkify <!-- 307fc6d -->
+- [x] Add `linkify` dependency to Cargo.toml
+- [x] Write tests for detecting http:// URLs in single-line text
+- [x] Write tests for detecting https:// URLs with paths and query strings
+- [x] Write tests for URL boundary detection (stops at ), ], >, quotes, whitespace)
+- [x] Write tests for no false positives on plain text
+- [x] Implement `detect_urls(lines: &[String]) -> Vec<DetectedLink>` in `src/link/detector.rs`
 
-### Task 1.3: File path detection
-- [ ] Write tests for detecting absolute Unix paths (/usr/bin/foo)
-- [ ] Write tests for detecting home-relative paths (~/Documents/file.txt)
-- [ ] Write tests for path boundary detection (stops at whitespace, quotes, parens)
-- [ ] Write tests for ignoring false positives (/dev/null, single /)
-- [ ] Write tests for paths with dots and extensions (/foo/bar.rs, /tmp/file.log)
-- [ ] Implement `detect_paths(lines: &[String]) -> Vec<DetectedLink>` in `src/link/detector.rs`
+### Task 1.3: File path detection <!-- 307fc6d -->
+- [x] Write tests for detecting absolute Unix paths (/usr/bin/foo)
+- [x] Write tests for detecting home-relative paths (~/Documents/file.txt)
+- [x] Write tests for path boundary detection (stops at whitespace, quotes, parens)
+- [x] Write tests for ignoring false positives (/dev/null, single /)
+- [x] Write tests for paths with dots and extensions (/foo/bar.rs, /tmp/file.log)
+- [x] Implement `detect_paths(lines: &[String]) -> Vec<DetectedLink>` in `src/link/detector.rs`
 
-### Task 1.4: LinkDetector with caching
-- [ ] Write tests for LinkDetector::scan() combining URL and path detection
-- [ ] Write tests for link_at(row, col) returning correct link
-- [ ] Write tests for link_at() returning None for non-link positions
-- [ ] Write tests for generation counter incrementing on re-scan
-- [ ] Implement `LinkDetector` in `src/link/mod.rs`
+### Task 1.4: LinkDetector with caching <!-- 307fc6d -->
+- [x] Write tests for LinkDetector::scan() combining URL and path detection
+- [x] Write tests for link_at(row, col) returning correct link
+- [x] Write tests for link_at() returning None for non-link positions
+- [x] Write tests for generation counter incrementing on re-scan
+- [x] Implement `LinkDetector` in `src/link/mod.rs`
 
 ### Phase 1 Completion
 - [ ] Phase completion verification and checkpointing
