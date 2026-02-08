@@ -26,6 +26,8 @@ pub struct Theme {
     pub success: Color,
     pub error: Color,
     pub selection: Color,
+    pub search_match: Color,
+    pub search_match_active: Color,
 }
 
 impl Color {
@@ -82,6 +84,8 @@ impl Theme {
             success: Color::from_hex("#6BCF9B"),
             error: Color::from_hex("#F57878"),
             selection: Color::from_hex("#3D2E23"),
+            search_match: Color::from_hex("#5C4A1E"),
+            search_match_active: Color::from_hex("#8B6914"),
         }
     }
 
@@ -100,6 +104,8 @@ impl Theme {
             success: Color::from_hex("#2D7A4F"),
             error: Color::from_hex("#C44242"),
             selection: Color::from_hex("#FFE8DC"),
+            search_match: Color::from_hex("#FFF0C8"),
+            search_match_active: Color::from_hex("#FFD966"),
         }
     }
 
@@ -118,6 +124,8 @@ impl Theme {
             success: Color::from_hex("#7FD6A6"),
             error: Color::from_hex("#F57878"),
             selection: Color::from_hex("#4A3D32"),
+            search_match: Color::from_hex("#5C4A1E"),
+            search_match_active: Color::from_hex("#8B6914"),
         }
     }
 }

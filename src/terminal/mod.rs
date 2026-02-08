@@ -116,6 +116,15 @@ impl Terminal {
         self.term.scroll_display(Scroll::Bottom);
     }
 
+    /// Set the display offset directly (0 = bottom, positive = scrolled up).
+    /// Clamps to the maximum available scrollback.
+    pub fn set_display_offset(&mut self, offset: usize) {
+        self.term.scroll_display(Scroll::Bottom);
+        if offset > 0 {
+            self.term.scroll_display(Scroll::Delta(offset as i32));
+        }
+    }
+
     /// Resize the terminal grid to new dimensions. Triggers content reflow.
     pub fn resize(&mut self, cols: usize, rows: usize) {
         let size = TermSize {

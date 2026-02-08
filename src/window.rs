@@ -11,10 +11,15 @@ use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 
 use crate::config::theme::Theme;
 use crate::config::types::Config;
-use crate::input::{match_pane_command, match_tab_command, PaneCommand, TabCommand};
+use crate::input::{
+    match_pane_command, match_tab_command, match_search_command, should_open_search,
+    InputMode, PaneCommand, SearchCommand, TabCommand,
+};
 use crate::link::opener::open_link;
 use crate::link::LinkDetector;
+use crate::search::SearchState;
 use crate::pane::divider::{generate_divider_quads, generate_unfocused_overlay_quads, OverlayQuad};
+use crate::search::overlay::{generate_search_bar_quads, SearchBarParams};
 use crate::pane::interaction::{CursorType, InteractionEffect, PaneInteraction};
 use crate::pane::{PaneId, Rect, SplitDirection};
 use crate::renderer::PaneRenderDescriptor;
@@ -91,6 +96,8 @@ pub struct App {
     interaction: PaneInteraction,
     link_detector: LinkDetector,
     link_hover_active: bool,
+    input_mode: InputMode,
+    search_state: SearchState,
 }
 
 impl App {
@@ -106,6 +113,8 @@ impl App {
             interaction: PaneInteraction::new(),
             link_detector: LinkDetector::new(),
             link_hover_active: false,
+            input_mode: InputMode::default(),
+            search_state: SearchState::default(),
         }
     }
 
@@ -437,6 +446,34 @@ impl App {
             ));
         }
 
+        // Generate search bar overlay when search is active
+        if self.search_state.is_active {
+            let renderer = self.renderer.as_ref().unwrap();
+            let focused = pane_tree.focused_pane_id();
+            let content = self.content_bounds(width, height);
+            let layout = pane_tree.calculate_layout(content.width, content.height);
+            if let Some((_, rect)) = layout.iter().find(|(id, _)| *id == focused) {
+                let screen_rect = Rect::new(
+                    rect.x,
+                    rect.y + TAB_BAR_HEIGHT,
+                    rect.width,
+                    rect.height,
+                );
+                let params = SearchBarParams {
+                    pane_rect: screen_rect,
+                    cell_width: renderer.cell_width(),
+                    cell_height: renderer.cell_height(),
+                    query: &self.search_state.query,
+                    current_match: self.search_state.current_index + 1,
+                    total_matches: self.search_state.total_count(),
+                    has_error: self.search_state.error.is_some(),
+                    bar_color: [theme.border.r, theme.border.g, theme.border.b, 0.95],
+                    text_color: [theme.text_primary.r, theme.text_primary.g, theme.text_primary.b, 1.0],
+                };
+                quads.extend(generate_search_bar_quads(&params));
+            }
+        }
+
         quads
     }
 
@@ -535,6 +572,83 @@ impl App {
         &self.link_detector
     }
 
+    /// Handle a search command: update query, navigate matches, or close search.
+    fn handle_search_command(&mut self, cmd: SearchCommand) {
+        match cmd {
+            SearchCommand::InsertChar(ch) => {
+                self.search_state.query.push(ch);
+                self.run_incremental_search();
+            }
+            SearchCommand::DeleteChar => {
+                self.search_state.query.pop();
+                self.run_incremental_search();
+            }
+            SearchCommand::NextMatch => {
+                self.search_state.next_match();
+                self.scroll_to_current_match();
+            }
+            SearchCommand::PrevMatch => {
+                self.search_state.prev_match();
+                self.scroll_to_current_match();
+            }
+            SearchCommand::Close => {
+                self.input_mode = InputMode::Normal;
+                self.search_state.is_active = false;
+                self.search_state.query.clear();
+                self.search_state.matches.clear();
+            }
+            SearchCommand::Open => {
+                // Already handled by should_open_search
+            }
+        }
+        if let Some(renderer) = &mut self.renderer {
+            renderer.pane_damage_mut().force_full_damage_all();
+        }
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
+
+    /// Re-run search after query changes (incremental search).
+    fn run_incremental_search(&mut self) {
+        let focused = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+        if let Some(state) = self.pane_states.get(&focused) {
+            let lines = crate::terminal::grid_bridge::extract_text_lines(&state.terminal);
+            self.search_state.set_query(&self.search_state.query.clone(), &lines);
+        }
+    }
+
+    /// Scroll the terminal viewport to show the current search match.
+    fn scroll_to_current_match(&mut self) {
+        let focused = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+        if let (Some(target_row), Some(state)) = (
+            self.search_state.scroll_target(),
+            self.pane_states.get_mut(&focused),
+        ) {
+            let viewport_rows = state.terminal.rows();
+            let current_offset = state.terminal.display_offset();
+            let max_offset = state.terminal.history_size();
+            if let Some(new_offset) = crate::search::compute_scroll_offset(
+                target_row,
+                viewport_rows,
+                current_offset,
+                max_offset,
+            ) {
+                state.terminal.set_display_offset(new_offset);
+            }
+        }
+    }
+
+    /// Get the current input mode (for testing).
+    pub fn input_mode(&self) -> InputMode {
+        self.input_mode
+    }
+
+    /// Get the search state (for testing).
+    pub fn search_state(&self) -> &SearchState {
+        &self.search_state
+    }
+
     /// Run the application event loop. This blocks until the window is closed.
     pub fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         let event_loop = EventLoop::new()?;
@@ -627,6 +741,41 @@ impl ApplicationHandler for App {
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed {
+                    // Check for search toggle (Ctrl+Shift+F) — works in any mode
+                    if should_open_search(&event.logical_key, self.modifiers) {
+                        if self.input_mode == InputMode::Search {
+                            // Close search
+                            self.input_mode = InputMode::Normal;
+                            self.search_state.is_active = false;
+                            self.search_state.query.clear();
+                            self.search_state.matches.clear();
+                            if let Some(renderer) = &mut self.renderer {
+                                renderer.pane_damage_mut().force_full_damage_all();
+                            }
+                        } else {
+                            // Open search
+                            self.input_mode = InputMode::Search;
+                            self.search_state.is_active = true;
+                        }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+
+                    // In search mode, intercept keys for search commands
+                    if self.input_mode == InputMode::Search {
+                        if let Some(cmd) = match_search_command(
+                            &event.logical_key,
+                            event.text.as_ref().map(|s| s.as_ref()),
+                            self.modifiers,
+                        ) {
+                            self.handle_search_command(cmd);
+                            return;
+                        }
+                        return; // Consume all keys in search mode
+                    }
+
                     // Check for tab commands first
                     if let Some(cmd) =
                         match_tab_command(&event.logical_key, self.modifiers)
@@ -785,14 +934,56 @@ impl ApplicationHandler for App {
                 let layout = pane_tree.calculate_layout(content.width, content.height);
                 let visible = pane_tree.visible_panes();
 
+                let focused_pane = pane_tree.focused_pane_id();
                 let mut pane_descs: Vec<PaneRenderDescriptor> = Vec::new();
                 for (pane_id, rect) in &layout {
                     if !visible.contains(pane_id) {
                         continue;
                     }
                     if let Some(state) = self.pane_states.get(pane_id) {
-                        let cells =
+                        let mut cells =
                             crate::terminal::grid_bridge::extract_grid_cells(&state.terminal);
+
+                        // Apply search highlights to the focused pane
+                        if self.search_state.is_active && *pane_id == focused_pane {
+                            let theme = self.renderer.as_ref().unwrap().theme();
+                            let cols = state.terminal.columns();
+                            let viewport_rows = state.terminal.rows() as i32;
+                            let offset = state.terminal.display_offset() as i32;
+                            let visible_matches = self.search_state.visible_matches(
+                                -offset,
+                                -offset + viewport_rows - 1,
+                                0,
+                            );
+                            // Convert visible matches to viewport-relative rows
+                            let viewport_matches: Vec<crate::search::SearchMatch> = visible_matches
+                                .iter()
+                                .map(|m| crate::search::SearchMatch {
+                                    row: m.row + offset,
+                                    start_col: m.start_col,
+                                    end_col: m.end_col,
+                                })
+                                .collect();
+                            // Find the current match index in the viewport_matches
+                            let current_viewport_idx = if let Some(current) = self.search_state.current_match() {
+                                viewport_matches.iter().position(|m| {
+                                    m.row == current.row + offset
+                                        && m.start_col == current.start_col
+                                        && m.end_col == current.end_col
+                                }).unwrap_or(usize::MAX)
+                            } else {
+                                usize::MAX
+                            };
+                            crate::search::highlight::apply_search_highlights(
+                                &mut cells,
+                                &viewport_matches,
+                                current_viewport_idx,
+                                cols,
+                                theme.search_match,
+                                theme.search_match_active,
+                            );
+                        }
+
                         // Offset rect by tab bar height for screen-space rendering
                         let screen_rect = Rect::new(
                             rect.x,
