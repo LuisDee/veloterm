@@ -228,24 +228,43 @@ impl App {
                 }
             }
 
-            // Update tab title from CWD for focused pane of active tab
-            if pane_id == focused && shell.cwd_changed {
-                shell.cwd_changed = false;
-                if !shell.title_is_explicit {
-                    if let Some(cwd) = shell.cwd.clone() {
-                        let dir_name =
-                            crate::shell_integration::dir_name_from_path(&cwd);
-                        let active_idx = self.tab_manager.active_index();
-                        self.tab_manager.set_title(active_idx, dir_name);
-                    }
-                }
-            }
+            // Update tab title for focused pane of active tab:
+            // Priority: explicit title (OSC 0/2) > process name > CWD basename > "Shell"
+            if pane_id == focused {
+                let active_idx = self.tab_manager.active_index();
 
-            // Update tab title from explicit title (OSC 0/2) for focused pane
-            if pane_id == focused && shell.title_is_explicit {
-                if let Some(title) = shell.title.clone() {
-                    let active_idx = self.tab_manager.active_index();
-                    self.tab_manager.set_title(active_idx, &title);
+                if shell.title_is_explicit {
+                    // Explicit title from OSC 0/2 — highest priority
+                    if let Some(title) = shell.title.clone() {
+                        self.tab_manager.set_title(active_idx, &title);
+                    }
+                } else {
+                    // Try foreground process name
+                    let process_title = state.pty.child_pid().and_then(|pid| {
+                        crate::pty::foreground_process_name(pid)
+                    });
+
+                    if let Some(ref proc_name) = process_title {
+                        if !crate::pty::is_shell_process(proc_name) {
+                            // Non-shell process (e.g., "vim", "claude") — use it
+                            self.tab_manager.set_title(active_idx, proc_name);
+                        } else if let Some(cwd) = shell.cwd.clone() {
+                            // Shell process — fall back to CWD basename
+                            let dir_name =
+                                crate::shell_integration::dir_name_from_path(&cwd);
+                            self.tab_manager.set_title(active_idx, dir_name);
+                        }
+                    } else if shell.cwd_changed {
+                        // No process detected — use CWD if changed
+                        if let Some(cwd) = shell.cwd.clone() {
+                            let dir_name =
+                                crate::shell_integration::dir_name_from_path(&cwd);
+                            self.tab_manager.set_title(active_idx, dir_name);
+                        }
+                    }
+                    if shell.cwd_changed {
+                        shell.cwd_changed = false;
+                    }
                 }
             }
         }
