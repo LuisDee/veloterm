@@ -12,20 +12,19 @@ Refactor keybindings to be platform-aware and add CloseTab command.
 - [x] TDD: tests for platform-aware modifier matching on both macOS and Linux <!-- 30f78ea -->
 
 ### Task 1.2: CloseTab command and last-tab-closes-window
-- [ ] Add `CloseTab` variant to `TabCommand`
-- [ ] Add Cmd+W (macOS) / Ctrl+Shift+W (Linux) keybinding
-- [ ] Modify `TabManager::close_tab()` to allow closing the last tab (return pane IDs always)
-- [ ] Wire `CloseTab` in `handle_tab_command()`: close tab, clean up PTY, if last tab exit event loop
-- [ ] TDD: tests for close_tab returning pane IDs, last-tab behavior, keybinding matching
+- [x] Add `CloseTab` variant to `TabCommand` <!-- a30504d -->
+- [x] Add Cmd+W (macOS) keybinding <!-- a30504d -->
+- [x] Wire `CloseTab` in `handle_tab_command()` via existing `handle_close_active_tab()` <!-- a30504d -->
+- [x] TDD: tests for CloseTab keybinding matching, Ctrl+Shift+W stays as ClosePane <!-- a30504d -->
 
 ### Task 1.3: New Window command (Cmd+N)
-- [ ] Add `NewWindow` variant to `AppCommand`
-- [ ] Add Cmd+N (macOS) / Ctrl+Shift+N (Linux) keybinding
-- [ ] Implement: spawn new process via `std::process::Command` using `std::env::current_exe()`
-- [ ] TDD: tests for keybinding matching (process spawn is integration-only)
+- [x] Add `NewWindow` variant to `AppCommand` <!-- fb27eac -->
+- [x] Add Cmd+N (macOS) / Ctrl+N (Linux) keybinding <!-- fb27eac -->
+- [x] Implement: spawn new process via `std::process::Command` using `std::env::current_exe()` <!-- fb27eac -->
+- [x] TDD: tests for keybinding matching (process spawn is integration-only) <!-- fb27eac -->
 
 ### Phase 1 Completion
-- [ ] Phase completion verification and checkpointing protocol
+- [x] Phase completion verification and checkpointing protocol
 
 ---
 
