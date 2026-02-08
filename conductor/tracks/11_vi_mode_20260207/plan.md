@@ -66,7 +66,7 @@
 
 ## Phase 3: Search, Cursor Rendering & Status Bar
 
-### 3.1 [ ] Implement vi-mode search (/ and ?)
+### 3.1 [x] Implement vi-mode search (/ and ?) <!-- bf4807b -->
 - `/` and `?` enter a search sub-mode with text input in status bar area
 - Reuse `SearchEngine` from `src/search/mod.rs` for query execution
 - `Enter` confirms and moves vi cursor to first match, `Escape` cancels
