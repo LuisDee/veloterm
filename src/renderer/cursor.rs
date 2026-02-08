@@ -25,11 +25,11 @@ pub const FLAG_CURSOR_HOLLOW: u32 = 0x03 << 2;
 /// Default cursor blink interval.
 pub const BLINK_INTERVAL: Duration = Duration::from_millis(500);
 
-/// Cursor foreground color (text under block cursor — dark on bright).
-pub const CURSOR_FG: Color = Color::new(0.1020, 0.0941, 0.0863, 1.0); // same as bg
+/// Cursor foreground color (text under block cursor — contrasts with accent).
+pub const CURSOR_FG: Color = Color::new(0.0784, 0.0784, 0.0745, 1.0); // #141413
 
-/// Cursor background color (cursor block color — bright).
-pub const CURSOR_BG: Color = Color::new(0.9098, 0.8980, 0.8745, 1.0); // same as fg
+/// Cursor background color (cursor block — accent orange).
+pub const CURSOR_BG: Color = Color::new(0.8510, 0.4667, 0.3412, 1.0); // #D97757
 
 /// Manages cursor state and generates cursor overlay instances.
 pub struct CursorState {

@@ -69,7 +69,7 @@ pub fn generate_tab_bar_quads(
     for i in 0..count {
         let x = i as f32 * tw;
         let (bg_r, bg_g, bg_b) = if i == active {
-            (theme.accent.r, theme.accent.g, theme.accent.b)
+            (theme.surface_raised.r, theme.surface_raised.g, theme.surface_raised.b)
         } else {
             (
                 theme.surface.r,
@@ -80,6 +80,15 @@ pub fn generate_tab_bar_quads(
         quads.push(OverlayQuad {
             rect: Rect::new(x, 0.0, tw, TAB_BAR_HEIGHT),
             color: [bg_r, bg_g, bg_b, 1.0],
+        });
+    }
+
+    // Active tab accent indicator stripe (2px at bottom)
+    {
+        let x = active as f32 * tw;
+        quads.push(OverlayQuad {
+            rect: Rect::new(x, TAB_BAR_HEIGHT - 2.0, tw, 2.0),
+            color: [theme.accent.r, theme.accent.g, theme.accent.b, 1.0],
         });
     }
 
@@ -154,8 +163,8 @@ pub fn generate_tab_label_text_cells(
 
         let (fg, bg) = if i == active {
             (
-                Color::new(1.0, 1.0, 1.0, 1.0),
-                Color::new(theme.accent.r, theme.accent.g, theme.accent.b, 1.0),
+                Color::new(theme.text.r, theme.text.g, theme.text.b, 1.0),
+                Color::new(theme.surface_raised.r, theme.surface_raised.g, theme.surface_raised.b, 1.0),
             )
         } else {
             (
@@ -181,7 +190,7 @@ pub fn generate_tab_label_text_cells(
         if show_close && columns >= 3 {
             let close_col = columns - 1;
             let close_fg = if i == active {
-                Color::new(1.0, 1.0, 1.0, 0.7)
+                Color::new(theme.text.r, theme.text.g, theme.text.b, 0.7)
             } else {
                 Color::new(theme.text_secondary.r, theme.text_secondary.g, theme.text_secondary.b, 0.7)
             };
@@ -334,24 +343,38 @@ mod tests {
         let mgr = TabManager::new();
         let theme = Theme::claude_dark();
         let quads = generate_tab_bar_quads(&mgr, 1280.0, &theme);
-        // Background + 1 tab + 0 separators + "+" button = 3 quads
-        assert_eq!(quads.len(), 3);
+        // Background + 1 tab + accent stripe + "+" button = 4 quads
+        assert_eq!(quads.len(), 4);
         // First quad is background spanning full width
         assert_eq!(quads[0].rect.width, 1280.0);
         assert_eq!(quads[0].rect.height, TAB_BAR_HEIGHT);
     }
 
     #[test]
-    fn quads_active_tab_uses_accent_color() {
+    fn quads_active_tab_uses_surface_raised() {
         setup();
         let mgr = TabManager::new();
         let theme = Theme::claude_dark();
         let quads = generate_tab_bar_quads(&mgr, 1280.0, &theme);
-        // Second quad is the active tab — should use accent color
+        // Second quad is the active tab — should use surface_raised
         let tab_quad = &quads[1];
-        assert_eq!(tab_quad.color[0], theme.accent.r);
-        assert_eq!(tab_quad.color[1], theme.accent.g);
-        assert_eq!(tab_quad.color[2], theme.accent.b);
+        assert_eq!(tab_quad.color[0], theme.surface_raised.r);
+        assert_eq!(tab_quad.color[1], theme.surface_raised.g);
+        assert_eq!(tab_quad.color[2], theme.surface_raised.b);
+    }
+
+    #[test]
+    fn quads_active_tab_has_accent_stripe() {
+        setup();
+        let mgr = TabManager::new();
+        let theme = Theme::claude_dark();
+        let quads = generate_tab_bar_quads(&mgr, 1280.0, &theme);
+        // Accent stripe quad (after tab bg, before separators)
+        let stripe = &quads[2];
+        assert_eq!(stripe.color[0], theme.accent.r);
+        assert_eq!(stripe.color[1], theme.accent.g);
+        assert_eq!(stripe.rect.height, 2.0);
+        assert!((stripe.rect.y - (TAB_BAR_HEIGHT - 2.0)).abs() < 0.01);
     }
 
     #[test]
@@ -362,8 +385,8 @@ mod tests {
         mgr.new_tab();
         let theme = Theme::claude_dark();
         let quads = generate_tab_bar_quads(&mgr, 1280.0, &theme);
-        // Background + 3 tabs + 2 separators + "+" button = 7 quads
-        assert_eq!(quads.len(), 7);
+        // Background + 3 tabs + accent stripe + 2 separators + "+" button = 8 quads
+        assert_eq!(quads.len(), 8);
     }
 
     #[test]
@@ -392,15 +415,15 @@ mod tests {
     }
 
     #[test]
-    fn label_active_tab_uses_accent_bg() {
+    fn label_active_tab_uses_surface_raised_bg() {
         setup();
         let mgr = TabManager::new();
         let theme = Theme::claude_dark();
         let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme, None);
         let tab_cell = labels[0].1.iter().find(|c| c.ch == 'S').unwrap();
-        assert!((tab_cell.bg.r - theme.accent.r).abs() < 0.01);
-        assert!((tab_cell.bg.g - theme.accent.g).abs() < 0.01);
-        assert!((tab_cell.bg.b - theme.accent.b).abs() < 0.01);
+        assert!((tab_cell.bg.r - theme.surface_raised.r).abs() < 0.01);
+        assert!((tab_cell.bg.g - theme.surface_raised.g).abs() < 0.01);
+        assert!((tab_cell.bg.b - theme.surface_raised.b).abs() < 0.01);
     }
 
     #[test]

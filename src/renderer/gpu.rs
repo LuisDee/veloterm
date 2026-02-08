@@ -113,9 +113,9 @@ impl SurfaceConfig {
     }
 }
 
-/// The clear color for Claude Dark theme background (#1A1816).
+/// The clear color for Claude Dark theme background (#141413).
 pub fn clear_color() -> wgpu::Color {
-    let c = Color::from_hex("#1A1816");
+    let c = Color::from_hex("#141413");
     wgpu::Color {
         r: c.r as f64,
         g: c.g as f64,
@@ -560,9 +560,10 @@ mod tests {
     fn clear_color_matches_claude_dark_background() {
         let c = clear_color();
         let eps = 1.0 / 512.0;
-        assert!((c.r - 26.0 / 255.0).abs() < eps, "red: {}", c.r);
-        assert!((c.g - 24.0 / 255.0).abs() < eps, "green: {}", c.g);
-        assert!((c.b - 22.0 / 255.0).abs() < eps, "blue: {}", c.b);
+        // #141413 = rgb(20, 20, 19)
+        assert!((c.r - 20.0 / 255.0).abs() < eps, "red: {}", c.r);
+        assert!((c.g - 20.0 / 255.0).abs() < eps, "green: {}", c.g);
+        assert!((c.b - 19.0 / 255.0).abs() < eps, "blue: {}", c.b);
         assert_eq!(c.a, 1.0);
     }
 
