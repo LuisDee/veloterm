@@ -42,13 +42,13 @@
 
 ## Phase 3: Drag-to-Resize & Polish
 
-### Task 3.1: Drag-to-Resize
-- [ ] Write tests for ratio updates during drag with minimum pane size enforcement
-- [ ] Implement drag-to-resize: on CursorMoved while Dragging, compute new ratio, clamp to min size, update PaneTree split ratio, trigger layout recalculation and redraw
+### Task 3.1: Drag-to-Resize <!-- cd99e98 -->
+- [x] Write tests for ratio updates during drag with minimum pane size enforcement
+- [x] Implement drag-to-resize: on CursorMoved while Dragging, compute new ratio, clamp to min size, update PaneTree split ratio, trigger layout recalculation and redraw
 
-### Task 3.2: Hover Highlight & Zoom Mode
-- [ ] Write tests for divider hover color change and divider hiding in zoom mode
-- [ ] Implement: use `Theme::accent_hover` for divider color when hovered; skip divider rendering when `pane_tree.zoomed.is_some()`
+### Task 3.2: Hover Highlight & Zoom Mode <!-- cd99e98 -->
+- [x] Write tests for divider hover color change and divider hiding in zoom mode
+- [x] Implement: use `Theme::accent` for divider color when hovered; skip divider rendering when `pane_tree.is_zoomed()`
 
 ### Task 3.3: Visual Validation
 - [ ] Run application and validate via Playwright screenshots:
