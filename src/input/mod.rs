@@ -148,6 +148,7 @@ pub fn match_pane_command(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TabCommand {
     NewTab,
+    CloseTab,
     NextTab,
     PrevTab,
     SelectTab(usize),
@@ -202,6 +203,7 @@ pub fn match_tab_command(
             let lower = s.to_lowercase();
             match lower.as_str() {
                 "t" => Some(TabCommand::NewTab),
+                "w" if cmd_only => Some(TabCommand::CloseTab),
                 "{" if ctrl_shift => Some(TabCommand::MoveTabLeft),
                 "}" if ctrl_shift => Some(TabCommand::MoveTabRight),
                 "1" => Some(TabCommand::SelectTab(0)),
@@ -977,6 +979,33 @@ mod tests {
         // Ctrl+Shift+1 still works
         let result = match_tab_command(&Key::Character("1".into()), ctrl_shift());
         assert_eq!(result, Some(TabCommand::SelectTab(0)));
+    }
+
+    #[test]
+    fn tab_cmd_close_tab_cmd_w_macos() {
+        let result = match_tab_command(&Key::Character("w".into()), cmd_mod());
+        if cfg!(target_os = "macos") {
+            assert_eq!(result, Some(TabCommand::CloseTab));
+        } else {
+            assert_eq!(result, None);
+        }
+    }
+
+    #[test]
+    fn tab_cmd_close_tab_cmd_w_uppercase_macos() {
+        let result = match_tab_command(&Key::Character("W".into()), cmd_mod());
+        if cfg!(target_os = "macos") {
+            assert_eq!(result, Some(TabCommand::CloseTab));
+        } else {
+            assert_eq!(result, None);
+        }
+    }
+
+    #[test]
+    fn tab_cmd_ctrl_shift_w_does_not_close_tab() {
+        // Ctrl+Shift+W is ClosePane (handled by match_pane_command), not CloseTab
+        let result = match_tab_command(&Key::Character("w".into()), ctrl_shift());
+        assert_eq!(result, None);
     }
 
     // ── Search command matching (2.3) ───────────────────────────────

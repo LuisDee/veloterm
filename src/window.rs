@@ -525,11 +525,15 @@ impl App {
     fn handle_tab_command(
         &mut self,
         command: TabCommand,
-        _event_loop: &ActiveEventLoop,
+        event_loop: &ActiveEventLoop,
     ) {
         let (width, height) = self.window_size();
 
         match command {
+            TabCommand::CloseTab => {
+                self.handle_close_active_tab(event_loop);
+                return; // handle_close_active_tab handles redraw/layout
+            }
             TabCommand::NewTab => {
                 self.tab_manager.new_tab();
                 // Spawn PTY for the new tab's initial pane
