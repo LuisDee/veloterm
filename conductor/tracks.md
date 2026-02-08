@@ -46,7 +46,7 @@ _Link: [./conductor/tracks/06_tabs_20260207/](./conductor/tracks/06_tabs_2026020
 ### [x] Track 08: URL & Path Detection (S)
 _Link: [./conductor/tracks/08_url_detection_20260207/](./conductor/tracks/08_url_detection_20260207/)_
 
-### [ ] Track 09: Scrollback Search (M)
+### [x] Track 09: Scrollback Search (M)
 _Link: [./conductor/tracks/09_scrollback_search_20260207/](./conductor/tracks/09_scrollback_search_20260207/)_
 
 ### [ ] Track 10: Shell Integration (M)
