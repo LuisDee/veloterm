@@ -2,6 +2,7 @@ pub mod config;
 pub mod input;
 pub mod link;
 pub mod pane;
+pub mod platform;
 pub mod pty;
 pub mod renderer;
 pub mod search;

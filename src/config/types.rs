@@ -163,7 +163,7 @@ impl Default for RawFontConfig {
     fn default() -> Self {
         Self {
             family: "JetBrains Mono".to_string(),
-            size: 13.0,
+            size: 18.0,
             line_height: 1.5,
             ui_family: "Inter".to_string(),
             display_family: "Georgia".to_string(),
@@ -302,7 +302,7 @@ impl Default for FontConfig {
     fn default() -> Self {
         Self {
             family: "JetBrains Mono".to_string(),
-            size: 13.0,
+            size: 18.0,
             line_height: 1.5,
             ui_family: "Inter".to_string(),
             display_family: "Georgia".to_string(),
@@ -495,7 +495,7 @@ impl Config {
 # Terminal content font family (with fallback: JetBrains Mono -> SF Mono -> Menlo -> system)
 family = "JetBrains Mono"
 # Font size in points
-size = 13.0
+size = 18.0
 # Line-height multiplier (1.5 = 150% of font size)
 line_height = 1.5
 # UI chrome font (tab bar, menus, status)
@@ -591,7 +591,7 @@ mod tests {
     #[test]
     fn default_font_size() {
         let config = Config::default();
-        assert_eq!(config.font.size, 13.0);
+        assert_eq!(config.font.size, 18.0);
     }
 
     #[test]
@@ -676,7 +676,7 @@ mod tests {
         let toml = r#"
 [font]
 family = "JetBrains Mono"
-size = 16.0
+size = 18.0
 
 [colors]
 theme = "claude_light"
@@ -697,7 +697,7 @@ fps_limit = 120
 "#;
         let config = Config::from_toml(toml).unwrap();
         assert_eq!(config.font.family, "JetBrains Mono");
-        assert_eq!(config.font.size, 16.0);
+        assert_eq!(config.font.size, 18.0);
         assert_eq!(config.colors.theme, "claude_light");
         assert_eq!(config.cursor.style, "beam");
         assert!(!config.cursor.blink);
@@ -728,7 +728,7 @@ size = 18.0
     #[test]
     fn parse_empty_toml_uses_all_defaults() {
         let config = Config::from_toml("").unwrap();
-        assert_eq!(config.font.size, 13.0);
+        assert_eq!(config.font.size, 18.0);
         assert_eq!(config.font.family, "JetBrains Mono");
         assert_eq!(config.font.line_height, 1.5);
         assert_eq!(config.colors.theme, "claude_dark");
@@ -1052,7 +1052,7 @@ fps_limit = 0
     fn load_missing_file_returns_defaults() {
         let path = Path::new("/tmp/nonexistent_veloterm_config_test.toml");
         let config = Config::load(path).unwrap();
-        assert_eq!(config.font.size, 13.0);
+        assert_eq!(config.font.size, 18.0);
         assert_eq!(config.colors.theme, "claude_dark");
     }
 

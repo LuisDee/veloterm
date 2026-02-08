@@ -20,6 +20,7 @@ env_logger = "0.11"
 unicode-width = "0.2"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
+anyhow = "1"
 
 # Terminal Emulation
 alacritty_terminal = "0.25"
@@ -44,6 +45,14 @@ toml = "0.8"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 notify = "8"
+
+# Image encoding
+image = "0.25"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-text = ">=20.1, <21"
+core-graphics = "0.23"
+core-foundation = "0.9"
 
 [dev-dependencies]
 tempfile = "3"

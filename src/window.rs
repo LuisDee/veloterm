@@ -104,6 +104,7 @@ pub struct App {
     current_font_size: f32,
     default_font_size: f32,
     event_proxy: Option<EventLoopProxy<UserEvent>>,
+    screenshot_requested: bool,
 }
 
 impl App {
@@ -125,6 +126,7 @@ impl App {
             current_font_size: font_size,
             default_font_size: font_size,
             event_proxy: None,
+            screenshot_requested: false,
         }
     }
 
@@ -1162,6 +1164,20 @@ impl ApplicationHandler<UserEvent> for App {
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed {
+                    // Check for screenshot (Cmd+Shift+S on macOS, Ctrl+Shift+S elsewhere)
+                    let is_screenshot_key = matches!(event.logical_key, Key::Character(ref s) if s.as_str() == "s" || s.as_str() == "S")
+                        && self.modifiers.shift_key()
+                        && (self.modifiers.super_key() || self.modifiers.control_key());
+
+                    if is_screenshot_key {
+                        self.screenshot_requested = true;
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        log::info!("📸 Screenshot requested (Cmd+Shift+S) - will capture on next frame");
+                        return;
+                    }
+
                     // Check for search toggle (Ctrl+Shift+F) — works in any mode
                     if should_open_search(&event.logical_key, self.modifiers) {
                         if self.input_mode == InputMode::Search {
@@ -1554,7 +1570,25 @@ impl ApplicationHandler<UserEvent> for App {
                 if let Some(renderer) = &mut self.renderer {
                     renderer.update_overlays(&overlay_quads);
                     match renderer.render_panes(&mut pane_descs, &text_overlays) {
-                        Ok(()) => {}
+                        Ok(surface_texture) => {
+                            // Take screenshot if requested
+                            if self.screenshot_requested {
+                                self.screenshot_requested = false;
+                                // Use fixed filename so only latest screenshot is kept.
+                                // Resolve relative to VELOTERM_PROJECT_DIR if set (needed when
+                                // launched via `open` where cwd is /).
+                                let path = match std::env::var("VELOTERM_PROJECT_DIR") {
+                                    Ok(dir) => std::path::PathBuf::from(dir).join("veloterm-latest.png"),
+                                    Err(_) => std::path::PathBuf::from("veloterm-latest.png"),
+                                };
+                                match renderer.capture_screenshot(&surface_texture.texture, &path) {
+                                    Ok(_) => {}, // Log message already in capture_screenshot
+                                    Err(e) => log::error!("✗ Screenshot failed: {}", e),
+                                }
+                            }
+                            // Present the frame
+                            surface_texture.present();
+                        }
                         Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                             renderer.resize(width, height);
                         }
@@ -1737,7 +1771,7 @@ mod tests {
     fn app_config_defaults_match_expected_values() {
         let app = App::new(WindowConfig::default(), Config::default());
         assert_eq!(app.app_config.colors.theme, "claude_dark");
-        assert_eq!(app.app_config.font.size, 13.0);
+        assert_eq!(app.app_config.font.size, 18.0);
         assert_eq!(app.app_config.scrollback.lines, 10_000);
         assert_eq!(app.app_config.cursor.style, "block");
         assert!(app.app_config.cursor.blink);
@@ -2436,8 +2470,8 @@ blink = false
     #[test]
     fn font_size_tracks_in_app() {
         let app = App::new(WindowConfig::default(), Config::default());
-        assert_eq!(app.current_font_size, 13.0);
-        assert_eq!(app.default_font_size, 13.0);
+        assert_eq!(app.current_font_size, 18.0);
+        assert_eq!(app.default_font_size, 18.0);
     }
 
     // ── Config hot-reload ────────────────────────────────────────
@@ -2445,7 +2479,7 @@ blink = false
     #[test]
     fn config_reload_font_updates_app_state() {
         let mut app = App::new(WindowConfig::default(), Config::default());
-        assert_eq!(app.current_font_size, 13.0);
+        assert_eq!(app.current_font_size, 18.0);
 
         let mut new_config = Config::default();
         new_config.font.size = 20.0;

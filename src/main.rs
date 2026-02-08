@@ -8,6 +8,10 @@ fn main() {
         return;
     }
 
+    // Default to info logging if RUST_LOG is not set (e.g., when launched via `open`)
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info");
+    }
     env_logger::init();
     log::info!("VeloTerm v0.1.0 starting");
 

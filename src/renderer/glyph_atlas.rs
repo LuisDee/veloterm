@@ -1,14 +1,17 @@
 // Glyph rasterization and GPU texture atlas.
 
+#[cfg(not(target_os = "macos"))]
 use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, SwashCache};
 use std::collections::HashMap;
 
 /// JetBrains Mono Regular — bundled as a compiled-in resource (~264KB).
+#[cfg(not(target_os = "macos"))]
 const JETBRAINS_MONO_TTF: &[u8] =
     include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
 
-/// Terminal content font fallback chain.
-const TERMINAL_FONT_FALLBACKS: &[&str] = &["SF Mono", "Menlo", "monospace"];
+/// Extra pixels per side added to each atlas slot to prevent glyph clipping.
+/// Descenders, ascenders, and anti-aliased fringes need room beyond the cell boundary.
+pub(crate) const GLYPH_PADDING: u32 = 2;
 
 /// Metadata for a single glyph in the atlas.
 #[derive(Debug, Clone)]
@@ -48,6 +51,49 @@ impl GlyphAtlas {
         font_family: &str,
         line_height_multiplier: f32,
     ) -> Self {
+        #[cfg(target_os = "macos")]
+        {
+            super::coretext_raster::rasterize_atlas(
+                &[],
+                font_size,
+                scale_factor,
+                font_family,
+                line_height_multiplier,
+            )
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Self::new_swash(font_size, scale_factor, font_family, line_height_multiplier)
+        }
+    }
+
+    /// Construct a GlyphAtlas from pre-computed parts (used by platform-specific backends).
+    pub(crate) fn from_parts(
+        atlas_data: Vec<u8>,
+        atlas_width: u32,
+        atlas_height: u32,
+        cell_width: f32,
+        cell_height: f32,
+        glyphs: HashMap<char, GlyphInfo>,
+    ) -> Self {
+        Self {
+            atlas_data,
+            atlas_width,
+            atlas_height,
+            cell_width,
+            cell_height,
+            glyphs,
+        }
+    }
+
+    /// Swash/cosmic-text rasterization backend (non-macOS).
+    #[cfg(not(target_os = "macos"))]
+    fn new_swash(
+        font_size: f32,
+        scale_factor: f32,
+        font_family: &str,
+        line_height_multiplier: f32,
+    ) -> Self {
         let scaled_size = font_size * scale_factor;
         let line_height = (scaled_size * line_height_multiplier).ceil();
 
@@ -79,8 +125,8 @@ impl GlyphAtlas {
             .unwrap_or(scaled_size * 0.6);
 
         let cell_height = line_height;
-        let slot_w = cell_width.ceil() as u32;
-        let slot_h = cell_height.ceil() as u32;
+        let slot_w = cell_width.ceil() as u32 + GLYPH_PADDING * 2;
+        let slot_h = cell_height.ceil() as u32 + GLYPH_PADDING * 2;
 
         // Atlas layout: 16 glyphs per row, ceil(95/16) = 6 rows
         let glyph_count = 95u32;
@@ -112,14 +158,15 @@ impl GlyphAtlas {
             let aw = atlas_width;
             let sw = slot_w;
             let sh = slot_h;
+            let pad = GLYPH_PADDING;
             buffer.draw(
                 &mut font_system,
                 &mut swash_cache,
                 white,
                 |x, y, _w, _h, color| {
                     if x >= 0 && y >= 0 {
-                        let xu = x as u32;
-                        let yu = y as u32;
+                        let xu = x as u32 + pad;
+                        let yu = y as u32 + pad;
                         // Clamp to slot boundaries to prevent bleed into adjacent glyphs
                         if xu < sw && yu < sh {
                             let ax = slot_x + xu;
@@ -156,13 +203,8 @@ impl GlyphAtlas {
     }
 
     /// Resolve font family name to cosmic-text `Attrs` with fallback chain.
-    ///
-    /// Tries the requested family first, then falls through the terminal
-    /// font fallback chain (SF Mono → Menlo → system monospace).
+    #[cfg(not(target_os = "macos"))]
     fn resolve_font_attrs(font_family: &str) -> Attrs<'static> {
-        // cosmic-text resolves font families at shaping time. We set the
-        // primary family name; if it's not found, cosmic-text will fall
-        // back to its own defaults. We additionally try our known fallbacks.
         match font_family.to_lowercase().as_str() {
             "jetbrains mono" => Attrs::new().family(Family::Name("JetBrains Mono")),
             "sf mono" => Attrs::new().family(Family::Name("SF Mono")),
@@ -406,5 +448,55 @@ mod tests {
         let atlas = create_test_atlas();
         assert!(atlas.glyph_info('\x00').is_none());
         assert!(atlas.glyph_info('\n').is_none());
+    }
+
+    // ── Glyph padding tests ────────────────────────────────────────
+
+    #[test]
+    fn atlas_padded_slot_larger_than_cell() {
+        let atlas = create_test_atlas();
+        let info = atlas.glyph_info('A').unwrap();
+        let slot_w_px = info.uv[2] * atlas.atlas_width as f32;
+        let slot_h_px = info.uv[3] * atlas.atlas_height as f32;
+        assert!(
+            slot_w_px > atlas.cell_width.ceil(),
+            "slot width {slot_w_px} should exceed cell width {}",
+            atlas.cell_width.ceil()
+        );
+        assert!(
+            slot_h_px > atlas.cell_height.ceil(),
+            "slot height {slot_h_px} should exceed cell height {}",
+            atlas.cell_height.ceil()
+        );
+    }
+
+    #[test]
+    fn atlas_glyph_not_clipped_at_boundary() {
+        // Glyphs with descenders (g, y, p) should have non-zero pixels
+        // near the bottom of their slot (within the padding zone)
+        let atlas = create_test_atlas();
+        for ch in ['g', 'y', 'p'] {
+            let info = atlas.glyph_info(ch).unwrap();
+            let [u, v, uw, vh] = info.uv;
+            let x0 = (u * atlas.atlas_width as f32) as u32;
+            let y0 = (v * atlas.atlas_height as f32) as u32;
+            let x1 = ((u + uw) * atlas.atlas_width as f32) as u32;
+            let y1 = ((v + vh) * atlas.atlas_height as f32) as u32;
+
+            let mut has_nonzero = false;
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let idx = (y * atlas.atlas_width + x) as usize;
+                    if atlas.atlas_data[idx] > 0 {
+                        has_nonzero = true;
+                        break;
+                    }
+                }
+                if has_nonzero {
+                    break;
+                }
+            }
+            assert!(has_nonzero, "Glyph '{ch}' should have non-zero pixels");
+        }
     }
 }

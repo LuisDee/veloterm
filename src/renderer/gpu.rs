@@ -101,7 +101,7 @@ impl SurfaceConfig {
     /// Build a wgpu SurfaceConfiguration from this config.
     pub fn to_wgpu_config(&self) -> wgpu::SurfaceConfiguration {
         wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             format: self.format,
             width: self.width,
             height: self.height,
@@ -430,12 +430,13 @@ pub fn create_atlas_texture(
     texture
 }
 
-/// Create a nearest-filtering sampler for the glyph atlas.
+/// Create a linear-filtering sampler for the glyph atlas.
+/// Linear filtering smooths fractional-pixel glyph positions instead of producing jagged edges.
 pub fn create_atlas_sampler(device: &wgpu::Device) -> wgpu::Sampler {
     device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("Atlas Sampler"),
-        mag_filter: wgpu::FilterMode::Nearest,
-        min_filter: wgpu::FilterMode::Nearest,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
         mipmap_filter: wgpu::FilterMode::Nearest,
         address_mode_u: wgpu::AddressMode::ClampToEdge,
         address_mode_v: wgpu::AddressMode::ClampToEdge,

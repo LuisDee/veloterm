@@ -4,6 +4,9 @@ pub mod glyph_atlas;
 pub mod gpu;
 pub mod grid_renderer;
 
+#[cfg(target_os = "macos")]
+mod coretext_raster;
+
 use crate::config::theme::Theme;
 use crate::pane::{PaneId, Rect as PaneRect};
 use damage::{DamageState, PaneDamageMap};
@@ -75,7 +78,15 @@ impl Renderer {
         line_height_multiplier: f32,
     ) -> Result<Self, GpuError> {
         let size = window.inner_size();
-        let scale_factor = window.scale_factor() as f32;
+        let winit_scale = window.scale_factor();
+
+        // On macOS, detect the actual display scale via CoreGraphics.
+        // Bare binaries (not .app bundles) get scale_factor=1.0 from winit
+        // even on Retina displays, causing fonts to render at half size.
+        #[cfg(target_os = "macos")]
+        let scale_factor = crate::platform::macos::detect_display_scale(winit_scale) as f32;
+        #[cfg(not(target_os = "macos"))]
+        let scale_factor = winit_scale as f32;
 
         // GPU setup
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
@@ -543,7 +554,7 @@ impl Renderer {
         &mut self,
         panes: &mut [PaneRenderDescriptor],
         text_overlays: &[(PaneRect, Vec<GridCell>)],
-    ) -> Result<(), wgpu::SurfaceError> {
+    ) -> Result<wgpu::SurfaceTexture, wgpu::SurfaceError> {
         // Process damage and prepare per-pane instance data
         struct PaneDrawData {
             rect: PaneRect,
@@ -601,9 +612,13 @@ impl Renderer {
         // Compute total pane instances
         let total_pane_instances: usize = draw_data.iter().map(|d| d.instances.len()).sum();
 
+        // Get surface texture (even if nothing to render, we need it for present)
+        let output = self.surface.get_current_texture()?;
+
         // Skip rendering entirely when nothing changed and no overlays need drawing
-        if total_pane_instances == 0 && text_overlays.is_empty() {
-            return Ok(());
+        if total_pane_instances == 0 && text_overlays.is_empty() && self.overlay_instance_count == 0 {
+            // Nothing to render, just return the blank surface
+            return Ok(output);
         }
 
         // Pre-compute text overlay instances
@@ -697,8 +712,7 @@ impl Renderer {
             self.instance_count = all_instances.len() as u32;
         }
 
-        // Begin render pass
-        let output = self.surface.get_current_texture()?;
+        // Begin render pass (output already acquired above)
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -834,7 +848,108 @@ impl Renderer {
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
-        output.present();
+        // Don't present yet - let caller capture screenshot if needed, then present
+        Ok(output)
+    }
+
+    /// Capture a screenshot of the surface texture to PNG.
+    /// Call this AFTER render_panes() but BEFORE calling present() on the texture.
+    pub fn capture_screenshot(
+        &self,
+        surface_texture: &wgpu::Texture,
+        path: &std::path::Path,
+    ) -> anyhow::Result<()> {
+        use image::{ImageBuffer, Rgba};
+
+        let width = self.surface_config.width;
+        let height = self.surface_config.height;
+        let bytes_per_pixel = 4u32;
+
+        // Row padding must be aligned to 256 bytes
+        let unpadded_bytes_per_row = width * bytes_per_pixel;
+        let padded_bytes_per_row = (unpadded_bytes_per_row + 255) & !255;
+
+        let output_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Screenshot Buffer"),
+            size: (padded_bytes_per_row * height) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Screenshot Encoder"),
+            });
+
+        encoder.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture {
+                texture: surface_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::ImageCopyBuffer {
+                buffer: &output_buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        // Map and read back
+        let buffer_slice = output_buffer.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+            sender.send(result).ok();
+        });
+        self.device.poll(wgpu::Maintain::Wait);
+        receiver.recv()??;
+
+        let data = buffer_slice.get_mapped_range();
+
+        // Remove row padding and handle BGRA -> RGBA conversion if needed
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+        for row in 0..height {
+            let start = (row * padded_bytes_per_row) as usize;
+            let end = start + (width * bytes_per_pixel) as usize;
+            let row_data = &data[start..end];
+
+            // Check if we need to swap B and R channels (Bgra8Unorm -> Rgba)
+            if matches!(
+                self.surface_config.format,
+                wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+            ) {
+                for chunk in row_data.chunks_exact(4) {
+                    pixels.push(chunk[2]); // R (was B)
+                    pixels.push(chunk[1]); // G
+                    pixels.push(chunk[0]); // B (was R)
+                    pixels.push(chunk[3]); // A
+                }
+            } else {
+                pixels.extend_from_slice(row_data);
+            }
+        }
+
+        drop(data);
+        output_buffer.unmap();
+
+        // Save as PNG
+        let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
+            ImageBuffer::from_raw(width, height, pixels)
+                .ok_or_else(|| anyhow::anyhow!("Failed to create image buffer"))?;
+        img.save(path)?;
+
+        log::info!("✓ Screenshot saved: {}", path.display());
         Ok(())
     }
 
