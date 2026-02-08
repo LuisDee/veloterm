@@ -20,7 +20,7 @@ impl PaneId {
 
     /// Reset the global counter (for testing only).
     #[cfg(test)]
-    fn reset_counter() {
+    pub(crate) fn reset_counter() {
         NEXT_PANE_ID.store(1, Ordering::Relaxed);
     }
 }
