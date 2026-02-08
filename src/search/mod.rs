@@ -71,6 +71,84 @@ impl SearchEngine {
     }
 }
 
+/// Manages search state: query, matches, navigation, and active status.
+pub struct SearchState {
+    pub query: String,
+    pub matches: Vec<SearchMatch>,
+    pub current_index: usize,
+    pub is_active: bool,
+    pub error: Option<String>,
+    engine: SearchEngine,
+}
+
+impl SearchState {
+    pub fn new() -> Self {
+        Self {
+            query: String::new(),
+            matches: Vec::new(),
+            current_index: 0,
+            is_active: false,
+            error: None,
+            engine: SearchEngine::new(),
+        }
+    }
+
+    /// Update the search query and re-run search against provided lines.
+    /// Resets current_index to 0.
+    pub fn set_query(&mut self, query: &str, lines: &[String]) {
+        self.query = query.to_string();
+        self.current_index = 0;
+        let result = self.engine.search(query, lines);
+        self.matches = result.matches;
+        self.error = result.error;
+    }
+
+    /// Advance to the next match. Wraps from last → 0.
+    pub fn next_match(&mut self) {
+        if self.matches.is_empty() {
+            return;
+        }
+        self.current_index = (self.current_index + 1) % self.matches.len();
+    }
+
+    /// Go to the previous match. Wraps from 0 → last.
+    pub fn prev_match(&mut self) {
+        if self.matches.is_empty() {
+            return;
+        }
+        if self.current_index == 0 {
+            self.current_index = self.matches.len() - 1;
+        } else {
+            self.current_index -= 1;
+        }
+    }
+
+    /// Returns the current active match, if any.
+    pub fn current_match(&self) -> Option<&SearchMatch> {
+        self.matches.get(self.current_index)
+    }
+
+    /// Returns matches visible in the given viewport range (± buffer rows).
+    pub fn visible_matches(&self, viewport_start: i32, viewport_end: i32, buffer: i32) -> Vec<&SearchMatch> {
+        let start = viewport_start - buffer;
+        let end = viewport_end + buffer;
+        self.matches
+            .iter()
+            .filter(|m| m.row >= start && m.row <= end)
+            .collect()
+    }
+
+    /// Returns the row of the current match for scroll-to-match.
+    pub fn scroll_target(&self) -> Option<i32> {
+        self.current_match().map(|m| m.row)
+    }
+
+    /// Total number of matches.
+    pub fn total_count(&self) -> usize {
+        self.matches.len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,5 +317,239 @@ mod tests {
         let content = lines(&["aaa bbb aaa", "ccc aaa"]);
         let result = engine.search("aaa", &content);
         assert_eq!(result.total_count, result.matches.len());
+    }
+
+    // ── 1.3.1 SearchState tracks query, index, count ───────────────
+
+    #[test]
+    fn search_state_initial_values() {
+        let state = SearchState::new();
+        assert_eq!(state.query, "");
+        assert_eq!(state.current_index, 0);
+        assert!(state.matches.is_empty());
+        assert!(!state.is_active);
+        assert!(state.error.is_none());
+    }
+
+    #[test]
+    fn search_state_tracks_query_after_set() {
+        let mut state = SearchState::new();
+        let content = lines(&["hello world"]);
+        state.set_query("hello", &content);
+        assert_eq!(state.query, "hello");
+        assert_eq!(state.total_count(), 1);
+    }
+
+    // ── 1.3.2 next_match wraps ─────────────────────────────────────
+
+    #[test]
+    fn next_match_advances_index() {
+        let mut state = SearchState::new();
+        let content = lines(&["aa bb aa cc aa"]);
+        state.set_query("aa", &content);
+        assert_eq!(state.current_index, 0);
+        state.next_match();
+        assert_eq!(state.current_index, 1);
+        state.next_match();
+        assert_eq!(state.current_index, 2);
+    }
+
+    #[test]
+    fn next_match_wraps_to_zero() {
+        let mut state = SearchState::new();
+        let content = lines(&["aa bb aa"]);
+        state.set_query("aa", &content);
+        assert_eq!(state.total_count(), 2);
+        state.next_match(); // 0 → 1
+        state.next_match(); // 1 → 0 (wrap)
+        assert_eq!(state.current_index, 0);
+    }
+
+    #[test]
+    fn next_match_no_matches_does_nothing() {
+        let mut state = SearchState::new();
+        let content = lines(&["hello"]);
+        state.set_query("xyz", &content);
+        state.next_match();
+        assert_eq!(state.current_index, 0);
+    }
+
+    // ── 1.3.3 prev_match wraps ─────────────────────────────────────
+
+    #[test]
+    fn prev_match_decrements_index() {
+        let mut state = SearchState::new();
+        let content = lines(&["aa bb aa cc aa"]);
+        state.set_query("aa", &content);
+        state.next_match(); // 0 → 1
+        state.next_match(); // 1 → 2
+        state.prev_match(); // 2 → 1
+        assert_eq!(state.current_index, 1);
+    }
+
+    #[test]
+    fn prev_match_wraps_to_last() {
+        let mut state = SearchState::new();
+        let content = lines(&["aa bb aa cc aa"]);
+        state.set_query("aa", &content);
+        assert_eq!(state.current_index, 0);
+        state.prev_match(); // 0 → 2 (wrap)
+        assert_eq!(state.current_index, 2);
+    }
+
+    #[test]
+    fn prev_match_no_matches_does_nothing() {
+        let mut state = SearchState::new();
+        let content = lines(&["hello"]);
+        state.set_query("xyz", &content);
+        state.prev_match();
+        assert_eq!(state.current_index, 0);
+    }
+
+    // ── 1.3.4 set_query resets index ───────────────────────────────
+
+    #[test]
+    fn set_query_resets_index_to_zero() {
+        let mut state = SearchState::new();
+        let content = lines(&["aa bb aa cc aa"]);
+        state.set_query("aa", &content);
+        state.next_match(); // 0 → 1
+        state.next_match(); // 1 → 2
+        assert_eq!(state.current_index, 2);
+        state.set_query("bb", &content);
+        assert_eq!(state.current_index, 0);
+    }
+
+    #[test]
+    fn set_query_updates_matches() {
+        let mut state = SearchState::new();
+        let content = lines(&["aa bb cc"]);
+        state.set_query("aa", &content);
+        assert_eq!(state.total_count(), 1);
+        state.set_query("bb", &content);
+        assert_eq!(state.total_count(), 1);
+        state.set_query("dd", &content);
+        assert_eq!(state.total_count(), 0);
+    }
+
+    // ── 1.3.5 current_match returns active match ───────────────────
+
+    #[test]
+    fn current_match_returns_first_match() {
+        let mut state = SearchState::new();
+        let content = lines(&["hello world hello"]);
+        state.set_query("hello", &content);
+        let m = state.current_match().unwrap();
+        assert_eq!(m.row, 0);
+        assert_eq!(m.start_col, 0);
+        assert_eq!(m.end_col, 5);
+    }
+
+    #[test]
+    fn current_match_after_navigation() {
+        let mut state = SearchState::new();
+        let content = lines(&["hello world hello"]);
+        state.set_query("hello", &content);
+        state.next_match();
+        let m = state.current_match().unwrap();
+        assert_eq!(m.start_col, 12);
+    }
+
+    #[test]
+    fn current_match_none_when_no_matches() {
+        let mut state = SearchState::new();
+        let content = lines(&["hello"]);
+        state.set_query("xyz", &content);
+        assert!(state.current_match().is_none());
+    }
+
+    #[test]
+    fn current_match_none_when_empty_query() {
+        let state = SearchState::new();
+        assert!(state.current_match().is_none());
+    }
+
+    // ── 1.3.6 Visible match filtering ──────────────────────────────
+
+    #[test]
+    fn visible_matches_filters_by_viewport() {
+        let mut state = SearchState::new();
+        let content = lines(&[
+            "XFIND row 0",    // row 0
+            "XFIND row 1",    // row 1
+            "nothing here",   // row 2
+            "XFIND row 3",    // row 3
+            "XFIND row 4",    // row 4
+            "nothing here",   // row 5
+            "XFIND row 6",    // row 6
+        ]);
+        state.set_query("XFIND", &content);
+        // viewport rows 2..4, buffer=0
+        let visible = state.visible_matches(2, 4, 0);
+        assert_eq!(visible.len(), 2); // rows 3 and 4
+        assert_eq!(visible[0].row, 3);
+        assert_eq!(visible[1].row, 4);
+    }
+
+    #[test]
+    fn visible_matches_includes_buffer() {
+        let mut state = SearchState::new();
+        let content = lines(&[
+            "XFIND row 0",
+            "XFIND row 1",
+            "nothing here",
+            "XFIND row 3",
+            "XFIND row 4",
+            "XFIND row 5",
+            "XFIND row 6",
+        ]);
+        state.set_query("XFIND", &content);
+        // viewport rows 3..4, buffer=1 → effective range 2..5
+        let visible = state.visible_matches(3, 4, 1);
+        // rows 3, 4, 5 are in range 2..5 inclusive
+        assert!(visible.iter().all(|m| m.row >= 2 && m.row <= 5));
+    }
+
+    #[test]
+    fn visible_matches_empty_when_no_matches_in_range() {
+        let mut state = SearchState::new();
+        let content = lines(&[
+            "XFIND row 0",
+            "nothing here",
+            "nothing here",
+            "nothing here",
+            "XFIND row 4",
+        ]);
+        state.set_query("XFIND", &content);
+        let visible = state.visible_matches(1, 3, 0);
+        assert!(visible.is_empty());
+    }
+
+    // ── scroll_target ──────────────────────────────────────────────
+
+    #[test]
+    fn scroll_target_returns_current_match_row() {
+        let mut state = SearchState::new();
+        let content = lines(&["nothing here", "XFIND here", "nothing here"]);
+        state.set_query("XFIND", &content);
+        assert_eq!(state.scroll_target(), Some(1));
+    }
+
+    #[test]
+    fn scroll_target_none_when_no_matches() {
+        let mut state = SearchState::new();
+        let content = lines(&["hello"]);
+        state.set_query("xyz", &content);
+        assert_eq!(state.scroll_target(), None);
+    }
+
+    #[test]
+    fn scroll_target_updates_after_navigation() {
+        let mut state = SearchState::new();
+        let content = lines(&["XFIND row 0", "nothing here", "XFIND row 2"]);
+        state.set_query("XFIND", &content);
+        assert_eq!(state.scroll_target(), Some(0));
+        state.next_match();
+        assert_eq!(state.scroll_target(), Some(2));
     }
 }
