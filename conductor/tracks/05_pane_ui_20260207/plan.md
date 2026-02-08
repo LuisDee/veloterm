@@ -21,13 +21,13 @@
 
 ## Phase 2: Rendering & Mouse Integration
 
-### Task 2.1: Divider Quad Generation
-- [ ] Write tests for generating `CellInstance` quads for divider bars
-- [ ] Implement `generate_divider_instances()` that produces GPU quads (bg_color = theme.border, no glyph) appended to the instance buffer in `render_panes()`
+### Task 2.1: Divider Quad Generation <!-- 96e4c18 -->
+- [x] Write tests for generating overlay quads for divider bars
+- [x] Implement `generate_divider_quads()` in `src/pane/divider.rs` and overlay shader + pipeline in renderer
 
-### Task 2.2: Unfocused Pane Overlay
-- [ ] Write tests for generating translucent overlay quads for unfocused panes
-- [ ] Implement overlay quad generation (one full-pane quad per unfocused pane, bg with alpha ~0.3), appended after pane content
+### Task 2.2: Unfocused Pane Overlay <!-- 96e4c18 -->
+- [x] Write tests for generating translucent overlay quads for unfocused panes
+- [x] Implement overlay quad generation (one full-pane quad per unfocused pane, bg with alpha ~0.3), appended after pane content
 
 ### Task 2.3: Wire Mouse Events into App
 - [ ] Write tests for mouse event routing (CursorMoved, MouseInput → PaneInteraction)
