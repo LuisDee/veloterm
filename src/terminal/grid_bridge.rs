@@ -8,11 +8,11 @@ use alacritty_terminal::term::cell::Flags as CellFlags;
 use alacritty_terminal::vte::ansi::Color as AnsiColor;
 use alacritty_terminal::vte::ansi::NamedColor;
 
-/// Default foreground color (Claude Dark text_primary).
-pub const DEFAULT_FG: Color = Color::new(0.9098, 0.8980, 0.8745, 1.0); // #E8E5DF
+/// Default foreground color (Claude Dark text #FAF9F5).
+pub const DEFAULT_FG: Color = Color::new(0.9804, 0.9765, 0.9608, 1.0); // #FAF9F5
 
-/// Default background color (Claude Dark background).
-pub const DEFAULT_BG: Color = Color::new(0.1020, 0.0941, 0.0863, 1.0); // #1A1816
+/// Default background color (Claude Dark terminal_bg #181715).
+pub const DEFAULT_BG: Color = Color::new(0.0941, 0.0902, 0.0824, 1.0); // #181715
 
 /// Standard 16 ANSI colors mapped to Claude Dark theme values.
 pub fn ansi_named_color(name: NamedColor) -> Color {
@@ -309,13 +309,15 @@ mod tests {
     // ── Default color handling ────────────────────────────────────────
 
     #[test]
-    fn default_fg_matches_theme_text_primary() {
-        assert!((DEFAULT_FG.r - 0.9098).abs() < 0.01);
+    fn default_fg_matches_theme_text() {
+        // #FAF9F5 → r = 0xFA/255 ≈ 0.9804
+        assert!((DEFAULT_FG.r - 0.9804).abs() < 0.01);
     }
 
     #[test]
-    fn default_bg_matches_theme_background() {
-        assert!((DEFAULT_BG.r - 0.1020).abs() < 0.01);
+    fn default_bg_matches_theme_terminal_bg() {
+        // #181715 → r = 0x18/255 ≈ 0.0941
+        assert!((DEFAULT_BG.r - 0.0941).abs() < 0.01);
     }
 
     // ── Grid extraction ──────────────────────────────────────────────
@@ -347,7 +349,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_grid_default_fg_is_theme_text_primary() {
+    fn extract_grid_default_fg_is_theme_text() {
         let term = Terminal::new(80, 24, 10_000);
         let cells = extract_grid_cells(&term);
         assert!((cells[0].fg.r - DEFAULT_FG.r).abs() < 0.01);

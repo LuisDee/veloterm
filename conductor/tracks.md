@@ -85,7 +85,7 @@ _Link: [./conductor/tracks/20_context_menus_20260208/](./conductor/tracks/20_con
 
 ## Wave 8 — Visual Polish & Theming
 
-### [ ] Track 21: Anthropic Dark Theme & Color Rendering (M)
+### [~] Track 21: Anthropic Dark Theme & Color Rendering (M)
 _Link: [./conductor/tracks/21_theme_colors_20260208/](./conductor/tracks/21_theme_colors_20260208/)_
 
 ---

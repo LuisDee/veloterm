@@ -3269,6 +3269,7 @@ dependencies = [
  "crossbeam-channel",
  "env_logger",
  "image",
+ "libc",
  "linkify",
  "log",
  "notify",

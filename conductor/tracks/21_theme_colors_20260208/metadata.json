@@ -1,0 +1,17 @@
+{
+  "track_id": "21_theme_colors",
+  "state": "NOT_STARTED",
+  "complexity": "M",
+  "wave": 8,
+  "cc_version_at_brief": "v2",
+  "cc_version_current": "v2",
+  "dependencies": ["03_config", "15_font_padding"],
+  "interfaces_owned": ["anthropic_dark_theme", "ansi_color_verification", "window_chrome_integration"],
+  "interfaces_consumed": ["Config.theme", "Theme", "GridBridge", "GlyphAtlas"],
+  "events_published": [],
+  "events_consumed": [],
+  "patches": [],
+  "created_at": "2026-02-08T12:00:00Z",
+  "started_at": null,
+  "completed_at": null
+}

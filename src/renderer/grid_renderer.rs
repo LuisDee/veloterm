@@ -242,7 +242,7 @@ pub fn generate_test_pattern(
         for (i, byte) in (0x20u8..=0x7Eu8).enumerate() {
             if i < cols {
                 cells[row_start + i] =
-                    GridCell::new(byte as char, theme.text_primary, theme.background);
+                    GridCell::new(byte as char, theme.text, theme.background);
             }
         }
     }
@@ -263,7 +263,7 @@ pub fn generate_test_pattern(
         let row_start = row * cols;
         for col in 0..cols {
             let ch = if (row + col) % 2 == 0 { '#' } else { '.' };
-            cells[row_start + col] = GridCell::new(ch, theme.text_muted, theme.background);
+            cells[row_start + col] = GridCell::new(ch, theme.text_secondary, theme.background);
         }
     }
 
@@ -590,7 +590,7 @@ mod tests {
         let theme = test_theme();
         let cells = generate_test_pattern(&grid, &theme);
         let row2_start = 2 * 80;
-        assert_eq!(cells[row2_start + 1].fg, theme.text_primary);
+        assert_eq!(cells[row2_start + 1].fg, theme.text);
     }
 
     #[test]
@@ -632,7 +632,7 @@ mod tests {
         let theme = test_theme();
         let cells = generate_test_pattern(&grid, &theme);
         let row4_start = 4 * 80;
-        assert_eq!(cells[row4_start].fg, theme.text_muted);
+        assert_eq!(cells[row4_start].fg, theme.text_secondary);
     }
 
     // ── Row byte offset and partial instance generation ──────────────

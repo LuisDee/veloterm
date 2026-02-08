@@ -58,9 +58,9 @@ pub fn generate_tab_bar_quads(
     quads.push(OverlayQuad {
         rect: Rect::new(0.0, 0.0, window_width, TAB_BAR_HEIGHT),
         color: [
-            theme.pane_background.r,
-            theme.pane_background.g,
-            theme.pane_background.b,
+            theme.surface.r,
+            theme.surface.g,
+            theme.surface.b,
             1.0,
         ],
     });
@@ -72,9 +72,9 @@ pub fn generate_tab_bar_quads(
             (theme.accent.r, theme.accent.g, theme.accent.b)
         } else {
             (
-                theme.pane_background.r,
-                theme.pane_background.g,
-                theme.pane_background.b,
+                theme.surface.r,
+                theme.surface.g,
+                theme.surface.b,
             )
         };
         quads.push(OverlayQuad {
@@ -108,9 +108,9 @@ pub fn generate_tab_bar_quads(
     quads.push(OverlayQuad {
         rect: Rect::new(plus_x, 0.0, NEW_TAB_BUTTON_WIDTH, TAB_BAR_HEIGHT),
         color: [
-            theme.pane_background.r,
-            theme.pane_background.g,
-            theme.pane_background.b,
+            theme.surface.r,
+            theme.surface.g,
+            theme.surface.b,
             1.0,
         ],
     });
@@ -160,15 +160,15 @@ pub fn generate_tab_label_text_cells(
         } else {
             (
                 Color::new(
-                    theme.text_muted.r,
-                    theme.text_muted.g,
-                    theme.text_muted.b,
+                    theme.text_secondary.r,
+                    theme.text_secondary.g,
+                    theme.text_secondary.b,
                     1.0,
                 ),
                 Color::new(
-                    theme.pane_background.r,
-                    theme.pane_background.g,
-                    theme.pane_background.b,
+                    theme.surface.r,
+                    theme.surface.g,
+                    theme.surface.b,
                     1.0,
                 ),
             )
@@ -183,7 +183,7 @@ pub fn generate_tab_label_text_cells(
             let close_fg = if i == active {
                 Color::new(1.0, 1.0, 1.0, 0.7)
             } else {
-                Color::new(theme.text_muted.r, theme.text_muted.g, theme.text_muted.b, 0.7)
+                Color::new(theme.text_secondary.r, theme.text_secondary.g, theme.text_secondary.b, 0.7)
             };
             cells[close_col] = GridCell::new('\u{00D7}', close_fg, bg); // × character
         }
@@ -221,15 +221,15 @@ pub fn generate_tab_label_text_cells(
     if plus_cols > 0 {
         let plus_rect = Rect::new(plus_x, text_y.max(0.0), NEW_TAB_BUTTON_WIDTH, cell_height);
         let bg = Color::new(
-            theme.pane_background.r,
-            theme.pane_background.g,
-            theme.pane_background.b,
+            theme.surface.r,
+            theme.surface.g,
+            theme.surface.b,
             1.0,
         );
         let fg = Color::new(
-            theme.text_muted.r,
-            theme.text_muted.g,
-            theme.text_muted.b,
+            theme.text_secondary.r,
+            theme.text_secondary.g,
+            theme.text_secondary.b,
             1.0,
         );
         let mut cells = vec![GridCell::empty(bg); plus_cols];
@@ -374,8 +374,8 @@ mod tests {
         let theme = Theme::claude_dark();
         let quads = generate_tab_bar_quads(&mgr, 1280.0, &theme);
         // quads[1] is tab 0 (inactive)
-        assert_eq!(quads[1].color[0], theme.pane_background.r);
-        assert_eq!(quads[1].color[1], theme.pane_background.g);
+        assert_eq!(quads[1].color[0], theme.surface.r);
+        assert_eq!(quads[1].color[1], theme.surface.g);
     }
 
     // ── generate_tab_label_text_cells ─────────────────────────────
@@ -411,7 +411,7 @@ mod tests {
         let theme = Theme::claude_dark();
         let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme, None);
         let tab0_cell = labels[0].1.iter().find(|c| c.ch == 'S').unwrap();
-        assert!((tab0_cell.bg.r - theme.pane_background.r).abs() < 0.01);
+        assert!((tab0_cell.bg.r - theme.surface.r).abs() < 0.01);
     }
 
     #[test]

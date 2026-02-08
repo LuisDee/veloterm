@@ -822,7 +822,7 @@ impl App {
                     total_matches: self.search_state.total_count(),
                     has_error: self.search_state.error.is_some(),
                     bar_color: [theme.border.r, theme.border.g, theme.border.b, 0.95],
-                    text_color: [theme.text_primary.r, theme.text_primary.g, theme.text_primary.b, 1.0],
+                    text_color: [theme.text.r, theme.text.g, theme.text.b, 1.0],
                 };
                 quads.extend(generate_search_bar_quads(&params));
             }
@@ -2119,9 +2119,9 @@ impl ApplicationHandler<UserEvent> for App {
                                     0.95,
                                 ],
                                 text_color: [
-                                    theme.text_primary.r,
-                                    theme.text_primary.g,
-                                    theme.text_primary.b,
+                                    theme.text.r,
+                                    theme.text.g,
+                                    theme.text.b,
                                     1.0,
                                 ],
                             };
