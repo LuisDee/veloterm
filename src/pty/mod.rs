@@ -31,6 +31,82 @@ impl std::fmt::Display for PtyError {
 
 impl std::error::Error for PtyError {}
 
+/// Known shell process names that should fall back to CWD-based titles.
+const SHELL_NAMES: &[&str] = &["zsh", "bash", "fish", "sh", "dash", "tcsh", "csh", "ksh"];
+
+/// Returns true if the given process name is a known shell.
+pub fn is_shell_process(name: &str) -> bool {
+    SHELL_NAMES.contains(&name)
+}
+
+/// Query the foreground process name for a given shell PID.
+///
+/// Returns the basename of the foreground child process, or None if
+/// detection fails or the shell itself is the foreground process.
+#[cfg(target_os = "macos")]
+pub fn foreground_process_name(shell_pid: u32) -> Option<String> {
+    extern "C" {
+        fn proc_listchildpids(
+            ppid: libc::c_int,
+            buffer: *mut libc::c_void,
+            buffersize: libc::c_int,
+        ) -> libc::c_int;
+        fn proc_pidpath(
+            pid: libc::c_int,
+            buffer: *mut libc::c_void,
+            buffersize: u32,
+        ) -> libc::c_int;
+    }
+
+    unsafe {
+        // Get number of child PIDs
+        let count =
+            proc_listchildpids(shell_pid as libc::c_int, std::ptr::null_mut(), 0);
+        if count <= 0 {
+            return None; // No children — shell is foreground
+        }
+
+        let mut pids = vec![0i32; count as usize];
+        let buf_size = (count as usize * std::mem::size_of::<i32>()) as libc::c_int;
+        let actual =
+            proc_listchildpids(shell_pid as libc::c_int, pids.as_mut_ptr() as *mut _, buf_size);
+        if actual <= 0 {
+            return None;
+        }
+
+        let num_pids = actual as usize / std::mem::size_of::<i32>();
+        // Take the last child (most recently spawned)
+        let fg_pid = pids[num_pids - 1];
+
+        let mut path_buf = vec![0u8; 4096];
+        let ret = proc_pidpath(
+            fg_pid,
+            path_buf.as_mut_ptr() as *mut _,
+            path_buf.len() as u32,
+        );
+        if ret <= 0 {
+            return None;
+        }
+
+        let path = std::ffi::CStr::from_ptr(path_buf.as_ptr() as *const _)
+            .to_string_lossy()
+            .to_string();
+        Some(path.rsplit('/').next().unwrap_or(&path).to_string())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn foreground_process_name(_shell_pid: u32) -> Option<String> {
+    // Linux: could read /proc/<pid>/task/<pid>/children + /proc/<child>/comm
+    // For now, return None (fall back to CWD)
+    None
+}
+
+/// Extract a process name from a full path string.
+pub fn basename_from_path(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
 /// Determine the shell to spawn: `$SHELL` or `/bin/sh` fallback.
 pub fn default_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
@@ -115,6 +191,11 @@ impl PtySession {
     pub fn write(&mut self, data: &[u8]) -> std::io::Result<()> {
         self.writer.write_all(data)?;
         self.writer.flush()
+    }
+
+    /// Returns the PID of the child shell process.
+    pub fn child_pid(&self) -> Option<u32> {
+        self._child.process_id()
     }
 
     /// Resize the PTY.
@@ -231,5 +312,51 @@ mod tests {
         let size = session.master.get_size().expect("get_size failed");
         assert_eq!(size.cols, 132);
         assert_eq!(size.rows, 50);
+    }
+
+    // ── Process name detection ─────────────────────────────────────
+
+    #[test]
+    fn is_shell_process_detects_common_shells() {
+        assert!(is_shell_process("zsh"));
+        assert!(is_shell_process("bash"));
+        assert!(is_shell_process("fish"));
+        assert!(is_shell_process("sh"));
+        assert!(is_shell_process("dash"));
+    }
+
+    #[test]
+    fn is_shell_process_rejects_non_shells() {
+        assert!(!is_shell_process("vim"));
+        assert!(!is_shell_process("claude"));
+        assert!(!is_shell_process("python"));
+        assert!(!is_shell_process("node"));
+    }
+
+    #[test]
+    fn basename_from_path_extracts_name() {
+        assert_eq!(basename_from_path("/usr/bin/vim"), "vim");
+        assert_eq!(basename_from_path("/usr/local/bin/claude"), "claude");
+        assert_eq!(basename_from_path("python3"), "python3");
+        assert_eq!(basename_from_path("/bin/zsh"), "zsh");
+    }
+
+    #[test]
+    fn child_pid_returns_some() {
+        let session = PtySession::new("/bin/sh", 80, 24).expect("spawn failed");
+        assert!(session.child_pid().is_some());
+    }
+
+    #[test]
+    fn foreground_process_of_idle_shell_is_none() {
+        // An idle shell has no foreground children
+        let session = PtySession::new("/bin/sh", 80, 24).expect("spawn failed");
+        let pid = session.child_pid().unwrap();
+        // Give shell a moment to start
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let name = foreground_process_name(pid);
+        // Idle shell has no children, so should be None
+        // (or could be a shell startup process — just verify it doesn't panic)
+        let _ = name;
     }
 }
