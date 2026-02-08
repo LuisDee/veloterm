@@ -51,7 +51,7 @@
 
 ## Phase 3: Runtime Font Size Adjustment & Integration
 
-### Task 3.1: Font size keyboard shortcuts
+### Task 3.1: Font size keyboard shortcuts [x] <!-- 9382142 -->
 - [ ] Add `AppCommand` enum to `input/mod.rs`: `IncreaseFontSize`, `DecreaseFontSize`, `ResetFontSize`
 - [ ] Add `match_app_command()` matcher: Cmd+= / Cmd+Plus → increase, Cmd+Minus → decrease, Cmd+0 → reset
 - [ ] Platform-aware: use `super_key()` on macOS (Cmd), `control_key()` on Linux (Ctrl)
