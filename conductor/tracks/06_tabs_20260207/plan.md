@@ -2,26 +2,26 @@
 
 ## Phase 1: Tab Data Model & Lifecycle
 
-### Task 1.1: TabId and Tab struct
-- [ ] Write tests for TabId uniqueness (atomic counter, like PaneId)
-- [ ] Write tests for Tab creation with default title and PaneTree
-- [ ] Implement `TabId`, `Tab` in `src/tab/mod.rs`
-- [ ] Add `pub mod tab;` to `src/lib.rs`
+### Task 1.1: TabId and Tab struct <!-- 73c0b42 -->
+- [x] Write tests for TabId uniqueness (atomic counter, like PaneId)
+- [x] Write tests for Tab creation with default title and PaneTree
+- [x] Implement `TabId`, `Tab` in `src/tab/mod.rs`
+- [x] Add `pub mod tab;` to `src/lib.rs`
 
-### Task 1.2: TabManager core operations
-- [ ] Write tests for TabManager::new() creates single tab
-- [ ] Write tests for new_tab() appends and returns TabId
-- [ ] Write tests for close_tab() removes tab, returns PaneIds for cleanup
-- [ ] Write tests for close_tab() on last tab returns None (can't close last)
-- [ ] Write tests for active_tab() / active_tab_mut() access
-- [ ] Implement TabManager in `src/tab/mod.rs`
+### Task 1.2: TabManager core operations <!-- 73c0b42 -->
+- [x] Write tests for TabManager::new() creates single tab
+- [x] Write tests for new_tab() appends and returns TabId
+- [x] Write tests for close_tab() removes tab, returns PaneIds for cleanup
+- [x] Write tests for close_tab() on last tab returns None (can't close last)
+- [x] Write tests for active_tab() / active_tab_mut() access
+- [x] Implement TabManager in `src/tab/mod.rs`
 
-### Task 1.3: Tab navigation
-- [ ] Write tests for select_tab(index) switches active tab, clamps to range
-- [ ] Write tests for next_tab() / prev_tab() cycle behavior (wraps around)
-- [ ] Write tests for move_tab(from, to) reorder
-- [ ] Write tests for set_title() updates tab title
-- [ ] Implement navigation methods on TabManager
+### Task 1.3: Tab navigation <!-- 73c0b42 -->
+- [x] Write tests for select_tab(index) switches active tab, clamps to range
+- [x] Write tests for next_tab() / prev_tab() cycle behavior (wraps around)
+- [x] Write tests for move_tab(from, to) reorder
+- [x] Write tests for set_title() updates tab title
+- [x] Implement navigation methods on TabManager
 
 ### Phase 1 Completion
 - [ ] Phase completion verification and checkpointing
@@ -36,18 +36,18 @@
 - [ ] Write tests for Ctrl+Shift+{ → MoveTabLeft, } → MoveTabRight
 - [ ] Implement `TabCommand` enum and `match_tab_command()` in `src/input/mod.rs`
 
-### Task 2.2: Tab bar quad generation
-- [ ] Write tests for generating tab background quads (active vs inactive colors)
-- [ ] Write tests for tab width calculation (shrink with many tabs, min/max clamping)
-- [ ] Write tests for new-tab button "+" quad at right end
-- [ ] Write tests for tab separator quads
-- [ ] Implement `generate_tab_bar_quads()` in `src/tab/bar.rs`
+### Task 2.2: Tab bar quad generation <!-- 73c0b42 -->
+- [x] Write tests for generating tab background quads (active vs inactive colors)
+- [x] Write tests for tab width calculation (shrink with many tabs, min/max clamping)
+- [x] Write tests for new-tab button "+" quad at right end
+- [x] Write tests for tab separator quads
+- [x] Implement `generate_tab_bar_quads()` in `src/tab/bar.rs`
 
-### Task 2.3: Tab bar hit testing
-- [ ] Write tests for click on tab → returns tab index
-- [ ] Write tests for click on "+" button → returns NewTab action
-- [ ] Write tests for click outside tab bar (y > 28) → returns None
-- [ ] Implement `hit_test_tab_bar()` in `src/tab/bar.rs`
+### Task 2.3: Tab bar hit testing <!-- 73c0b42 -->
+- [x] Write tests for click on tab → returns tab index
+- [x] Write tests for click on "+" button → returns NewTab action
+- [x] Write tests for click outside tab bar (y > 28) → returns None
+- [x] Implement `hit_test_tab_bar()` in `src/tab/bar.rs`
 
 ### Phase 2 Completion
 - [ ] Phase completion verification and checkpointing
