@@ -1,6 +1,6 @@
 # Track 15: Font Rendering & Terminal Padding — Implementation Plan
 
-## Phase 1: Config & Font Loading Foundation
+## Phase 1: Config & Font Loading Foundation [checkpoint: dd08b9f]
 
 ### Task 1.1: Add padding and font config fields [x] <!-- 87a9e0d -->
 - [ ] Add `PaddingConfig` struct to `config/types.rs` with `top`, `bottom`, `left`, `right` (all `f64`, default 12.0)
@@ -27,7 +27,7 @@
 - [ ] Ensure existing tests pass with new API (update test helpers)
 - [ ] Write integration test: config font.family change triggers atlas rebuild
 
-## Phase 2: Terminal Padding & Scissor Rect
+## Phase 2: Terminal Padding & Scissor Rect [checkpoint: dd08b9f]
 
 ### Task 2.1: Padding-aware grid dimensions [x] <!-- a58f7b8 -->
 - [ ] Modify `GridDimensions::from_pane_rect()` to accept padding parameters
@@ -49,7 +49,7 @@
 - [ ] Selection drag respects padding offset
 - [ ] Write tests: click at padding edge → no cell, click just inside padding → cell (0,0)
 
-## Phase 3: Runtime Font Size Adjustment & Integration
+## Phase 3: Runtime Font Size Adjustment & Integration [checkpoint: dd08b9f]
 
 ### Task 3.1: Font size keyboard shortcuts [x] <!-- 9382142 -->
 - [ ] Add `AppCommand` enum to `input/mod.rs`: `IncreaseFontSize`, `DecreaseFontSize`, `ResetFontSize`

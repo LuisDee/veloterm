@@ -59,7 +59,7 @@ _Link: [./conductor/tracks/11_vi_mode_20260207/](./conductor/tracks/11_vi_mode_2
 
 ## Wave 6 — Core Terminal Quality (PRIORITY RESET)
 
-### [~] Track 15: Font Rendering & Terminal Padding (M)
+### [x] Track 15: Font Rendering & Terminal Padding (M)
 _Link: [./conductor/tracks/15_font_padding_20260208/](./conductor/tracks/15_font_padding_20260208/)_
 
 ### [ ] Track 16: Cursor & Input Polish (S)
