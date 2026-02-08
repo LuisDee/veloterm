@@ -59,6 +59,8 @@ pub struct KeysConfig {
 pub struct CursorConfig {
     pub style: String,
     pub blink: bool,
+    /// Blink rate in milliseconds. 0 = disable blinking.
+    pub blink_rate: u64,
 }
 
 /// Scrollback configuration.
@@ -217,6 +219,7 @@ struct RawKeysConfig {
 struct RawCursorConfig {
     style: String,
     blink: bool,
+    blink_rate: u64,
 }
 
 impl Default for RawCursorConfig {
@@ -224,6 +227,7 @@ impl Default for RawCursorConfig {
         Self {
             style: "block".to_string(),
             blink: true,
+            blink_rate: 500,
         }
     }
 }
@@ -334,6 +338,7 @@ impl Default for CursorConfig {
         Self {
             style: "block".to_string(),
             blink: true,
+            blink_rate: 500,
         }
     }
 }
@@ -393,6 +398,7 @@ impl Config {
             cursor: CursorConfig {
                 style: raw.cursor.style,
                 blink: raw.cursor.blink,
+                blink_rate: raw.cursor.blink_rate,
             },
             scrollback: ScrollbackConfig {
                 lines: raw.scrollback.lines,
@@ -447,6 +453,14 @@ impl Config {
                 self.colors.theme,
                 VALID_THEMES.join(", ")
             )));
+        }
+
+        if self.cursor.blink_rate != 0
+            && (self.cursor.blink_rate < 100 || self.cursor.blink_rate > 2000)
+        {
+            return Err(ConfigError::Validation(
+                "cursor blink_rate must be 0 (disabled) or between 100 and 2000 ms".to_string(),
+            ));
         }
 
         if !VALID_CURSOR_STYLES.contains(&self.cursor.style.as_str()) {
@@ -519,6 +533,8 @@ theme = "claude_dark"
 style = "block"
 # Enable cursor blinking
 blink = true
+# Blink rate in milliseconds (0 = disable, 100-2000)
+blink_rate = 500
 
 [scrollback]
 # Number of lines to keep in scrollback history
@@ -1141,6 +1157,102 @@ fps_limit = 0
         // Must parse without error
         let config = Config::from_toml(&toml_str).unwrap();
         assert_eq!(config, Config::default());
+    }
+
+    // ── Cursor blink_rate config tests ─────────────────────────────
+
+    #[test]
+    fn default_cursor_blink_rate() {
+        let config = Config::default();
+        assert_eq!(config.cursor.blink_rate, 500);
+    }
+
+    #[test]
+    fn parse_cursor_blink_rate() {
+        let toml = r#"
+[cursor]
+style = "block"
+blink = true
+blink_rate = 750
+"#;
+        let config = Config::from_toml(toml).unwrap();
+        assert_eq!(config.cursor.blink_rate, 750);
+    }
+
+    #[test]
+    fn parse_cursor_blink_rate_default_when_missing() {
+        let toml = r#"
+[cursor]
+style = "block"
+blink = true
+"#;
+        let config = Config::from_toml(toml).unwrap();
+        assert_eq!(config.cursor.blink_rate, 500);
+    }
+
+    #[test]
+    fn invalid_cursor_blink_rate_too_low() {
+        let toml = r#"
+[cursor]
+blink_rate = 50
+"#;
+        let result = Config::from_toml(toml);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn invalid_cursor_blink_rate_too_high() {
+        let toml = r#"
+[cursor]
+blink_rate = 3000
+"#;
+        let result = Config::from_toml(toml);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn valid_cursor_blink_rate_zero_disables() {
+        let toml = r#"
+[cursor]
+blink_rate = 0
+"#;
+        let config = Config::from_toml(toml).unwrap();
+        assert_eq!(config.cursor.blink_rate, 0);
+    }
+
+    #[test]
+    fn valid_cursor_blink_rate_at_minimum() {
+        let toml = r#"
+[cursor]
+blink_rate = 100
+"#;
+        let config = Config::from_toml(toml).unwrap();
+        assert_eq!(config.cursor.blink_rate, 100);
+    }
+
+    #[test]
+    fn valid_cursor_blink_rate_at_maximum() {
+        let toml = r#"
+[cursor]
+blink_rate = 2000
+"#;
+        let config = Config::from_toml(toml).unwrap();
+        assert_eq!(config.cursor.blink_rate, 2000);
+    }
+
+    #[test]
+    fn diff_detects_cursor_blink_rate_change() {
+        let a = Config::default();
+        let mut b = Config::default();
+        b.cursor.blink_rate = 750;
+        let delta = a.diff(&b);
+        assert!(delta.cursor_changed);
+    }
+
+    #[test]
+    fn print_default_includes_blink_rate() {
+        let toml_str = Config::print_default();
+        assert!(toml_str.contains("blink_rate"));
     }
 
     #[test]
