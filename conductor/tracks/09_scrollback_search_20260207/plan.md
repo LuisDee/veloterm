@@ -73,27 +73,27 @@
 ## Phase 3: Match Highlighting & App Integration
 
 ### 3.1 Write tests for match highlighting in grid
-- [ ] 3.1.1 Write tests: `apply_search_highlights()` modifies GridCell background for matched cells
-- [ ] 3.1.2 Write tests: current match uses `search_match_active` color, others use `search_match` color
-- [ ] 3.1.3 Write tests: only cells in visible viewport (± buffer) get highlight applied
-- [ ] 3.1.4 Write tests: clearing search removes all highlight overrides
+- [x] 3.1.1 Write tests: `apply_search_highlights()` modifies GridCell background for matched cells <!-- 644aa9e -->
+- [x] 3.1.2 Write tests: current match uses `search_match_active` color, others use `search_match` color <!-- 644aa9e -->
+- [x] 3.1.3 Write tests: only cells in visible viewport (± buffer) get highlight applied <!-- 644aa9e -->
+- [x] 3.1.4 Write tests: clearing search removes all highlight overrides <!-- 644aa9e -->
 
 ### 3.2 Implement match highlighting
-- [ ] 3.2.1 Extend theme config with `search_match` and `search_match_active` colors (with defaults)
-- [ ] 3.2.2 Implement `apply_search_highlights(cells, visible_matches, current_index, theme)` — override bg color on matched cells
-- [ ] 3.2.3 Integrate into `grid_bridge` or renderer cell generation — apply highlights after extracting grid cells
-- [ ] 3.2.4 Mark affected rows as dirty in damage tracking when search state changes
+- [x] 3.2.1 Extend theme config with `search_match` and `search_match_active` colors (with defaults) <!-- 644aa9e -->
+- [x] 3.2.2 Implement `apply_search_highlights(cells, visible_matches, current_index, theme)` — override bg color on matched cells <!-- 644aa9e -->
+- [x] 3.2.3 Integrate into `grid_bridge` or renderer cell generation — apply highlights after extracting grid cells <!-- 644aa9e -->
+- [x] 3.2.4 Mark affected rows as dirty in damage tracking when search state changes <!-- 644aa9e -->
 
 ### 3.3 Write tests for scroll-to-match
-- [ ] 3.3.1 Write tests: navigating to a match outside viewport triggers scroll
-- [ ] 3.3.2 Write tests: navigating to a match inside viewport does NOT scroll
-- [ ] 3.3.3 Write tests: wrapping navigation scrolls correctly
+- [x] 3.3.1 Write tests: navigating to a match outside viewport triggers scroll <!-- 644aa9e -->
+- [x] 3.3.2 Write tests: navigating to a match inside viewport does NOT scroll <!-- 644aa9e -->
+- [x] 3.3.3 Write tests: wrapping navigation scrolls correctly <!-- 644aa9e -->
 
 ### 3.4 Implement scroll-to-match and full integration
-- [ ] 3.4.1 Implement scroll-to-match in `window.rs` — on match navigation, adjust terminal `display_offset` to show current match row
-- [ ] 3.4.2 Wire incremental search: on each keystroke in search mode, re-run search engine, update SearchState, request redraw
-- [ ] 3.4.3 Wire overlay rendering: when search active, generate search bar quads in `generate_overlay_quads()`
-- [ ] 3.4.4 Wire highlight clearing: on search close, clear highlights, snap to bottom (optional), mark full damage
-- [ ] 3.4.5 Add `Ctrl+Shift+F` to default keybindings in Config
+- [x] 3.4.1 Implement scroll-to-match in `window.rs` — on match navigation, adjust terminal `display_offset` to show current match row <!-- 644aa9e -->
+- [x] 3.4.2 Wire incremental search: on each keystroke in search mode, re-run search engine, update SearchState, request redraw <!-- 644aa9e -->
+- [x] 3.4.3 Wire overlay rendering: when search active, generate search bar quads in `generate_overlay_quads()` <!-- 644aa9e -->
+- [x] 3.4.4 Wire highlight clearing: on search close, clear highlights, snap to bottom (optional), mark full damage <!-- 644aa9e -->
+- [x] 3.4.5 Add `Ctrl+Shift+F` to default keybindings in Config <!-- 644aa9e -->
 
 ### Phase 3 Completion — Verification and Checkpointing
