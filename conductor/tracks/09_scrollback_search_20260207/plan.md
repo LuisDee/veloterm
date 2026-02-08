@@ -39,32 +39,32 @@
 ## Phase 2: Search UI Overlay & Input Mode
 
 ### 2.1 Write tests for search overlay quad generation
-- [ ] 2.1.1 Write tests: search bar generates overlay quads at top-right of pane rect
-- [ ] 2.1.2 Write tests: search bar dimensions (width, height based on cell size)
-- [ ] 2.1.3 Write tests: search bar contains background quad + text area
-- [ ] 2.1.4 Write tests: match count text positioning within bar
+- [x] 2.1.1 Write tests: search bar generates overlay quads at top-right of pane rect <!-- 834cdfe -->
+- [x] 2.1.2 Write tests: search bar dimensions (width, height based on cell size) <!-- 834cdfe -->
+- [x] 2.1.3 Write tests: search bar contains background quad + text area <!-- 834cdfe -->
+- [x] 2.1.4 Write tests: match count text positioning within bar <!-- 834cdfe -->
 
 ### 2.2 Implement search overlay rendering
-- [ ] 2.2.1 Create `src/search/overlay.rs` — `generate_search_bar_quads(pane_rect, cell_size, search_state, theme)` returns `Vec<OverlayQuad>`
-- [ ] 2.2.2 Generate background quad (theme search bar color, rounded feel via sizing)
-- [ ] 2.2.3 Generate text cell instances for query text, match count ("N of M"), and navigation indicators
-- [ ] 2.2.4 Integrate into `Renderer::update_overlays()` — append search bar quads when search is active
+- [x] 2.2.1 Create `src/search/overlay.rs` — `generate_search_bar_quads(pane_rect, cell_size, search_state, theme)` returns `Vec<OverlayQuad>` <!-- 834cdfe -->
+- [x] 2.2.2 Generate background quad (theme search bar color, rounded feel via sizing) <!-- 834cdfe -->
+- [x] 2.2.3 Generate text cell instances for query text, match count ("N of M"), and navigation indicators <!-- 834cdfe -->
+- [x] 2.2.4 Integrate into `Renderer::update_overlays()` — append search bar quads when search is active <!-- 834cdfe -->
 
 ### 2.3 Write tests for modal input handling
-- [ ] 2.3.1 Write tests: `InputMode::Search` captures printable characters into query
-- [ ] 2.3.2 Write tests: Backspace removes last character from query
-- [ ] 2.3.3 Write tests: Escape exits search mode, returns `InputMode::Normal`
-- [ ] 2.3.4 Write tests: Enter triggers next_match
-- [ ] 2.3.5 Write tests: Shift+Enter triggers prev_match
-- [ ] 2.3.6 Write tests: Ctrl+Shift+F toggles search mode on/off
-- [ ] 2.3.7 Write tests: arrow up/down in search mode trigger prev/next match
+- [x] 2.3.1 Write tests: `InputMode::Search` captures printable characters into query <!-- 834cdfe -->
+- [x] 2.3.2 Write tests: Backspace removes last character from query <!-- 834cdfe -->
+- [x] 2.3.3 Write tests: Escape exits search mode, returns `InputMode::Normal` <!-- 834cdfe -->
+- [x] 2.3.4 Write tests: Enter triggers next_match <!-- 834cdfe -->
+- [x] 2.3.5 Write tests: Shift+Enter triggers prev_match <!-- 834cdfe -->
+- [x] 2.3.6 Write tests: Ctrl+Shift+F toggles search mode on/off <!-- 834cdfe -->
+- [x] 2.3.7 Write tests: arrow up/down in search mode trigger prev/next match <!-- 834cdfe -->
 
 ### 2.4 Implement modal input handling
-- [ ] 2.4.1 Add `InputMode` enum (`Normal`, `Search`) to input module
-- [ ] 2.4.2 Add `match_search_command()` — handle key events when in search mode
-- [ ] 2.4.3 Integrate into `window.rs` input dispatch — check InputMode before routing to PTY
-- [ ] 2.4.4 Ctrl+Shift+F opens search (sets InputMode::Search, activates SearchState)
-- [ ] 2.4.5 Escape closes search (sets InputMode::Normal, deactivates SearchState, clears highlights)
+- [x] 2.4.1 Add `InputMode` enum (`Normal`, `Search`) to input module <!-- 834cdfe -->
+- [x] 2.4.2 Add `match_search_command()` — handle key events when in search mode <!-- 834cdfe -->
+- [x] 2.4.3 Integrate into `window.rs` input dispatch — check InputMode before routing to PTY <!-- 834cdfe -->
+- [x] 2.4.4 Ctrl+Shift+F opens search (sets InputMode::Search, activates SearchState) <!-- 834cdfe -->
+- [x] 2.4.5 Escape closes search (sets InputMode::Normal, deactivates SearchState, clears highlights) <!-- 834cdfe -->
 
 ### Phase 2 Completion — Verification and Checkpointing
 
