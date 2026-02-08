@@ -63,6 +63,7 @@ pub fn generate_tab_bar_quads(
             theme.surface.b,
             1.0,
         ],
+        border_radius: 0.0,
     });
 
     // Individual tab backgrounds
@@ -80,6 +81,7 @@ pub fn generate_tab_bar_quads(
         quads.push(OverlayQuad {
             rect: Rect::new(x, 0.0, tw, TAB_BAR_HEIGHT),
             color: [bg_r, bg_g, bg_b, 1.0],
+            border_radius: 0.0,
         });
     }
 
@@ -89,6 +91,7 @@ pub fn generate_tab_bar_quads(
         quads.push(OverlayQuad {
             rect: Rect::new(x, TAB_BAR_HEIGHT - 2.0, tw, 2.0),
             color: [theme.accent.r, theme.accent.g, theme.accent.b, 1.0],
+            border_radius: 0.0,
         });
     }
 
@@ -98,6 +101,7 @@ pub fn generate_tab_bar_quads(
         quads.push(OverlayQuad {
             rect: Rect::new(x, 2.0, TAB_SEPARATOR_WIDTH, TAB_BAR_HEIGHT - 4.0),
             color: [theme.border.r, theme.border.g, theme.border.b, 0.5],
+            border_radius: 0.0,
         });
     }
 
@@ -108,7 +112,8 @@ pub fn generate_tab_bar_quads(
             quads.push(OverlayQuad {
                 rect: Rect::new(x, 4.0, 6.0, 6.0),
                 color: [theme.accent.r, theme.accent.g, theme.accent.b, 1.0],
-            });
+                border_radius: 0.0,
+                });
         }
     }
 
@@ -122,6 +127,7 @@ pub fn generate_tab_bar_quads(
             theme.surface.b,
             1.0,
         ],
+        border_radius: 0.0,
     });
 
     quads

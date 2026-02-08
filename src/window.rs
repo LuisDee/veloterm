@@ -12,6 +12,7 @@ use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 use crate::config::theme::Theme;
 use crate::config::types::{Config, ConfigDelta};
 use crate::config::watcher::UserEvent;
+use crate::header_bar::{generate_header_bar_quads, generate_header_bar_text_cells, HEADER_BAR_HEIGHT};
 use crate::input::{
     match_app_command, match_pane_command, match_tab_command, match_search_command,
     should_open_search, AppCommand, InputMode, PaneCommand, SearchCommand, TabCommand,
@@ -20,10 +21,12 @@ use crate::link::opener::open_link;
 use crate::link::LinkDetector;
 use crate::search::SearchState;
 use crate::pane::divider::{generate_divider_quads, generate_unfocused_overlay_quads, OverlayQuad};
+use crate::pane::header::{generate_pane_header_quads, generate_pane_header_text, PANE_HEADER_HEIGHT};
 use crate::search::overlay::{generate_search_bar_quads, generate_search_bar_text_cells, SearchBarParams};
 use crate::pane::interaction::{CursorType, InteractionEffect, PaneInteraction};
 use crate::pane::{PaneId, Rect, SplitDirection};
 use crate::renderer::PaneRenderDescriptor;
+use crate::status_bar::{generate_status_bar_quads, generate_status_bar_text_cells, STATUS_BAR_HEIGHT};
 use crate::tab::bar::{generate_tab_bar_quads, generate_tab_label_text_cells, hit_test_tab_bar, TabBarAction, TAB_BAR_HEIGHT};
 use crate::tab::TabManager;
 
@@ -32,7 +35,7 @@ pub const DEFAULT_WIDTH: f64 = 1280.0;
 /// Default window height in logical pixels.
 pub const DEFAULT_HEIGHT: f64 = 720.0;
 /// Default window title.
-pub const DEFAULT_TITLE: &str = "VeloTerm";
+pub const DEFAULT_TITLE: &str = "Claude Terminal \u{2014} Anthropic";
 
 /// Configuration for the VeloTerm window.
 #[derive(Debug, Clone)]
@@ -199,9 +202,28 @@ impl App {
         }
     }
 
-    /// Compute the content bounds (below the tab bar).
+    /// Total chrome height above the content area (header bar + tab bar).
+    fn chrome_top_height() -> f32 {
+        HEADER_BAR_HEIGHT + TAB_BAR_HEIGHT
+    }
+
+    /// Padding around the pane grid (between chrome and panes).
+    const PANE_GRID_PADDING: f32 = 12.0;
+
+    /// Compute the content bounds (below header bar + tab bar, above status bar).
     fn content_bounds(&self, width: f32, height: f32) -> Rect {
-        Rect::new(0.0, TAB_BAR_HEIGHT, width, (height - TAB_BAR_HEIGHT).max(0.0))
+        let top = Self::chrome_top_height();
+        let content_h = (height - top - STATUS_BAR_HEIGHT).max(0.0);
+        Rect::new(0.0, top, width, content_h)
+    }
+
+    /// Content bounds inset by PANE_GRID_PADDING on all sides for pane layout.
+    fn pane_grid_bounds(&self, width: f32, height: f32) -> Rect {
+        let top = Self::chrome_top_height() + Self::PANE_GRID_PADDING;
+        let pad2 = Self::PANE_GRID_PADDING * 2.0;
+        let content_w = (width - pad2).max(0.0);
+        let content_h = (height - top - STATUS_BAR_HEIGHT - Self::PANE_GRID_PADDING).max(0.0);
+        Rect::new(Self::PANE_GRID_PADDING, top, content_w, content_h)
     }
 
     /// Handle a pane command (split, close, focus, zoom).
@@ -512,7 +534,7 @@ impl App {
         event_loop: &ActiveEventLoop,
     ) {
         let (width, height) = self.window_size();
-        let content = self.content_bounds(width as f32, height as f32);
+        let pgrid = self.pane_grid_bounds(width as f32, height as f32);
 
         match command {
             PaneCommand::SplitVertical | PaneCommand::SplitHorizontal => {
@@ -522,7 +544,7 @@ impl App {
                 };
                 let pane_tree = &mut self.tab_manager.active_tab_mut().pane_tree;
                 if let Some(new_id) = pane_tree.split_focused(direction) {
-                    let layout = pane_tree.calculate_layout(content.width, content.height);
+                    let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
                     if let Some((_, rect)) = layout.iter().find(|(id, _)| *id == new_id) {
                         let (cols, rows) = self.grid_dims_for_rect(rect);
                         self.spawn_pane(new_id, cols, rows);
@@ -562,8 +584,8 @@ impl App {
             PaneCommand::FocusDirection(direction) => {
                 self.tab_manager.active_tab_mut().pane_tree.focus_direction(
                     direction,
-                    content.width,
-                    content.height,
+                    pgrid.width,
+                    pgrid.height,
                 );
             }
             PaneCommand::ZoomToggle => {
@@ -595,8 +617,8 @@ impl App {
                 self.tab_manager.new_tab();
                 // Spawn PTY for the new tab's initial pane
                 let pane_id = self.tab_manager.active_tab().pane_tree.focused_pane_id();
-                let content = self.content_bounds(width as f32, height as f32);
-                let rect = Rect::new(0.0, 0.0, content.width, content.height);
+                let pgrid = self.pane_grid_bounds(width as f32, height as f32);
+                let rect = Rect::new(0.0, 0.0, pgrid.width, pgrid.height);
                 let (cols, rows) = self.grid_dims_for_rect(&rect);
                 self.spawn_pane(pane_id, cols, rows);
                 self.update_interaction_layout(width, height);
@@ -679,7 +701,7 @@ impl App {
             let ch = renderer.cell_height();
             let pad = &self.app_config.padding;
             let usable_w = (rect.width - pad.left as f32 - pad.right as f32).max(0.0);
-            let usable_h = (rect.height - pad.top as f32 - pad.bottom as f32).max(0.0);
+            let usable_h = (rect.height - PANE_HEADER_HEIGHT - pad.top as f32 - pad.bottom as f32).max(0.0);
             let cols = (usable_w / cw).floor().max(1.0) as u16;
             let rows = (usable_h / ch).floor().max(1.0) as u16;
             (cols, rows)
@@ -690,9 +712,9 @@ impl App {
 
     /// Resize all pane terminals and PTYs to match their current layout rects.
     fn resize_all_panes(&mut self, width: u32, height: u32) {
-        let content = self.content_bounds(width as f32, height as f32);
+        let pgrid = self.pane_grid_bounds(width as f32, height as f32);
         let pane_tree = &self.tab_manager.active_tab().pane_tree;
-        let layout = pane_tree.calculate_layout(content.width, content.height);
+        let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
         for (pane_id, rect) in &layout {
             let (cols, rows) = self.grid_dims_for_rect(rect);
             if let Some(state) = self.pane_states.get_mut(pane_id) {
@@ -756,7 +778,7 @@ impl App {
             .update_layout(pane_tree.root(), content, 20.0);
     }
 
-    /// Generate all overlay quads (tab bar + dividers + unfocused pane dimming).
+    /// Generate all overlay quads (header bar + tab bar + dividers + unfocused pane dimming + status bar).
     fn generate_overlay_quads(&self, width: f32, height: f32) -> Vec<OverlayQuad> {
         let theme = if let Some(renderer) = &self.renderer {
             renderer.theme()
@@ -764,11 +786,33 @@ impl App {
             return Vec::new();
         };
 
-        // Always generate tab bar quads
-        let mut quads = generate_tab_bar_quads(&self.tab_manager, width, theme);
+        // Header bar quads
+        let mut quads = generate_header_bar_quads(width, theme);
+
+        // Tab bar quads (offset by header bar height)
+        let tab_quads = generate_tab_bar_quads(&self.tab_manager, width, theme);
+        for q in tab_quads {
+            quads.push(OverlayQuad {
+                rect: Rect::new(q.rect.x, q.rect.y + HEADER_BAR_HEIGHT, q.rect.width, q.rect.height),
+                color: q.color,
+                border_radius: q.border_radius,
+            });
+        }
+
+        // Generate pane header quads for all visible panes (using padded bounds)
+        let pane_tree = &self.tab_manager.active_tab().pane_tree;
+        let pgrid = self.pane_grid_bounds(width, height);
+        {
+            let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
+            let focused = pane_tree.focused_pane_id();
+            for (pane_id, rect) in &layout {
+                let screen_rect = Rect::new(rect.x + pgrid.x, rect.y + pgrid.y, rect.width, rect.height);
+                let is_active = *pane_id == focused;
+                quads.extend(generate_pane_header_quads(screen_rect, is_active, theme));
+            }
+        }
 
         // Generate pane overlay quads only if there are multiple panes and not zoomed
-        let pane_tree = &self.tab_manager.active_tab().pane_tree;
         if pane_tree.pane_count() > 1 && !pane_tree.is_zoomed() {
             let hovered_index = match self.interaction.state() {
                 crate::pane::interaction::InteractionState::Hovering { divider_index } => {
@@ -784,12 +828,11 @@ impl App {
                 hovered_index,
             ));
 
-            let content = self.content_bounds(width, height);
-            let layout = pane_tree.calculate_layout(content.width, content.height);
-            // Offset layout rects by tab bar height for overlay rendering
+            let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
+            // Offset layout rects by pane grid origin for overlay rendering
             let offset_layout: Vec<_> = layout
                 .iter()
-                .map(|(id, rect)| (*id, Rect::new(rect.x, rect.y + TAB_BAR_HEIGHT, rect.width, rect.height)))
+                .map(|(id, rect)| (*id, Rect::new(rect.x + pgrid.x, rect.y + pgrid.y, rect.width, rect.height)))
                 .collect();
             let focused = pane_tree.focused_pane_id();
             quads.extend(generate_unfocused_overlay_quads(
@@ -804,12 +847,11 @@ impl App {
         if self.search_state.is_active {
             let renderer = self.renderer.as_ref().unwrap();
             let focused = pane_tree.focused_pane_id();
-            let content = self.content_bounds(width, height);
-            let layout = pane_tree.calculate_layout(content.width, content.height);
+            let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
             if let Some((_, rect)) = layout.iter().find(|(id, _)| *id == focused) {
                 let screen_rect = Rect::new(
-                    rect.x,
-                    rect.y + TAB_BAR_HEIGHT,
+                    rect.x + pgrid.x,
+                    rect.y + pgrid.y,
                     rect.width,
                     rect.height,
                 );
@@ -831,8 +873,7 @@ impl App {
         // Generate scrollbar overlay quads for each visible pane with scrollback
         {
             let now = std::time::Instant::now();
-            let content = self.content_bounds(width, height);
-            let layout = pane_tree.calculate_layout(content.width, content.height);
+            let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
             let padding = self.renderer.as_ref().map(|r| r.padding()).unwrap_or([0.0; 4]);
             for (pane_id, rect) in &layout {
                 if let Some(state) = self.pane_states.get(pane_id) {
@@ -842,8 +883,8 @@ impl App {
                         let visible_rows = state.terminal.rows();
                         let display_offset = state.scroll_state.current_line_offset();
                         let screen_rect = Rect::new(
-                            rect.x,
-                            rect.y + TAB_BAR_HEIGHT,
+                            rect.x + pgrid.x,
+                            rect.y + pgrid.y,
                             rect.width,
                             rect.height,
                         );
@@ -855,12 +896,16 @@ impl App {
                             quads.push(OverlayQuad {
                                 rect: Rect::new(thumb.x, thumb.y, thumb.width, thumb.height),
                                 color: [1.0, 1.0, 1.0, alpha],
-                            });
+                                border_radius: 0.0,
+                                            });
                         }
                     }
                 }
             }
         }
+
+        // Status bar quads
+        quads.extend(generate_status_bar_quads(width, height, theme));
 
         quads
     }
@@ -1336,8 +1381,8 @@ impl ApplicationHandler<UserEvent> for App {
                         // Use grid_dims_for_rect to account for padding
                         let initial_pane_id =
                             self.tab_manager.active_tab().pane_tree.focused_pane_id();
-                        let content = self.content_bounds(size.width as f32, size.height as f32);
-                        let rect = Rect::new(0.0, 0.0, content.width, content.height);
+                        let pgrid = self.pane_grid_bounds(size.width as f32, size.height as f32);
+                        let rect = Rect::new(0.0, 0.0, pgrid.width, pgrid.height);
                         let (cols, rows) = self.grid_dims_for_rect(&rect);
                         self.spawn_pane(initial_pane_id, cols, rows);
                     }
@@ -1589,7 +1634,10 @@ impl ApplicationHandler<UserEvent> for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let y = position.y as f32;
-                if y < TAB_BAR_HEIGHT {
+                let chrome_top = Self::chrome_top_height();
+                let tab_bar_top = HEADER_BAR_HEIGHT;
+                let tab_bar_bottom = chrome_top;
+                if y >= tab_bar_top && y < tab_bar_bottom {
                     // In tab bar area — track hovered tab
                     let (width, _) = self.window_size();
                     let tw = crate::tab::bar::tab_width(width as f32, self.tab_manager.tab_count());
@@ -1633,7 +1681,7 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                     let effect = self.interaction.on_cursor_moved(position.x as f32, -1.0);
                     self.apply_interaction_effect(effect);
-                } else {
+                } else if y >= chrome_top {
                     // Clear tab hover when cursor leaves tab bar
                     if self.hovered_tab.is_some() {
                         self.hovered_tab = None;
@@ -1641,7 +1689,7 @@ impl ApplicationHandler<UserEvent> for App {
                             window.request_redraw();
                         }
                     }
-                    let content_y = y - TAB_BAR_HEIGHT;
+                    let content_y = y - chrome_top;
                     // Check for link hover when modifier is held
                     // Use focused pane's local coordinates
                     let on_link = self.update_link_hover(position.x as f32, content_y);
@@ -1663,8 +1711,8 @@ impl ApplicationHandler<UserEvent> for App {
                         let focused_pane = self.tab_manager.active_tab().pane_tree.focused_pane_id();
                         let padding = self.renderer.as_ref().map(|r| r.padding()).unwrap_or([0.0; 4]);
                         let (win_w, win_h) = self.window_size();
-                        let content_bounds = self.content_bounds(win_w as f32, win_h as f32);
-                        let layout = self.tab_manager.active_tab().pane_tree.calculate_layout(content_bounds.width, content_bounds.height);
+                        let pgrid_bounds = self.pane_grid_bounds(win_w as f32, win_h as f32);
+                        let layout = self.tab_manager.active_tab().pane_tree.calculate_layout(pgrid_bounds.width, pgrid_bounds.height);
                         let pane_rect = layout.iter().find(|(id, _)| *id == focused_pane).map(|(_, r)| *r);
 
                         let mut scrollbar_dragging = false;
@@ -1708,6 +1756,14 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                         }
                     }
+                } else {
+                    // Header bar region — clear hover state
+                    if self.hovered_tab.is_some() {
+                        self.hovered_tab = None;
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                    }
                 }
             }
             WindowEvent::MouseInput {
@@ -1716,7 +1772,8 @@ impl ApplicationHandler<UserEvent> for App {
                 ..
             } => {
                 let cursor_pos = self.interaction.cursor_pos();
-                let raw_y = cursor_pos.1 + TAB_BAR_HEIGHT; // reconstruct raw y
+                let chrome_top = Self::chrome_top_height();
+                let raw_y = cursor_pos.1 + chrome_top; // reconstruct raw y
 
                 // End tab drag on any mouse release
                 if btn_state == ElementState::Released && self.tab_drag_index.is_some() {
@@ -1724,13 +1781,14 @@ impl ApplicationHandler<UserEvent> for App {
                     self.tab_drag_active = false;
                 }
 
-                if raw_y < TAB_BAR_HEIGHT {
-                    // Click in tab bar
+                if raw_y >= HEADER_BAR_HEIGHT && raw_y < chrome_top {
+                    // Click in tab bar — pass y relative to tab bar origin
+                    let tab_bar_y = raw_y - HEADER_BAR_HEIGHT;
                     if btn_state == ElementState::Pressed {
                         let (width, _) = self.window_size();
                         if let Some(action) = hit_test_tab_bar(
                             cursor_pos.0,
-                            raw_y,
+                            tab_bar_y,
                             width as f32,
                             self.tab_manager.tab_count(),
                             self.tab_manager.active_index(),
@@ -1792,10 +1850,10 @@ impl ApplicationHandler<UserEvent> for App {
                         let padding = self.renderer.as_ref().map(|r| r.padding()).unwrap_or([0.0; 4]);
                         let focused_pane = self.tab_manager.active_tab().pane_tree.focused_pane_id();
                         let (width, height) = self.window_size();
-                        let content = self.content_bounds(width as f32, height as f32);
-                        let layout = self.tab_manager.active_tab().pane_tree.calculate_layout(content.width, content.height);
+                        let pgrid = self.pane_grid_bounds(width as f32, height as f32);
+                        let layout = self.tab_manager.active_tab().pane_tree.calculate_layout(pgrid.width, pgrid.height);
                         let screen_rect = layout.iter().find(|(id, _)| *id == focused_pane).map(|(_, r)| {
-                            Rect::new(r.x, r.y + TAB_BAR_HEIGHT, r.width, r.height)
+                            Rect::new(r.x + pgrid.x, r.y + pgrid.y, r.width, r.height)
                         });
                         if let (Some(screen_rect), Some(state)) = (screen_rect, self.pane_states.get_mut(&focused_pane)) {
                             let history_size = state.terminal.history_size();
@@ -1892,8 +1950,9 @@ impl ApplicationHandler<UserEvent> for App {
                 ..
             } => {
                 let cursor_pos = self.interaction.cursor_pos();
-                let raw_y = cursor_pos.1 + TAB_BAR_HEIGHT;
-                if raw_y >= TAB_BAR_HEIGHT {
+                let chrome_top = Self::chrome_top_height();
+                let raw_y = cursor_pos.1 + chrome_top;
+                if raw_y >= chrome_top {
                     // Right-click in content area — show context menu
                     let focused_pane = self.tab_manager.active_tab().pane_tree.focused_pane_id();
                     let has_selection = self
@@ -1991,9 +2050,9 @@ impl ApplicationHandler<UserEvent> for App {
                 self.rescan_links();
 
                 // Build render descriptors for active tab's visible panes
-                let content = self.content_bounds(width as f32, height as f32);
+                let pgrid = self.pane_grid_bounds(width as f32, height as f32);
                 let pane_tree = &self.tab_manager.active_tab().pane_tree;
-                let layout = pane_tree.calculate_layout(content.width, content.height);
+                let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
                 let visible = pane_tree.visible_panes();
 
                 let focused_pane = pane_tree.focused_pane_id();
@@ -2052,12 +2111,12 @@ impl ApplicationHandler<UserEvent> for App {
                             crate::input::selection::apply_selection_flags(&mut cells, sel, cols);
                         }
 
-                        // Offset rect by tab bar height for screen-space rendering
+                        // Offset rect by pane grid origin + pane header for screen-space rendering
                         let screen_rect = Rect::new(
-                            rect.x,
-                            rect.y + TAB_BAR_HEIGHT,
+                            rect.x + pgrid.x,
+                            rect.y + pgrid.y + PANE_HEADER_HEIGHT,
                             rect.width,
-                            rect.height,
+                            (rect.height - PANE_HEADER_HEIGHT).max(0.0),
                         );
                         // Generate cursor instance for this pane
                         let cursor_instance = if let Some(state) = self.pane_states.get(pane_id) {
@@ -2089,8 +2148,14 @@ impl ApplicationHandler<UserEvent> for App {
                     let theme = renderer.theme();
                     let cw = renderer.cell_width();
                     let ch = renderer.cell_height();
+                    // Header bar text
+                    if let Some((rect, cells)) = generate_header_bar_text_cells(
+                        width as f32, cw, ch, theme,
+                    ) {
+                        text_overlays.push((rect, cells));
+                    }
 
-                    // Tab labels
+                    // Tab labels (offset by header bar height)
                     let labels = generate_tab_label_text_cells(
                         &self.tab_manager,
                         width as f32,
@@ -2099,18 +2164,62 @@ impl ApplicationHandler<UserEvent> for App {
                         theme,
                         self.hovered_tab,
                     );
-                    text_overlays.extend(labels);
+                    for (rect, cells) in labels {
+                        let offset_rect = Rect::new(rect.x, rect.y + HEADER_BAR_HEIGHT, rect.width, rect.height);
+                        text_overlays.push((offset_rect, cells));
+                    }
+
+                    // Pane header text
+                    {
+                        let pane_tree = &self.tab_manager.active_tab().pane_tree;
+                        let pgrid = self.pane_grid_bounds(width as f32, height as f32);
+                        let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
+                        let focused = pane_tree.focused_pane_id();
+                        let visible = pane_tree.visible_panes();
+                        for (idx, (pane_id, rect)) in layout.iter().enumerate() {
+                            if !visible.contains(pane_id) {
+                                continue;
+                            }
+                            let screen_rect = Rect::new(rect.x + pgrid.x, rect.y + pgrid.y, rect.width, rect.height);
+                            let is_active = *pane_id == focused;
+                            // Get pane title from terminal CWD or tab title
+                            let title = self.pane_states.get(pane_id)
+                                .and_then(|s| s.terminal.shell_state().cwd.clone())
+                                .map(|cwd| crate::shell_integration::dir_name_from_path(&cwd).to_string())
+                                .unwrap_or_else(|| "Shell".to_string());
+                            let shell_name = "bash";
+                            if let Some((text_rect, cells)) = generate_pane_header_text(
+                                screen_rect, idx, &title, shell_name,
+                                is_active, cw, ch, theme,
+                            ) {
+                                text_overlays.push((text_rect, cells));
+                            }
+                        }
+                    }
+
+                    // Status bar text
+                    {
+                        let pane_tree = &self.tab_manager.active_tab().pane_tree;
+                        let pane_ids: Vec<_> = pane_tree.visible_panes();
+                        let focused = pane_tree.focused_pane_id();
+                        let active_pane_index = pane_ids.iter().position(|id| *id == focused).unwrap_or(0);
+                        if let Some((rect, cells)) = generate_status_bar_text_cells(
+                            width as f32, height as f32, cw, ch, active_pane_index, theme,
+                        ) {
+                            text_overlays.push((rect, cells));
+                        }
+                    }
 
                     // Search bar text
                     if self.search_state.is_active {
                         let pane_tree = &self.tab_manager.active_tab().pane_tree;
                         let focused = pane_tree.focused_pane_id();
-                        let content = self.content_bounds(width as f32, height as f32);
-                        let layout = pane_tree.calculate_layout(content.width, content.height);
+                        let pgrid = self.pane_grid_bounds(width as f32, height as f32);
+                        let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
                         if let Some((_, rect)) = layout.iter().find(|(id, _)| *id == focused) {
                             let screen_rect = Rect::new(
-                                rect.x,
-                                rect.y + TAB_BAR_HEIGHT,
+                                rect.x + pgrid.x,
+                                rect.y + pgrid.y,
                                 rect.width,
                                 rect.height,
                             );
@@ -2205,7 +2314,7 @@ mod tests {
     #[test]
     fn default_config_title() {
         let cfg = WindowConfig::default();
-        assert_eq!(cfg.title, "VeloTerm");
+        assert_eq!(cfg.title, "Claude Terminal \u{2014} Anthropic");
     }
 
     #[test]
@@ -2228,7 +2337,7 @@ mod tests {
     fn window_attributes_has_correct_title() {
         let cfg = WindowConfig::default();
         let attrs = cfg.to_window_attributes();
-        assert_eq!(attrs.title, "VeloTerm");
+        assert_eq!(attrs.title, "Claude Terminal \u{2014} Anthropic");
     }
 
     #[test]
@@ -2591,7 +2700,9 @@ blink = false
             .pane_tree
             .calculate_layout(content.width, content.height);
         let first_width = layout[0].1.width;
-        assert!((first_width - 300.0).abs() < 1.0);
+        // With 8px gap: usable = 992, 30% = 297.6
+        let expected = (content.width - crate::pane::PANE_GAP) * 0.3;
+        assert!((first_width - expected).abs() < 1.0);
     }
 
     #[test]
@@ -2610,7 +2721,7 @@ blink = false
             .active_tab_mut()
             .pane_tree
             .split_focused(SplitDirection::Vertical);
-        // Content area is offset by TAB_BAR_HEIGHT, so divider is at x=640
+        // Content area is offset by chrome top, so divider is at x=640
         // in content coordinates (0.0 to 1280.0 width, 0.0 to 692.0 height)
         let content = app.content_bounds(1280.0, 720.0);
         app.interaction.update_layout(
@@ -2768,12 +2879,13 @@ blink = false
     }
 
     #[test]
-    fn app_content_bounds_accounts_for_tab_bar() {
+    fn app_content_bounds_accounts_for_chrome() {
         let app = App::new(WindowConfig::default(), Config::default());
         let content = app.content_bounds(1280.0, 720.0);
-        assert_eq!(content.y, TAB_BAR_HEIGHT);
+        let chrome_top = App::chrome_top_height();
+        assert_eq!(content.y, chrome_top);
         assert_eq!(content.width, 1280.0);
-        assert_eq!(content.height, 720.0 - TAB_BAR_HEIGHT);
+        assert_eq!(content.height, 720.0 - chrome_top - STATUS_BAR_HEIGHT);
     }
 
     #[test]

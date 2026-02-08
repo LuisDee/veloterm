@@ -59,8 +59,19 @@ pub fn rasterize_atlas(
     let slot_w = cell_width.ceil() as u32 + GLYPH_PADDING * 2;
     let slot_h = cell_height.ceil() as u32 + GLYPH_PADDING * 2;
 
-    // Atlas layout: 16 glyphs per row, ceil(95/16) = 6 rows
-    let glyph_count = 95u32;
+    // Extra UI chrome characters beyond ASCII
+    let extra_chars: &[char] = &[
+        '\u{273B}', // ✻ TEARDROP-SPOKED ASTERISK (brand icon)
+        '\u{2460}', '\u{2461}', '\u{2462}', '\u{2463}', '\u{2464}', // ①②③④⑤
+        '\u{2465}', '\u{2466}', '\u{2467}', '\u{2468}', // ⑥⑦⑧⑨
+        '\u{25CF}', // ● BLACK CIRCLE (status dot)
+        '\u{00B7}', // · MIDDLE DOT (separator)
+        '\u{00D7}', // × MULTIPLICATION SIGN (tab close)
+        '\u{2026}', // … HORIZONTAL ELLIPSIS
+    ];
+
+    // Atlas layout: 16 glyphs per row
+    let glyph_count = 95u32 + extra_chars.len() as u32;
     let cols = 16u32;
     let rows = glyph_count.div_ceil(cols);
     let atlas_width = (cols * slot_w).next_power_of_two().max(512);
@@ -142,6 +153,51 @@ pub fn rasterize_atlas(
         // bottom-up storage to top-down. Slot row 0 ends up at the top of the
         // atlas, so v = slot_y / atlas_height maps correctly. Do NOT also flip
         // the UV — that would double-flip and produce upside-down glyphs.
+        glyphs.insert(
+            c,
+            GlyphInfo {
+                uv: [
+                    slot_x as f32 / atlas_width as f32,
+                    slot_y as f32 / atlas_height as f32,
+                    slot_w as f32 / atlas_width as f32,
+                    slot_h as f32 / atlas_height as f32,
+                ],
+            },
+        );
+    }
+
+    // Rasterize extra UI chrome characters (same approach as ASCII above)
+    let ascii_count = 95u32;
+    for (j, &c) in extra_chars.iter().enumerate() {
+        let i = ascii_count + j as u32;
+        let col = i % cols;
+        let row = i / cols;
+        let slot_x = col * slot_w;
+        let slot_y = row * slot_h;
+
+        let characters: [u16; 1] = [c as u16];
+        let mut glyph_indices: [u16; 1] = [0];
+        unsafe {
+            ct_font.get_glyphs_for_characters(
+                characters.as_ptr(),
+                glyph_indices.as_mut_ptr(),
+                1,
+            );
+        }
+
+        // Skip if font doesn't have this glyph
+        if glyph_indices[0] == 0 {
+            continue;
+        }
+
+        let pos_x = (slot_x + GLYPH_PADDING) as f64;
+        let pos_y = (atlas_height as f32
+            - (slot_y + GLYPH_PADDING) as f32
+            - ascent) as f64;
+
+        let positions = [CGPoint::new(pos_x, pos_y)];
+        ct_font.draw_glyphs(&glyph_indices, &positions, cg_ctx.clone());
+
         glyphs.insert(
             c,
             GlyphInfo {

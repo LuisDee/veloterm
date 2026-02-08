@@ -90,6 +90,8 @@ mod macos {
 
         // Build the menu
         let menu = NSMenu::new(mtm);
+        // Disable auto-enable so items without action selectors remain enabled
+        unsafe { menu.setAutoenablesItems(false) };
 
         let copy_item = make_item(mtm, "Copy", 1, has_selection);
         let paste_item = make_item(mtm, "Paste", 2, true);

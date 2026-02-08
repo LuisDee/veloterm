@@ -128,12 +128,14 @@ impl Renderer {
 
         // Surface configuration
         let surface_caps = surface.get_capabilities(&adapter);
+        log::info!("Available surface formats: {:?}", surface_caps.formats);
         let format = surface_caps
             .formats
             .iter()
             .find(|f| f.is_srgb())
             .copied()
             .unwrap_or(surface_caps.formats[0]);
+        log::info!("Selected surface format: {:?} (is_srgb={})", format, format.is_srgb());
 
         // Clamp to GPU's max texture dimension to prevent wgpu validation errors
         // (macOS retina windows can exceed 2048px)
@@ -522,6 +524,7 @@ impl Renderer {
             .map(|q| OverlayInstance {
                 rect: [q.rect.x, q.rect.y, q.rect.width, q.rect.height],
                 color: q.color,
+                extras: [q.border_radius, 0.0, 0.0, 0.0],
             })
             .collect();
 
@@ -647,17 +650,11 @@ impl Renderer {
         for (rect, cells) in text_overlays {
             let local_grid =
                 GridDimensions::from_pane_rect(rect, self.cell_width(), self.cell_height());
-            let mut instances = generate_instances(&local_grid, cells, &self.atlas);
-            // Offset positions from local grid coords to screen coords
-            let col_offset = rect.x / self.cell_width();
-            let row_offset = rect.y / self.cell_height();
-            for inst in &mut instances {
-                inst.position[0] += col_offset;
-                inst.position[1] += row_offset;
-            }
+            let instances = generate_instances(&local_grid, cells, &self.atlas);
+            // Use local grid so NDC maps correctly within the text rect viewport
             text_overlay_data.push(TextOverlayDrawData {
                 rect: *rect,
-                grid: surface_grid.clone(),
+                grid: local_grid,
                 instances,
             });
         }

@@ -1,5 +1,6 @@
 pub mod config;
 pub mod context_menu;
+pub mod header_bar;
 pub mod input;
 pub mod link;
 pub mod pane;
@@ -9,6 +10,7 @@ pub mod renderer;
 pub mod scroll;
 pub mod search;
 pub mod shell_integration;
+pub mod status_bar;
 pub mod tab;
 pub mod terminal;
 pub mod vi_mode;

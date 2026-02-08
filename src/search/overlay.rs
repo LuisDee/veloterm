@@ -26,6 +26,7 @@ pub fn generate_search_bar_quads(params: &SearchBarParams) -> Vec<OverlayQuad> {
     vec![OverlayQuad {
         rect,
         color: params.bar_color,
+        border_radius: 0.0,
     }]
 }
 

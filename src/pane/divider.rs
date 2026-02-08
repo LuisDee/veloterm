@@ -55,6 +55,8 @@ pub struct OverlayQuad {
     pub rect: Rect,
     /// RGBA color.
     pub color: [f32; 4],
+    /// Border radius in pixels (0.0 for sharp corners).
+    pub border_radius: f32,
 }
 
 /// Generate overlay quads for divider bars.
@@ -78,6 +80,7 @@ pub fn generate_divider_quads(
             OverlayQuad {
                 rect: d.rect,
                 color,
+                border_radius: 0.0,
             }
         })
         .collect()
@@ -97,6 +100,7 @@ pub fn generate_unfocused_overlay_quads(
         .map(|(_, rect)| OverlayQuad {
             rect: *rect,
             color: [bg_color.r, bg_color.g, bg_color.b, dim_alpha],
+            border_radius: 0.0,
         })
         .collect()
 }
@@ -288,9 +292,9 @@ mod tests {
         let bounds = Rect::new(0.0, 0.0, 1280.0, 720.0);
         let dividers = calculate_dividers(&root, bounds, 20.0);
         let h_divider = &dividers[1];
-        // Right half starts at x=640, width=640
-        assert_eq!(h_divider.rect.x, 640.0);
-        assert_eq!(h_divider.rect.width, 640.0);
+        // With 8px gap: right half starts at x=644, width=636
+        assert_eq!(h_divider.rect.x, 644.0);
+        assert_eq!(h_divider.rect.width, 636.0);
     }
 
     #[test]
@@ -344,9 +348,9 @@ mod tests {
         assert_eq!(dividers.len(), 2);
         assert_eq!(dividers[0].direction, SplitDirection::Vertical);
         assert_eq!(dividers[1].direction, SplitDirection::Vertical);
-        // Root divider at x=600, inner divider at x=300 (left half split)
+        // Root divider at x=600, inner divider at x=298 (left half is 596px, split at 50%)
         assert_eq!(dividers[0].rect.x, 599.0);
-        assert_eq!(dividers[1].rect.x, 299.0);
+        assert_eq!(dividers[1].rect.x, 297.0);
     }
 
     #[test]

@@ -113,13 +113,23 @@ impl SurfaceConfig {
     }
 }
 
+/// Convert a single sRGB component to linear.
+fn srgb_to_linear(c: f64) -> f64 {
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
 /// The clear color for Claude Dark theme background (#141413).
+/// Returns linear color values for correct rendering on sRGB surfaces.
 pub fn clear_color() -> wgpu::Color {
     let c = Color::from_hex("#141413");
     wgpu::Color {
-        r: c.r as f64,
-        g: c.g as f64,
-        b: c.b as f64,
+        r: srgb_to_linear(c.r as f64),
+        g: srgb_to_linear(c.g as f64),
+        b: srgb_to_linear(c.b as f64),
         a: c.a as f64,
     }
 }
@@ -196,8 +206,9 @@ pub struct GridUniforms {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct OverlayInstance {
-    pub rect: [f32; 4],  // x, y, width, height in pixels
-    pub color: [f32; 4], // RGBA
+    pub rect: [f32; 4],   // x, y, width, height in pixels
+    pub color: [f32; 4],  // RGBA
+    pub extras: [f32; 4], // border_radius, _pad, _pad, _pad
 }
 
 impl OverlayInstance {
@@ -217,6 +228,12 @@ impl OverlayInstance {
                     format: wgpu::VertexFormat::Float32x4,
                     offset: 16,
                     shader_location: 1,
+                },
+                // extras: vec4<f32> at location(2) — border_radius in .x
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: 32,
+                    shader_location: 2,
                 },
             ],
         }
@@ -557,13 +574,14 @@ mod tests {
     // ── Clear color tests ──────────────────────────────────────────
 
     #[test]
-    fn clear_color_matches_claude_dark_background() {
+    fn clear_color_is_linear_version_of_claude_dark_background() {
         let c = clear_color();
-        let eps = 1.0 / 512.0;
-        // #141413 = rgb(20, 20, 19)
-        assert!((c.r - 20.0 / 255.0).abs() < eps, "red: {}", c.r);
-        assert!((c.g - 20.0 / 255.0).abs() < eps, "green: {}", c.g);
-        assert!((c.b - 19.0 / 255.0).abs() < eps, "blue: {}", c.b);
+        // #141413 = sRGB(20/255, 20/255, 19/255) → linear values are much smaller
+        // srgb_to_linear(20/255) ≈ 0.00607
+        assert!(c.r < 0.01, "red should be linearized: {}", c.r);
+        assert!(c.g < 0.01, "green should be linearized: {}", c.g);
+        assert!(c.b < 0.01, "blue should be linearized: {}", c.b);
+        assert!(c.r > 0.004, "red not too small: {}", c.r);
         assert_eq!(c.a, 1.0);
     }
 
@@ -624,7 +642,7 @@ mod tests {
     fn shader_compiles_and_pipeline_creates() {
         let ctx = try_create_headless().expect("GPU required");
         let bind_group_layout = create_bind_group_layout(&ctx.device);
-        // Using Bgra8UnormSrgb as a common surface format
+        // Using Bgra8UnormSrgb — our preferred surface format (sRGB gamma encoding)
         let pipeline = create_render_pipeline(
             &ctx.device,
             wgpu::TextureFormat::Bgra8UnormSrgb,
@@ -693,11 +711,11 @@ mod tests {
     // ── Overlay types tests ──────────────────────────────────────────
 
     #[test]
-    fn overlay_instance_size_is_32_bytes() {
+    fn overlay_instance_size_is_48_bytes() {
         assert_eq!(
             std::mem::size_of::<OverlayInstance>(),
-            32,
-            "OverlayInstance must be 32 bytes (rect 16 + color 16)"
+            48,
+            "OverlayInstance must be 48 bytes (rect 16 + color 16 + extras 16)"
         );
     }
 
@@ -706,17 +724,18 @@ mod tests {
         let inst = OverlayInstance {
             rect: [100.0, 200.0, 2.0, 720.0],
             color: [0.5, 0.4, 0.3, 1.0],
+            extras: [0.0, 0.0, 0.0, 0.0],
         };
         let bytes = bytemuck::bytes_of(&inst);
-        assert_eq!(bytes.len(), 32);
+        assert_eq!(bytes.len(), 48);
     }
 
     #[test]
-    fn overlay_instance_vertex_layout_has_2_attributes() {
+    fn overlay_instance_vertex_layout_has_3_attributes() {
         let layout = OverlayInstance::vertex_buffer_layout();
-        assert_eq!(layout.attributes.len(), 2);
+        assert_eq!(layout.attributes.len(), 3);
         assert_eq!(layout.step_mode, wgpu::VertexStepMode::Instance);
-        assert_eq!(layout.array_stride, 32);
+        assert_eq!(layout.array_stride, 48);
     }
 
     #[test]

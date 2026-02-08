@@ -86,11 +86,24 @@ fn vs_main(
     return out;
 }
 
+// Convert a single sRGB component to linear.
+fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 {
+        return c / 12.92;
+    }
+    return pow((c + 0.055) / 1.055, 2.4);
+}
+
+// Convert an RGB color from sRGB to linear.
+fn srgb3_to_linear(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(srgb_to_linear(c.r), srgb_to_linear(c.g), srgb_to_linear(c.b));
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Cursor rendering — draw cursor shape using bg_color as cursor color
     if in.is_cursor > 0.5 {
-        let cursor_color = in.bg_color.rgb;
+        let cursor_color = srgb3_to_linear(in.bg_color.rgb);
         let shape = u32(in.cursor_shape + 0.5);
 
         if shape == 0u {
@@ -119,12 +132,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
+    // Convert sRGB input colors to linear for correct output on sRGB surface
     // Selection: swap fg and bg colors
-    var fg = in.fg_color.rgb;
-    var bg = in.bg_color.rgb;
+    var fg = srgb3_to_linear(in.fg_color.rgb);
+    var bg = srgb3_to_linear(in.bg_color.rgb);
     if in.is_selected > 0.5 {
-        fg = in.bg_color.rgb;
-        bg = in.fg_color.rgb;
+        fg = srgb3_to_linear(in.bg_color.rgb);
+        bg = srgb3_to_linear(in.fg_color.rgb);
     }
 
     var color: vec3<f32>;
@@ -135,7 +149,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     } else {
         // Sample glyph alpha from atlas
         let glyph_alpha = textureSample(atlas_texture, atlas_sampler, in.uv).r;
-        // Blend: background behind, foreground glyph on top
+        // Blend in linear space: background behind, foreground glyph on top
         color = mix(bg, fg, glyph_alpha);
     }
 

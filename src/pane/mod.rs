@@ -1,6 +1,7 @@
 // Pane layout engine: binary tree data structure for terminal pane management.
 
 pub mod divider;
+pub mod header;
 pub mod interaction;
 
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -220,26 +221,32 @@ pub enum RemoveResult {
 
 /// Split a rect into two sub-rects along a direction with a given ratio.
 /// Clamps the ratio so neither sub-rect is smaller than min_size pixels.
+/// Gap between panes in pixels.
+pub const PANE_GAP: f32 = 8.0;
+
 pub(crate) fn split_rect(bounds: Rect, direction: SplitDirection, ratio: f32, min_size: f32) -> (Rect, Rect) {
+    let gap = PANE_GAP;
     match direction {
         SplitDirection::Vertical => {
             let total = bounds.width;
-            let clamped_ratio = clamp_ratio(ratio, total, min_size);
-            let first_w = total * clamped_ratio;
-            let second_w = total - first_w;
+            let usable = (total - gap).max(0.0);
+            let clamped_ratio = clamp_ratio(ratio, usable, min_size);
+            let first_w = usable * clamped_ratio;
+            let second_w = usable - first_w;
             (
                 Rect::new(bounds.x, bounds.y, first_w, bounds.height),
-                Rect::new(bounds.x + first_w, bounds.y, second_w, bounds.height),
+                Rect::new(bounds.x + first_w + gap, bounds.y, second_w, bounds.height),
             )
         }
         SplitDirection::Horizontal => {
             let total = bounds.height;
-            let clamped_ratio = clamp_ratio(ratio, total, min_size);
-            let first_h = total * clamped_ratio;
-            let second_h = total - first_h;
+            let usable = (total - gap).max(0.0);
+            let clamped_ratio = clamp_ratio(ratio, usable, min_size);
+            let first_h = usable * clamped_ratio;
+            let second_h = usable - first_h;
             (
                 Rect::new(bounds.x, bounds.y, bounds.width, first_h),
-                Rect::new(bounds.x, bounds.y + first_h, bounds.width, second_h),
+                Rect::new(bounds.x, bounds.y + first_h + gap, bounds.width, second_h),
             )
         }
     }
@@ -718,9 +725,10 @@ mod tests {
         let layout = tree.calculate_layout(1280.0, 720.0);
         assert_eq!(layout.len(), 2);
         // Root is first child (left), new pane is second (right)
+        // With 8px gap: usable = 1272, each side = 636
         let root_rect = layout.iter().find(|(id, _)| *id == root_id).unwrap().1;
         assert_eq!(root_rect.x, 0.0);
-        assert_eq!(root_rect.width, 640.0);
+        assert_eq!(root_rect.width, 636.0);
         assert_eq!(root_rect.height, 720.0);
     }
 
@@ -731,9 +739,10 @@ mod tests {
         tree.split_focused(SplitDirection::Horizontal);
         let layout = tree.calculate_layout(1280.0, 720.0);
         assert_eq!(layout.len(), 2);
+        // With 8px gap: usable = 712, each side = 356
         let root_rect = layout.iter().find(|(id, _)| *id == root_id).unwrap().1;
         assert_eq!(root_rect.y, 0.0);
-        assert_eq!(root_rect.height, 360.0);
+        assert_eq!(root_rect.height, 356.0);
         assert_eq!(root_rect.width, 1280.0);
     }
 
@@ -744,9 +753,10 @@ mod tests {
         tree.split_focused(SplitDirection::Horizontal);
         let layout = tree.calculate_layout(1280.0, 720.0);
         assert_eq!(layout.len(), 3);
-        // All rects should cover the window without overlap
+        // With gaps, total pane area is less than window area (gaps take space)
         let total_area: f32 = layout.iter().map(|(_, r)| r.width * r.height).sum();
-        assert!((total_area - 1280.0 * 720.0).abs() < 1.0);
+        let gap_area = PANE_GAP * 720.0 + PANE_GAP * 636.0; // vertical gap + horizontal gap in right half
+        assert!((total_area + gap_area - 1280.0 * 720.0).abs() < 2.0);
     }
 
     #[test]
@@ -942,10 +952,12 @@ mod tests {
         let mut tree = PaneTree::new();
         tree.split_focused(SplitDirection::Vertical);
         assert!(tree.set_split_ratio_by_index(0, 0.3));
-        // Verify by checking layout: first pane should be ~30% of width
+        // Verify by checking layout: first pane should be ~30% of usable width
+        // usable = 1000 - 8 (gap) = 992, 30% = 297.6
         let layout = tree.calculate_layout(1000.0, 500.0);
         let first_width = layout[0].1.width;
-        assert!((first_width - 300.0).abs() < 1.0);
+        let expected = (1000.0 - PANE_GAP) * 0.3;
+        assert!((first_width - expected).abs() < 1.0);
     }
 
     #[test]

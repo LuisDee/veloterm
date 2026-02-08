@@ -30,14 +30,22 @@ Read("/Users/luisdeburnay/work/terminal-em/veloterm-latest.png")
 How it works:
 1. Builds VeloTerm and creates the `.app` bundle (with `VELOTERM_PROJECT_DIR` set)
 2. Launches via `open` for proper Retina scaling
-3. Sends Cmd+Shift+S to trigger GPU buffer capture
-4. Saves to `veloterm-latest.png` (overwrites previous)
+3. Uses `GetWindowID` (Homebrew) + `screencapture -l` for color-accurate OS-level capture
+4. Falls back to Cmd+Shift+S GPU buffer capture if OS capture fails
+5. Saves to `veloterm-latest.png` (overwrites previous)
 
 **DO NOT manually build the .app wrapper in bash commands.** The script sets
 `VELOTERM_PROJECT_DIR` in the wrapper so the GPU capture knows where to write
 the PNG. If you construct the wrapper yourself and forget this env var, the
 capture fails with "Read-only file system" because it tries to write inside
 the `.app` bundle. Just run the script.
+
+**GPU buffer capture color issue**: `copy_texture_to_buffer` from `Bgra8UnormSrgb`
+on Apple Metal returns gamma-incorrect values. OS-level `screencapture` via
+`GetWindowID` is the reliable method for color-accurate screenshots.
+
+**Shader changes require `cargo clean -p veloterm`**: Shaders are embedded via
+`include_str!()` which Cargo doesn't track for incremental recompilation.
 
 ## Testing
 
