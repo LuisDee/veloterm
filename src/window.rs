@@ -1441,6 +1441,23 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         return;
                     }
+                    if crate::input::clipboard::is_select_all_keybinding(&event.logical_key, self.modifiers) {
+                        if let Some(state) = self.pane_states.get_mut(&focused_id) {
+                            let rows = state.terminal.rows();
+                            let cols = state.terminal.columns();
+                            state.mouse_selection.active_selection = Some(
+                                crate::input::selection::Selection {
+                                    start: (0, 0),
+                                    end: (rows.saturating_sub(1), cols.saturating_sub(1)),
+                                    selection_type: crate::input::selection::SelectionType::Range,
+                                },
+                            );
+                        }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
 
                     // Route normal keys to focused pane's PTY
                     let bytes = crate::input::translate_key(
