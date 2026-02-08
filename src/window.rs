@@ -1327,6 +1327,48 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                     }
 
+                    // Check for clipboard commands (Cmd+C, Cmd+V, Cmd+A)
+                    if crate::input::clipboard::is_copy_keybinding(&event.logical_key, self.modifiers) {
+                        if let Some(state) = self.pane_states.get_mut(&focused_id) {
+                            if let Some(ref sel) = state.mouse_selection.active_selection {
+                                let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal);
+                                let cols = state.terminal.columns();
+                                let text = match sel.selection_type {
+                                    crate::input::selection::SelectionType::VisualBlock => {
+                                        crate::input::selection::selected_text_block(&cells, sel, cols)
+                                    }
+                                    crate::input::selection::SelectionType::Line => {
+                                        crate::input::selection::selected_text_lines(&cells, sel, cols)
+                                    }
+                                    _ => crate::input::selection::selected_text(&cells, sel, cols),
+                                };
+                                if !text.is_empty() {
+                                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                        let _ = clipboard.set_text(&text);
+                                    }
+                                }
+                                state.mouse_selection.clear_selection();
+                            }
+                        }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+                    if crate::input::clipboard::is_paste_keybinding(&event.logical_key, self.modifiers) {
+                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                            if let Ok(text) = clipboard.get_text() {
+                                if let Some(state) = self.pane_states.get_mut(&focused_id) {
+                                    let bytes = crate::input::clipboard::paste_bytes(&text, true);
+                                    if let Err(e) = state.pty.write(&bytes) {
+                                        log::warn!("PTY paste write error: {e}");
+                                    }
+                                }
+                            }
+                        }
+                        return;
+                    }
+
                     // Route normal keys to focused pane's PTY
                     let bytes = crate::input::translate_key(
                         &event.logical_key,
