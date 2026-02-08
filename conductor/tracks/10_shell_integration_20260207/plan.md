@@ -1,6 +1,6 @@
 # Track 10: Shell Integration — Implementation Plan
 
-## Phase 1: Shell State & OSC Interception
+## Phase 1: Shell State & OSC Interception [checkpoint: 4b6b8ca]
 
 Core infrastructure: custom event listener, shell state struct, OSC 133/7/0 parsing.
 
