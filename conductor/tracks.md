@@ -62,7 +62,7 @@ _Link: [./conductor/tracks/11_vi_mode_20260207/](./conductor/tracks/11_vi_mode_2
 ### [x] Track 15: Font Rendering & Terminal Padding (M)
 _Link: [./conductor/tracks/15_font_padding_20260208/](./conductor/tracks/15_font_padding_20260208/)_
 
-### [ ] Track 16: Cursor & Input Polish (S)
+### [x] Track 16: Cursor & Input Polish (S)
 _Link: [./conductor/tracks/16_cursor_input_20260208/](./conductor/tracks/16_cursor_input_20260208/)_
 
 ### [ ] Track 17: Text Selection & Clipboard (M)

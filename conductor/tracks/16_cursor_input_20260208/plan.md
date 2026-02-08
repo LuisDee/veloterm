@@ -26,7 +26,7 @@
 - Only request redraw on blink state change (avoid unnecessary GPU wakeups)
 - Write tests: cursor instance generation, blink state transitions trigger/skip redraws
 
-### Phase 1 Checkpoint [ ]
+### Phase 1 Checkpoint [x] [checkpoint: 5f67bc5]
 
 ## Phase 2: Blink Polish & Input Verification
 
@@ -59,4 +59,4 @@
 - Verify Cmd+Plus/Minus still works (no input regression)
 - Screenshot validation with Playwright MCP
 
-### Phase 2 Checkpoint [ ]
+### Phase 2 Checkpoint [x] [checkpoint: 5f67bc5]
