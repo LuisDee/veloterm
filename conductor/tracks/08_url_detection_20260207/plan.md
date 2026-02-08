@@ -60,14 +60,14 @@
 - [x] Request redraw when link highlight changes
 - [x] Write integration tests for hover highlight and click dispatch
 
-### Task 2.4: Visual Validation
-- [ ] Build and run application
-- [ ] Validate via screenshots:
-  - [ ] URL underline highlight visible on modifier+hover
-  - [ ] File path underline highlight visible on modifier+hover
-  - [ ] Cursor changes to pointer hand on link hover
-  - [ ] Modifier+click opens URL in browser
-  - [ ] Modifier+click opens file path in editor
+### Task 2.4: Visual Validation <!-- 911e52a -->
+- [x] Build and run application
+- [x] Validate via screenshots:
+  - [x] URL underline highlight visible on modifier+hover
+  - [x] File path underline highlight visible on modifier+hover
+  - [x] Cursor changes to pointer hand on link hover
+  - [x] Modifier+click opens URL in browser
+  - [x] Modifier+click opens file path in editor
 
 ### Phase 2 Completion
-- [ ] Phase completion verification and checkpointing
+- [x] Phase completion verification and checkpointing
