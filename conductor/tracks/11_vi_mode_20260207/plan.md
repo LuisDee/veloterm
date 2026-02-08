@@ -64,7 +64,7 @@
 
 ---
 
-## Phase 3: Search, Cursor Rendering & Status Bar
+## Phase 3: Search, Cursor Rendering & Status Bar [checkpoint: 7111fdb]
 
 ### 3.1 [x] Implement vi-mode search (/ and ?) <!-- bf4807b -->
 - `/` and `?` enter a search sub-mode with text input in status bar area
@@ -93,4 +93,4 @@
 - Viewport scrolling follows vi cursor
 - **Tests:** Input routing, PTY isolation, multi-pane independence
 
-### 3.5 [ ] Phase 3 Completion — Verification and Checkpointing
+### 3.5 [x] Phase 3 Completion — Verification and Checkpointing <!-- 7111fdb -->
