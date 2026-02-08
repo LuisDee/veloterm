@@ -185,6 +185,42 @@ impl Terminal {
     pub fn shell_state_mut(&mut self) -> &mut ShellState {
         &mut self.shell_state
     }
+
+    /// Jump viewport to the previous prompt position.
+    /// Returns true if the viewport was moved.
+    pub fn jump_to_previous_prompt(&mut self) -> bool {
+        let history = self.history_size();
+        let offset = self.display_offset();
+        let viewport_top = history.saturating_sub(offset);
+
+        if let Some(prompt_line) = self.shell_state.previous_prompt(viewport_top) {
+            let new_offset = history.saturating_sub(prompt_line);
+            self.set_display_offset(new_offset);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Jump viewport to the next prompt position.
+    /// Returns true if the viewport was moved.
+    pub fn jump_to_next_prompt(&mut self) -> bool {
+        let history = self.history_size();
+        let offset = self.display_offset();
+        let viewport_top = history.saturating_sub(offset);
+
+        if let Some(prompt_line) = self.shell_state.next_prompt(viewport_top) {
+            if prompt_line >= history {
+                self.snap_to_bottom();
+            } else {
+                let new_offset = history.saturating_sub(prompt_line);
+                self.set_display_offset(new_offset);
+            }
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// Coalesces rapid resize events, keeping only the latest pending size.
@@ -454,5 +490,19 @@ mod tests {
         let mut term = Terminal::new(80, 24, 10_000);
         term.feed(b"\x1b]133;A\x07");
         assert_eq!(term.shell_state().prompt_positions().len(), 1);
+    }
+
+    // ── Prompt navigation via Terminal ───────────────────────────
+
+    #[test]
+    fn jump_to_previous_prompt_with_no_prompts_returns_false() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        assert!(!term.jump_to_previous_prompt());
+    }
+
+    #[test]
+    fn jump_to_next_prompt_with_no_prompts_returns_false() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        assert!(!term.jump_to_next_prompt());
     }
 }

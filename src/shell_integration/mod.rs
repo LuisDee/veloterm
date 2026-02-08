@@ -1,5 +1,7 @@
 // Shell integration: OSC sequence parsing, shell state tracking, and prompt navigation.
 
+pub mod listener;
+
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
@@ -626,5 +628,157 @@ mod tests {
             }
             other => panic!("expected SemanticPrompt, got {:?}", other),
         }
+    }
+
+    // ── Prompt navigation ─────────────────────────────────────────
+
+    #[test]
+    fn previous_prompt_from_middle_of_scrollback() {
+        let mut state = ShellState::new();
+        for line in [10, 20, 30] {
+            state.handle_event(
+                &ShellEvent::SemanticPrompt(PromptMarker::PromptStart, None),
+                line,
+            );
+        }
+        assert_eq!(state.previous_prompt(25), Some(20));
+    }
+
+    #[test]
+    fn next_prompt_from_middle_of_scrollback() {
+        let mut state = ShellState::new();
+        for line in [10, 20, 30] {
+            state.handle_event(
+                &ShellEvent::SemanticPrompt(PromptMarker::PromptStart, None),
+                line,
+            );
+        }
+        assert_eq!(state.next_prompt(15), Some(20));
+    }
+
+    #[test]
+    fn previous_prompt_at_first_prompt_returns_none() {
+        let mut state = ShellState::new();
+        for line in [10, 20, 30] {
+            state.handle_event(
+                &ShellEvent::SemanticPrompt(PromptMarker::PromptStart, None),
+                line,
+            );
+        }
+        assert_eq!(state.previous_prompt(10), None);
+        assert_eq!(state.previous_prompt(5), None);
+    }
+
+    #[test]
+    fn next_prompt_at_last_prompt_returns_none() {
+        let mut state = ShellState::new();
+        for line in [10, 20, 30] {
+            state.handle_event(
+                &ShellEvent::SemanticPrompt(PromptMarker::PromptStart, None),
+                line,
+            );
+        }
+        assert_eq!(state.next_prompt(30), None);
+        assert_eq!(state.next_prompt(35), None);
+    }
+
+    #[test]
+    fn prompt_navigation_with_no_prompts_returns_none() {
+        let state = ShellState::new();
+        assert_eq!(state.previous_prompt(50), None);
+        assert_eq!(state.next_prompt(50), None);
+    }
+
+    #[test]
+    fn prompt_navigation_respects_viewport_position() {
+        let mut state = ShellState::new();
+        for i in 0..10 {
+            state.handle_event(
+                &ShellEvent::SemanticPrompt(PromptMarker::PromptStart, None),
+                i * 10,
+            );
+        }
+        // From viewport position 45, previous is 40, next is 50
+        assert_eq!(state.previous_prompt(45), Some(40));
+        assert_eq!(state.next_prompt(45), Some(50));
+        // From position 0, previous is None, next is 10
+        assert_eq!(state.previous_prompt(0), None);
+        assert_eq!(state.next_prompt(0), Some(10));
+    }
+
+    // ── Command timing ────────────────────────────────────────────
+
+    #[test]
+    fn command_duration_is_end_minus_start() {
+        let mut state = ShellState::new();
+        state.handle_event(
+            &ShellEvent::SemanticPrompt(PromptMarker::CommandStart, None),
+            10,
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        state.handle_event(
+            &ShellEvent::SemanticPrompt(PromptMarker::CommandEnd, Some(0)),
+            11,
+        );
+        let record = state.last_command().unwrap();
+        assert!(record.duration >= Duration::from_millis(5));
+        assert!(record.end >= record.start);
+    }
+
+    #[test]
+    fn command_history_stores_bounded_records() {
+        let mut state = ShellState::new();
+        for i in 0..MAX_COMMAND_HISTORY + 10 {
+            state.handle_event(
+                &ShellEvent::SemanticPrompt(PromptMarker::CommandStart, None),
+                i,
+            );
+            state.handle_event(
+                &ShellEvent::SemanticPrompt(PromptMarker::CommandEnd, Some(0)),
+                i + 1,
+            );
+        }
+        assert_eq!(state.command_history().len(), MAX_COMMAND_HISTORY);
+    }
+
+    #[test]
+    fn multiple_sequential_commands_tracked_independently() {
+        let mut state = ShellState::new();
+        state.handle_event(
+            &ShellEvent::SemanticPrompt(PromptMarker::CommandStart, None),
+            10,
+        );
+        state.handle_event(
+            &ShellEvent::SemanticPrompt(PromptMarker::CommandEnd, Some(0)),
+            11,
+        );
+        state.handle_event(
+            &ShellEvent::SemanticPrompt(PromptMarker::CommandStart, None),
+            20,
+        );
+        state.handle_event(
+            &ShellEvent::SemanticPrompt(PromptMarker::CommandEnd, Some(1)),
+            21,
+        );
+        assert_eq!(state.command_history().len(), 2);
+        assert_eq!(state.command_history()[0].exit_status, Some(0));
+        assert_eq!(state.command_history()[1].exit_status, Some(1));
+        assert_eq!(state.last_exit_status, Some(1));
+    }
+
+    #[test]
+    fn command_timing_accessible_per_pane() {
+        let mut state1 = ShellState::new();
+        let state2 = ShellState::new();
+        state1.handle_event(
+            &ShellEvent::SemanticPrompt(PromptMarker::CommandStart, None),
+            10,
+        );
+        state1.handle_event(
+            &ShellEvent::SemanticPrompt(PromptMarker::CommandEnd, Some(0)),
+            11,
+        );
+        assert_eq!(state1.command_history().len(), 1);
+        assert_eq!(state2.command_history().len(), 0);
     }
 }

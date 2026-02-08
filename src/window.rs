@@ -162,6 +162,33 @@ impl App {
     }
 
     /// Handle a pane command (split, close, focus, zoom).
+    /// Handle a shell integration command (prompt navigation).
+    fn handle_shell_command(&mut self, command: crate::input::ShellCommand) {
+        let focused = self
+            .tab_manager
+            .active_tab()
+            .pane_tree
+            .focused_pane_id();
+        if let Some(state) = self.pane_states.get_mut(&focused) {
+            let moved = match command {
+                crate::input::ShellCommand::PreviousPrompt => {
+                    state.terminal.jump_to_previous_prompt()
+                }
+                crate::input::ShellCommand::NextPrompt => {
+                    state.terminal.jump_to_next_prompt()
+                }
+            };
+            if moved {
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.pane_damage_mut().force_full_damage_all();
+                }
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+        }
+    }
+
     fn handle_pane_command(
         &mut self,
         command: PaneCommand,
@@ -789,6 +816,14 @@ impl ApplicationHandler for App {
                         match_pane_command(&event.logical_key, self.modifiers)
                     {
                         self.handle_pane_command(cmd, event_loop);
+                        return;
+                    }
+
+                    // Then check for shell integration commands
+                    if let Some(cmd) =
+                        crate::input::match_shell_command(&event.logical_key, self.modifiers)
+                    {
+                        self.handle_shell_command(cmd);
                         return;
                     }
 

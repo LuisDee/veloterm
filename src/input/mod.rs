@@ -200,6 +200,40 @@ pub fn match_tab_command(
     }
 }
 
+/// A shell integration command triggered by a keybinding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellCommand {
+    PreviousPrompt,
+    NextPrompt,
+}
+
+/// Check if a key event matches a shell integration command keybinding.
+///
+/// Hardcoded defaults:
+/// - Ctrl+Shift+P: jump to previous prompt
+/// - Ctrl+Shift+N: jump to next prompt
+pub fn match_shell_command(
+    logical_key: &Key,
+    modifiers: ModifiersState,
+) -> Option<ShellCommand> {
+    let ctrl_shift = modifiers.control_key() && modifiers.shift_key();
+    if !ctrl_shift {
+        return None;
+    }
+
+    match logical_key {
+        Key::Character(s) => {
+            let lower = s.to_lowercase();
+            match lower.as_str() {
+                "p" => Some(ShellCommand::PreviousPrompt),
+                "n" => Some(ShellCommand::NextPrompt),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Translate a winit key event into terminal byte sequences to send to the PTY.
 ///
 /// Returns `None` if the key event should not produce any output (e.g. modifier-only
@@ -902,6 +936,44 @@ mod tests {
             no_mods(),
         );
         assert_eq!(result, Some(SearchCommand::PrevMatch));
+    }
+
+    // ── Shell command matching ────────────────────────────────────
+
+    #[test]
+    fn shell_cmd_previous_prompt() {
+        let result = match_shell_command(&Key::Character("P".into()), ctrl_shift());
+        assert_eq!(result, Some(ShellCommand::PreviousPrompt));
+    }
+
+    #[test]
+    fn shell_cmd_previous_prompt_lowercase() {
+        let result = match_shell_command(&Key::Character("p".into()), ctrl_shift());
+        assert_eq!(result, Some(ShellCommand::PreviousPrompt));
+    }
+
+    #[test]
+    fn shell_cmd_next_prompt() {
+        let result = match_shell_command(&Key::Character("N".into()), ctrl_shift());
+        assert_eq!(result, Some(ShellCommand::NextPrompt));
+    }
+
+    #[test]
+    fn shell_cmd_next_prompt_lowercase() {
+        let result = match_shell_command(&Key::Character("n".into()), ctrl_shift());
+        assert_eq!(result, Some(ShellCommand::NextPrompt));
+    }
+
+    #[test]
+    fn shell_cmd_no_match_without_ctrl_shift() {
+        let result = match_shell_command(&Key::Character("p".into()), no_mods());
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn shell_cmd_no_match_unbound_key() {
+        let result = match_shell_command(&Key::Character("x".into()), ctrl_shift());
+        assert_eq!(result, None);
     }
 
     // ── InputMode default ──────────────────────────────────────────
