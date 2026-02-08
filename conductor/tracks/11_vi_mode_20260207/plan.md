@@ -22,7 +22,7 @@
 - Implement scroll motions: Ctrl+U, Ctrl+D
 - **Tests:** Word motion across word boundaries, buffer top/bottom, viewport-relative motions, half-page scroll
 
-### 1.4 [ ] Add vi-mode config and entry keybinding
+### 1.4 [x] Add vi-mode config and entry keybinding <!-- 952e91b -->
 - Extend `Config` with `vi_mode` section: `enabled` (bool), `entry_key` (String)
 - Extend `InputMode` enum with `Vi` variant
 - Add `should_toggle_vi_mode()` to input matching
