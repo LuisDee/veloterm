@@ -8,6 +8,7 @@ use crate::renderer::gpu::CellInstance;
 pub const CELL_FLAG_UNDERLINE: u32 = 0x10; // bit 4
 pub const CELL_FLAG_STRIKETHROUGH: u32 = 0x20; // bit 5
 pub const CELL_FLAG_SELECTED: u32 = 0x40; // bit 6
+pub const CELL_FLAG_VI_CURSOR: u32 = 0x80; // bit 7
 
 /// A single cell in the terminal grid.
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -637,7 +637,7 @@ impl ViState {
 use crate::input::selection::{
     Selection, SelectionType, selected_text, selected_text_block, selected_text_lines,
 };
-use crate::renderer::grid_renderer::GridCell;
+use crate::renderer::grid_renderer::{GridCell, CELL_FLAG_VI_CURSOR};
 
 impl ViState {
     /// Convert the current vi-mode visual selection to a Selection for rendering.
@@ -680,6 +680,26 @@ impl ViState {
             _ => selected_text(cells, &selection, cols),
         };
         Some(text)
+    }
+
+    /// Set the CELL_FLAG_VI_CURSOR on the cell at the current cursor position.
+    /// The cursor position is relative to the viewport: `viewport_top` is subtracted from cursor.row.
+    pub fn apply_vi_cursor_flag(&self, cells: &mut [GridCell], cols: usize, viewport_top: usize) {
+        if self.cursor.row < viewport_top {
+            return;
+        }
+        let rel_row = self.cursor.row - viewport_top;
+        let idx = rel_row * cols + self.cursor.col;
+        if idx < cells.len() {
+            cells[idx].flags |= CELL_FLAG_VI_CURSOR;
+        }
+    }
+}
+
+/// Clear CELL_FLAG_VI_CURSOR from all cells.
+pub fn clear_vi_cursor_flags(cells: &mut [GridCell]) {
+    for cell in cells.iter_mut() {
+        cell.flags &= !CELL_FLAG_VI_CURSOR;
     }
 }
 
@@ -1776,5 +1796,68 @@ mod tests {
         state.process_key('w', false);
         state.process_key('\r', false);
         assert_eq!(state.search_query, "new");
+    }
+
+    // ── Vi cursor flag ────────────────────────────────────────────────
+
+    #[test]
+    fn apply_vi_cursor_flag_sets_flag_at_cursor() {
+        let mut cells = make_cells(&["hello world"], 20);
+        let state = ViState::new(0, 3);
+        state.apply_vi_cursor_flag(&mut cells, 20, 0);
+        assert_ne!(cells[3].flags & CELL_FLAG_VI_CURSOR, 0);
+    }
+
+    #[test]
+    fn apply_vi_cursor_flag_does_not_set_other_cells() {
+        let mut cells = make_cells(&["hello world"], 20);
+        let state = ViState::new(0, 3);
+        state.apply_vi_cursor_flag(&mut cells, 20, 0);
+        assert_eq!(cells[0].flags & CELL_FLAG_VI_CURSOR, 0);
+        assert_eq!(cells[4].flags & CELL_FLAG_VI_CURSOR, 0);
+    }
+
+    #[test]
+    fn apply_vi_cursor_flag_with_viewport_offset() {
+        let mut cells = make_cells(&["line0", "line1", "line2"], 10);
+        let state = ViState::new(5, 2); // cursor at row 5
+        state.apply_vi_cursor_flag(&mut cells, 10, 4); // viewport starts at row 4
+        // Row 5 relative to viewport_top 4 = row 1 in cells
+        let idx = 1 * 10 + 2;
+        assert_ne!(cells[idx].flags & CELL_FLAG_VI_CURSOR, 0);
+    }
+
+    #[test]
+    fn apply_vi_cursor_flag_out_of_viewport_is_noop() {
+        let mut cells = make_cells(&["hello"], 10);
+        let state = ViState::new(0, 3); // cursor at row 0
+        state.apply_vi_cursor_flag(&mut cells, 10, 5); // viewport starts at row 5
+        // cursor row 0 < viewport_top 5, so no flag set
+        for cell in &cells {
+            assert_eq!(cell.flags & CELL_FLAG_VI_CURSOR, 0);
+        }
+    }
+
+    #[test]
+    fn clear_vi_cursor_flags_removes_all() {
+        let mut cells = make_cells(&["hello world"], 20);
+        cells[3].flags |= CELL_FLAG_VI_CURSOR;
+        cells[10].flags |= CELL_FLAG_VI_CURSOR;
+        clear_vi_cursor_flags(&mut cells);
+        for cell in &cells {
+            assert_eq!(cell.flags & CELL_FLAG_VI_CURSOR, 0);
+        }
+    }
+
+    #[test]
+    fn vi_cursor_flag_does_not_interfere_with_selection() {
+        use crate::renderer::grid_renderer::CELL_FLAG_SELECTED;
+        let mut cells = make_cells(&["hello"], 10);
+        cells[3].flags |= CELL_FLAG_SELECTED;
+        let state = ViState::new(0, 3);
+        state.apply_vi_cursor_flag(&mut cells, 10, 0);
+        // Both flags should be set
+        assert_ne!(cells[3].flags & CELL_FLAG_SELECTED, 0);
+        assert_ne!(cells[3].flags & CELL_FLAG_VI_CURSOR, 0);
     }
 }
