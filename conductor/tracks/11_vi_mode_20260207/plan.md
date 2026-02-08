@@ -35,26 +35,26 @@
 
 ## Phase 2: Visual Selection & Yank
 
-### 2.1 [ ] Implement Visual (character-wise) selection
+### 2.1 [x] Implement Visual (character-wise) selection <!-- a524f1a -->
 - On entering Visual mode, record anchor = current cursor position
 - Selection spans from anchor to cursor (inclusive), normalized in reading order
 - Extend `SelectionType` with `VisualBlock` variant
 - Convert vi selection to `Selection` struct for rendering via `apply_selection_flags`
 - **Tests:** Selection range for various anchor/cursor combos, selection across lines, normalize order
 
-### 2.2 [ ] Implement Visual-Line selection
+### 2.2 [x] Implement Visual-Line selection <!-- a524f1a -->
 - On entering Visual-Line mode, record anchor row
 - Selection covers full rows from min(anchor_row, cursor_row) to max(anchor_row, cursor_row)
 - All columns in selected rows are marked
 - **Tests:** Single-line selection, multi-line up/down, motion within visual-line mode
 
-### 2.3 [ ] Implement Visual-Block (rectangular) selection
+### 2.3 [x] Implement Visual-Block (rectangular) selection <!-- a524f1a -->
 - On entering Visual-Block mode, record anchor (row, col)
 - Selection is a rectangle: rows min..max, cols min..max of anchor and cursor
 - Implement `selected_text_block()` for rectangular text extraction
 - **Tests:** Rectangle selection, column alignment, block text extraction
 
-### 2.4 [ ] Implement yank to clipboard
+### 2.4 [x] Implement yank to clipboard <!-- ff3876e -->
 - `y` in any visual mode extracts selected text and copies to system clipboard via `arboard`
 - Visual: contiguous text, Visual-Line: full lines with newlines, Visual-Block: per-row with newlines
 - After yank, transition to Normal mode and clear selection
