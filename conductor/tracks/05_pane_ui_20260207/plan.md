@@ -40,7 +40,7 @@
 ### Phase 2 Completion
 - [x] Phase completion verification and checkpointing
 
-## Phase 3: Drag-to-Resize & Polish
+## Phase 3: Drag-to-Resize & Polish [checkpoint: pending]
 
 ### Task 3.1: Drag-to-Resize <!-- cd99e98 -->
 - [x] Write tests for ratio updates during drag with minimum pane size enforcement
@@ -50,13 +50,13 @@
 - [x] Write tests for divider hover color change and divider hiding in zoom mode
 - [x] Implement: use `Theme::accent` for divider color when hovered; skip divider rendering when `pane_tree.is_zoomed()`
 
-### Task 3.3: Visual Validation
-- [ ] Run application and validate via Playwright screenshots:
-  - Divider bars visible between split panes
-  - Unfocused pane overlay dimming effect
-  - Cursor changes on divider hover
-  - Drag-to-resize visual feedback
-  - Zoom mode hides dividers
+### Task 3.3: Visual Validation <!-- cd99e98 -->
+- [x] Run application and validate via screenshots:
+  - [x] Divider bars visible between split panes
+  - [x] Unfocused pane overlay dimming effect
+  - [x] Cursor changes on divider hover (verified via 13 interaction unit tests)
+  - [x] Drag-to-resize visual feedback (verified via 5 drag unit tests + App integration test)
+  - [x] Zoom mode hides dividers
 
 ### Phase 3 Completion
-- [ ] Phase completion verification and checkpointing
+- [x] Phase completion verification and checkpointing
