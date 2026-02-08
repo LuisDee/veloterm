@@ -19,18 +19,18 @@
 - [x] 1.2.4 Handle invalid regex gracefully — return error string, empty matches <!-- adbb08e -->
 
 ### 1.3 Write tests for SearchState and match navigation
-- [ ] 1.3.1 Write tests: SearchState tracks query string, current match index, total count
-- [ ] 1.3.2 Write tests: `next_match()` advances index, wraps from last→0
-- [ ] 1.3.3 Write tests: `prev_match()` decrements index, wraps from 0→last
-- [ ] 1.3.4 Write tests: `set_query()` resets current index to 0
-- [ ] 1.3.5 Write tests: `current_match()` returns the active SearchMatch
-- [ ] 1.3.6 Write tests: visible match filtering (given viewport range, return only visible matches)
+- [x] 1.3.1 Write tests: SearchState tracks query string, current match index, total count
+- [x] 1.3.2 Write tests: `next_match()` advances index, wraps from last→0
+- [x] 1.3.3 Write tests: `prev_match()` decrements index, wraps from 0→last
+- [x] 1.3.4 Write tests: `set_query()` resets current index to 0
+- [x] 1.3.5 Write tests: `current_match()` returns the active SearchMatch
+- [x] 1.3.6 Write tests: visible match filtering (given viewport range, return only visible matches)
 
 ### 1.4 Implement SearchState
-- [ ] 1.4.1 Implement `SearchState` struct with query, matches, current_index, is_active fields
-- [ ] 1.4.2 Implement navigation methods (next_match, prev_match, current_match)
-- [ ] 1.4.3 Implement `visible_matches(viewport_start, viewport_end, buffer)` — returns matches in visible range ± 5 rows
-- [ ] 1.4.4 Implement `scroll_target()` — returns row of current match for scroll-to-match
+- [x] 1.4.1 Implement `SearchState` struct with query, matches, current_index, is_active fields
+- [x] 1.4.2 Implement navigation methods (next_match, prev_match, current_match)
+- [x] 1.4.3 Implement `visible_matches(viewport_start, viewport_end, buffer)` — returns matches in visible range ± 5 rows
+- [x] 1.4.4 Implement `scroll_target()` — returns row of current match for scroll-to-match <!-- ed3bd5a -->
 
 ### Phase 1 Completion — Verification and Checkpointing
 
