@@ -30,7 +30,7 @@
 
 ## Phase 2: Blink Polish & Input Verification
 
-### Task 2.1: Configurable blink rate and blink pause on keystroke [ ]
+### Task 2.1: Configurable blink rate and blink pause on keystroke [x] <!-- a827635 -->
 - Replace hardcoded `BLINK_INTERVAL` with configurable value from `CursorConfig.blink_rate`
 - Track `last_keypress_time` in CursorState
 - On keystroke: reset blink timer, force cursor visible
@@ -39,7 +39,7 @@
 - Wire config hot-reload: cursor config change updates blink rate
 - Write tests: blink rate changes, keystroke pause/resume, disabled blink, hot-reload
 
-### Task 2.2: Keyboard input verification tests [ ]
+### Task 2.2: Keyboard input verification tests [x] <!-- a827635 -->
 - Write comprehensive tests verifying PTY byte sequences for:
   - Backspace → 0x7F
   - Delete → \x1b[3~
