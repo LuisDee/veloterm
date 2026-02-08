@@ -33,31 +33,30 @@ Refactor keybindings to be platform-aware and add CloseTab command.
 Visual close button rendering and drag-to-reorder interaction.
 
 ### Task 2.1: Tab close button rendering
-- [ ] Add close button "×" text cell to `generate_tab_label_text_cells()` — right-aligned within each tab
-- [ ] Active tab: always render close button
-- [ ] Inactive tabs: render close button only when tab is hovered (track hovered tab index)
-- [ ] Add `CloseTab(usize)` variant to `TabBarAction`
-- [ ] Update `hit_test_tab_bar()` to detect close button clicks (rightmost ~16px of tab)
-- [ ] Wire close button click to `handle_tab_command(CloseTab)` in window.rs
-- [ ] TDD: tests for hit_test close button region, close button visibility logic
+- [x] Add close button "×" text cell to `generate_tab_label_text_cells()` — right-aligned within each tab <!-- 0277018 -->
+- [x] Active tab: always render close button <!-- 0277018 -->
+- [x] Inactive tabs: render close button only when tab is hovered <!-- 0277018 -->
+- [x] Add `CloseTab(usize)` variant to `TabBarAction` <!-- 0277018 -->
+- [x] Update `hit_test_tab_bar()` to detect close button clicks (rightmost ~16px of tab) <!-- 0277018 -->
+- [x] Wire close button click to close tab in window.rs <!-- 0277018 -->
+- [x] TDD: tests for hit_test close button region, close button visibility logic <!-- 0277018 -->
 
 ### Task 2.2: Tab hover tracking
-- [ ] Track mouse hover state in tab bar: `hovered_tab: Option<usize>`
-- [ ] Update hovered_tab on CursorMoved when y < TAB_BAR_HEIGHT
-- [ ] Clear hovered_tab when cursor leaves tab bar
-- [ ] Pass hovered_tab to `generate_tab_label_text_cells()` for close button visibility
-- [ ] TDD: tests for hover index calculation from cursor position
+- [x] Track mouse hover state in tab bar: `hovered_tab: Option<usize>` <!-- 0277018 -->
+- [x] Update hovered_tab on CursorMoved when y < TAB_BAR_HEIGHT <!-- 0277018 -->
+- [x] Clear hovered_tab when cursor leaves tab bar <!-- 0277018 -->
+- [x] Pass hovered_tab to `generate_tab_label_text_cells()` for close button visibility <!-- 0277018 -->
 
 ### Task 2.3: Drag-to-reorder tabs
-- [ ] Add tab drag state: `is_dragging_tab: bool`, `drag_tab_index: usize`, `drag_start_x: f32`
-- [ ] On mouse press on tab (not close button): begin drag
-- [ ] On CursorMoved while dragging: compute target tab index from cursor x; if different from current, call `TabManager::move_tab()`
-- [ ] On mouse release: end drag
-- [ ] Minimum drag distance before activating (prevent accidental drags on click)
-- [ ] TDD: tests for drag target calculation, swap logic
+- [x] Add tab drag state: `tab_drag_index`, `tab_drag_start_x`, `tab_drag_active` <!-- 3c5c95a -->
+- [x] On mouse press on tab (not close button): begin drag tracking <!-- 3c5c95a -->
+- [x] On CursorMoved while dragging: compute target tab index, call `move_tab()` <!-- 3c5c95a -->
+- [x] On mouse release: end drag <!-- 3c5c95a -->
+- [x] Minimum drag distance (5px) before activating <!-- 3c5c95a -->
+- [x] TDD: tests for drag target calculation, swap logic <!-- 3c5c95a -->
 
 ### Phase 2 Completion
-- [ ] Phase completion verification and checkpointing protocol
+- [x] Phase completion verification and checkpointing protocol
 
 ---
 
