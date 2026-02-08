@@ -1,6 +1,6 @@
 # Track 06: Tab System — Plan
 
-## Phase 1: Tab Data Model & Lifecycle
+## Phase 1: Tab Data Model & Lifecycle [checkpoint: 69318c3]
 
 ### Task 1.1: TabId and Tab struct <!-- 73c0b42 -->
 - [x] Write tests for TabId uniqueness (atomic counter, like PaneId)
@@ -24,7 +24,7 @@
 - [x] Implement navigation methods on TabManager
 
 ### Phase 1 Completion
-- [ ] Phase completion verification and checkpointing
+- [x] Phase completion verification and checkpointing
 
 ## Phase 2: Tab Commands & Tab Bar Rendering
 
