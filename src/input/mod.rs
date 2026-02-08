@@ -541,6 +541,12 @@ mod tests {
         assert_eq!(result, Some(vec![0x0c]));
     }
 
+    #[test]
+    fn ctrl_e() {
+        let result = press(Key::Character("e".into()), None, ModifiersState::CONTROL);
+        assert_eq!(result, Some(vec![0x05]));
+    }
+
     // ── Function keys ───────────────────────────────────────────────
 
     #[test]

@@ -326,6 +326,24 @@ impl App {
                 window.request_redraw();
             }
         }
+
+        if delta.cursor_changed {
+            for state in self.pane_states.values_mut() {
+                if let Some(style) = crate::renderer::cursor::CursorStyle::from_config_str(
+                    &self.app_config.cursor.style,
+                ) {
+                    state.cursor.set_style(style);
+                }
+                if self.app_config.cursor.blink {
+                    state.cursor.set_blink_rate(self.app_config.cursor.blink_rate);
+                } else {
+                    state.cursor.set_blink_rate(0);
+                }
+            }
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+        }
     }
 
     fn handle_shell_command(&mut self, command: crate::input::ShellCommand) {
@@ -2542,6 +2560,84 @@ blink = false
         app.handle_config_reload(new_config, delta);
         assert_eq!(app.app_config.padding.top, 24.0);
         assert_eq!(app.app_config.padding.left, 16.0);
+    }
+
+    #[test]
+    fn config_reload_cursor_blink_rate_updates_panes() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        let pane_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
+        let terminal = crate::terminal::Terminal::new(80, 24, 10_000);
+        app.pane_states.insert(
+            pane_id,
+            PaneState {
+                terminal,
+                pty: crate::pty::PtySession::new(&crate::pty::default_shell(), 80, 24).unwrap(),
+                vi_state: None,
+                cursor: crate::renderer::cursor::CursorState::new(),
+            },
+        );
+
+        // Default blink rate is 500
+        assert_eq!(app.pane_states[&pane_id].cursor.blink_rate_ms, 500);
+
+        // Hot-reload with new blink rate
+        let mut new_config = Config::default();
+        new_config.cursor.blink_rate = 750;
+        let delta = app.app_config.diff(&new_config);
+        assert!(delta.cursor_changed);
+
+        app.handle_config_reload(new_config, delta);
+        assert_eq!(app.pane_states[&pane_id].cursor.blink_rate_ms, 750);
+    }
+
+    #[test]
+    fn config_reload_cursor_blink_disabled_sets_rate_zero() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        let pane_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
+        let terminal = crate::terminal::Terminal::new(80, 24, 10_000);
+        app.pane_states.insert(
+            pane_id,
+            PaneState {
+                terminal,
+                pty: crate::pty::PtySession::new(&crate::pty::default_shell(), 80, 24).unwrap(),
+                vi_state: None,
+                cursor: crate::renderer::cursor::CursorState::new(),
+            },
+        );
+
+        // Disable blink via config
+        let mut new_config = Config::default();
+        new_config.cursor.blink = false;
+        let delta = app.app_config.diff(&new_config);
+
+        app.handle_config_reload(new_config, delta);
+        assert_eq!(app.pane_states[&pane_id].cursor.blink_rate_ms, 0);
+    }
+
+    #[test]
+    fn config_reload_cursor_style_updates_panes() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        let pane_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
+        let terminal = crate::terminal::Terminal::new(80, 24, 10_000);
+        app.pane_states.insert(
+            pane_id,
+            PaneState {
+                terminal,
+                pty: crate::pty::PtySession::new(&crate::pty::default_shell(), 80, 24).unwrap(),
+                vi_state: None,
+                cursor: crate::renderer::cursor::CursorState::new(),
+            },
+        );
+
+        let mut new_config = Config::default();
+        new_config.cursor.style = "beam".to_string();
+        let delta = app.app_config.diff(&new_config);
+
+        app.handle_config_reload(new_config, delta);
+        assert_eq!(
+            app.pane_states[&pane_id].cursor.style,
+            crate::renderer::cursor::CursorStyle::Beam
+        );
     }
 
     #[test]
