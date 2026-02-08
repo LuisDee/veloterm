@@ -350,6 +350,16 @@ impl ViState {
         }
     }
 
+    /// Get the full status bar text for the current vi-mode state.
+    /// During search input, shows the search prompt. Otherwise shows the mode indicator.
+    pub fn status_text(&self) -> String {
+        if self.search_input_active {
+            self.search_prompt()
+        } else {
+            self.mode_text().to_string()
+        }
+    }
+
     /// Whether search input is currently active (collecting query text).
     pub fn is_search_active(&self) -> bool {
         self.search_input_active
@@ -1859,5 +1869,52 @@ mod tests {
         // Both flags should be set
         assert_ne!(cells[3].flags & CELL_FLAG_SELECTED, 0);
         assert_ne!(cells[3].flags & CELL_FLAG_VI_CURSOR, 0);
+    }
+
+    // ── Status bar text ───────────────────────────────────────────────
+
+    #[test]
+    fn status_text_normal_mode() {
+        let state = ViState::new(0, 0);
+        assert_eq!(state.status_text(), "-- NORMAL --");
+    }
+
+    #[test]
+    fn status_text_visual_mode() {
+        let mut state = ViState::new(0, 0);
+        state.process_key('v', false);
+        assert_eq!(state.status_text(), "-- VISUAL --");
+    }
+
+    #[test]
+    fn status_text_visual_line_mode() {
+        let mut state = ViState::new(0, 0);
+        state.process_key('V', false);
+        assert_eq!(state.status_text(), "-- VISUAL LINE --");
+    }
+
+    #[test]
+    fn status_text_visual_block_mode() {
+        let mut state = ViState::new(0, 0);
+        state.process_key('v', true);
+        assert_eq!(state.status_text(), "-- VISUAL BLOCK --");
+    }
+
+    #[test]
+    fn status_text_during_search_shows_prompt() {
+        let mut state = ViState::new(0, 0);
+        state.process_key('/', false);
+        state.process_key('f', false);
+        state.process_key('o', false);
+        assert_eq!(state.status_text(), "/ fo");
+    }
+
+    #[test]
+    fn status_text_after_search_confirm_shows_mode() {
+        let mut state = ViState::new(0, 0);
+        state.process_key('/', false);
+        state.process_key('x', false);
+        state.process_key('\r', false);
+        assert_eq!(state.status_text(), "-- NORMAL --");
     }
 }
