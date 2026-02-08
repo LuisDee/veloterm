@@ -4,15 +4,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
-use winit::event::{ElementState, WindowEvent};
+use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::ModifiersState;
-use winit::window::{Window, WindowAttributes, WindowId};
+use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 
 use crate::config::theme::Theme;
 use crate::config::types::Config;
 use crate::input::{match_pane_command, PaneCommand};
-use crate::pane::{PaneId, PaneTree, SplitDirection};
+use crate::pane::divider::{generate_divider_quads, generate_unfocused_overlay_quads, OverlayQuad};
+use crate::pane::interaction::{CursorType, InteractionEffect, PaneInteraction};
+use crate::pane::{PaneId, PaneTree, Rect, SplitDirection};
 use crate::renderer::PaneRenderDescriptor;
 
 /// Default window width in logical pixels.
@@ -82,6 +84,7 @@ pub struct App {
     pane_tree: PaneTree,
     pane_states: HashMap<PaneId, PaneState>,
     modifiers: ModifiersState,
+    interaction: PaneInteraction,
 }
 
 impl App {
@@ -94,6 +97,7 @@ impl App {
             pane_tree: PaneTree::new(),
             pane_states: HashMap::new(),
             modifiers: ModifiersState::empty(),
+            interaction: PaneInteraction::new(),
         }
     }
 
@@ -162,6 +166,7 @@ impl App {
                     }
                     // Resize existing panes since the layout changed
                     self.resize_all_panes(width, height);
+                    self.update_interaction_layout(width, height);
                     // Force full damage on all panes
                     if let Some(renderer) = &mut self.renderer {
                         renderer.pane_damage_mut().force_full_damage_all();
@@ -180,6 +185,7 @@ impl App {
                         }
                         // Resize remaining panes
                         self.resize_all_panes(width, height);
+                        self.update_interaction_layout(width, height);
                     }
                     None => {
                         // Last pane — exit application
@@ -196,6 +202,7 @@ impl App {
                 self.pane_tree.zoom_toggle();
                 // Resize all panes since visible panes changed
                 self.resize_all_panes(width, height);
+                self.update_interaction_layout(width, height);
                 if let Some(renderer) = &mut self.renderer {
                     renderer.pane_damage_mut().force_full_damage_all();
                 }
@@ -228,6 +235,102 @@ impl App {
                 let _ = state.pty.resize(cols, rows);
             }
         }
+    }
+
+    /// Get the interaction state machine (for testing).
+    pub fn interaction(&self) -> &PaneInteraction {
+        &self.interaction
+    }
+
+    /// Apply an InteractionEffect to the app state.
+    pub(crate) fn apply_interaction_effect(&mut self, effect: InteractionEffect) {
+        match effect {
+            InteractionEffect::None => {}
+            InteractionEffect::SetCursor(cursor_type) => {
+                if let Some(window) = &self.window {
+                    let icon = match cursor_type {
+                        CursorType::Default => CursorIcon::Default,
+                        CursorType::EwResize => CursorIcon::EwResize,
+                        CursorType::NsResize => CursorIcon::NsResize,
+                    };
+                    window.set_cursor(icon);
+                }
+            }
+            InteractionEffect::UpdateRatio {
+                split_index,
+                new_ratio,
+            } => {
+                self.pane_tree.set_split_ratio_by_index(split_index, new_ratio);
+                let (w, h) = self.window_size();
+                self.resize_all_panes(w, h);
+                self.update_interaction_layout(w, h);
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+            InteractionEffect::FocusPane(pane_id) => {
+                self.pane_tree.set_focus(pane_id);
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+        }
+    }
+
+    /// Update the interaction state machine's cached layout.
+    fn update_interaction_layout(&mut self, width: u32, height: u32) {
+        let bounds = Rect::new(0.0, 0.0, width as f32, height as f32);
+        self.interaction
+            .update_layout(self.pane_tree.root(), bounds, 20.0);
+    }
+
+    /// Generate all overlay quads (dividers + unfocused pane dimming).
+    fn generate_overlay_quads(&self, width: f32, height: f32) -> Vec<OverlayQuad> {
+        if self.pane_tree.pane_count() <= 1 || self.pane_tree.is_zoomed() {
+            return Vec::new();
+        }
+
+        let theme = if let Some(renderer) = &self.renderer {
+            renderer.theme()
+        } else {
+            return Vec::new();
+        };
+
+        let hovered_index = match self.interaction.state() {
+            crate::pane::interaction::InteractionState::Hovering { divider_index } => {
+                Some(*divider_index)
+            }
+            _ => None,
+        };
+
+        let mut quads = generate_divider_quads(
+            self.interaction.dividers(),
+            &theme.border,
+            &theme.accent,
+            hovered_index,
+        );
+
+        let layout = self.pane_tree.calculate_layout(width, height);
+        let focused = self.pane_tree.focused_pane_id();
+        quads.extend(generate_unfocused_overlay_quads(
+            &layout,
+            focused,
+            &theme.background,
+            0.3,
+        ));
+
+        quads
+    }
+
+    /// Get window physical size, with fallback.
+    fn window_size(&self) -> (u32, u32) {
+        self.window
+            .as_ref()
+            .map(|w| {
+                let s = w.inner_size();
+                (s.width, s.height)
+            })
+            .unwrap_or((1280, 720))
     }
 
     /// Run the application event loop. This blocks until the window is closed.
@@ -293,6 +396,10 @@ impl ApplicationHandler for App {
                 }
 
                 self.window = Some(window);
+
+                // Initialize interaction layout
+                let (w, h) = self.window_size();
+                self.update_interaction_layout(w, h);
             }
             Err(e) => {
                 log::error!("Failed to create window: {e}");
@@ -342,6 +449,27 @@ impl ApplicationHandler for App {
                     }
                 }
             }
+            WindowEvent::CursorMoved { position, .. } => {
+                let effect = self
+                    .interaction
+                    .on_cursor_moved(position.x as f32, position.y as f32);
+                self.apply_interaction_effect(effect);
+            }
+            WindowEvent::MouseInput {
+                state: btn_state,
+                button: MouseButton::Left,
+                ..
+            } => {
+                let (width, height) = self.window_size();
+                let layout = self
+                    .pane_tree
+                    .calculate_layout(width as f32, height as f32);
+                let effect = match btn_state {
+                    ElementState::Pressed => self.interaction.on_mouse_press(&layout),
+                    ElementState::Released => self.interaction.on_mouse_release(),
+                };
+                self.apply_interaction_effect(effect);
+            }
             WindowEvent::Resized(size) => {
                 log::debug!("Window resized to {}x{}", size.width, size.height);
                 if let Some(renderer) = &mut self.renderer {
@@ -350,6 +478,8 @@ impl ApplicationHandler for App {
                 }
                 // Resize all pane terminals and PTYs
                 self.resize_all_panes(size.width, size.height);
+                // Update interaction layout for new window size
+                self.update_interaction_layout(size.width, size.height);
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 log::debug!("Scale factor changed to {scale_factor:.2}");
@@ -393,7 +523,12 @@ impl ApplicationHandler for App {
                     }
                 }
 
+                // Generate and upload overlay quads (dividers + unfocused dimming)
+                let overlay_quads =
+                    self.generate_overlay_quads(width as f32, height as f32);
+
                 if let Some(renderer) = &mut self.renderer {
+                    renderer.update_overlays(&overlay_quads);
                     match renderer.render_panes(&mut pane_descs) {
                         Ok(()) => {}
                         Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
@@ -747,5 +882,114 @@ blink = false
         let (cols, rows) = app.grid_dims_for_rect(&rect);
         // Without renderer, falls back to 80x24
         assert_eq!((cols, rows), (80, 24));
+    }
+
+    // ── PaneInteraction integration ──────────────────────────────────
+
+    #[test]
+    fn app_interaction_starts_idle() {
+        let app = App::new(WindowConfig::default(), Config::default());
+        assert_eq!(
+            *app.interaction().state(),
+            crate::pane::interaction::InteractionState::Idle
+        );
+    }
+
+    #[test]
+    fn app_interaction_layout_updates_after_split() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        // Initially single pane → no dividers
+        app.update_interaction_layout(1280, 720);
+        assert!(app.interaction().dividers().is_empty());
+
+        // Split → one divider
+        app.pane_tree.split_focused(SplitDirection::Vertical);
+        app.update_interaction_layout(1280, 720);
+        assert_eq!(app.interaction().dividers().len(), 1);
+    }
+
+    #[test]
+    fn app_apply_focus_pane_changes_focus() {
+        use crate::pane::interaction::InteractionEffect;
+
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        let first_id = app.pane_tree.focused_pane_id();
+        let second_id = app
+            .pane_tree
+            .split_focused(SplitDirection::Vertical)
+            .unwrap();
+        assert_eq!(app.pane_tree.focused_pane_id(), second_id);
+
+        app.apply_interaction_effect(InteractionEffect::FocusPane(first_id));
+        assert_eq!(app.pane_tree.focused_pane_id(), first_id);
+    }
+
+    #[test]
+    fn app_apply_update_ratio_changes_layout() {
+        use crate::pane::interaction::InteractionEffect;
+
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        app.pane_tree.split_focused(SplitDirection::Vertical);
+        app.update_interaction_layout(1000, 500);
+
+        // Change ratio from default 0.5 to 0.3
+        app.apply_interaction_effect(InteractionEffect::UpdateRatio {
+            split_index: 0,
+            new_ratio: 0.3,
+        });
+
+        // Verify layout changed
+        let layout = app.pane_tree.calculate_layout(1000.0, 500.0);
+        let first_width = layout[0].1.width;
+        assert!((first_width - 300.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn app_overlay_quads_empty_for_single_pane() {
+        let app = App::new(WindowConfig::default(), Config::default());
+        // Without renderer, generate_overlay_quads returns empty
+        let quads = app.generate_overlay_quads(1280.0, 720.0);
+        assert!(quads.is_empty());
+    }
+
+    #[test]
+    fn app_cursor_moved_updates_interaction_state() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        app.pane_tree.split_focused(SplitDirection::Vertical);
+        app.update_interaction_layout(1280, 720);
+
+        // Move cursor to divider position (at x=640 for 50/50 split)
+        let effect = app.interaction.on_cursor_moved(640.0, 360.0);
+        assert!(matches!(
+            effect,
+            crate::pane::interaction::InteractionEffect::SetCursor(
+                crate::pane::interaction::CursorType::EwResize
+            )
+        ));
+        assert!(matches!(
+            app.interaction().state(),
+            crate::pane::interaction::InteractionState::Hovering { .. }
+        ));
+    }
+
+    #[test]
+    fn app_mouse_press_in_pane_produces_focus_effect() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        let first_id = app.pane_tree.focused_pane_id();
+        let _second_id = app
+            .pane_tree
+            .split_focused(SplitDirection::Vertical)
+            .unwrap();
+        app.update_interaction_layout(1280, 720);
+
+        // Move cursor into the left pane (well away from divider)
+        app.interaction.on_cursor_moved(100.0, 360.0);
+
+        let layout = app.pane_tree.calculate_layout(1280.0, 720.0);
+        let effect = app.interaction.on_mouse_press(&layout);
+        assert_eq!(
+            effect,
+            crate::pane::interaction::InteractionEffect::FocusPane(first_id)
+        );
     }
 }

@@ -419,6 +419,52 @@ impl PaneTree {
             self.focused = id;
         }
     }
+
+    /// Get a reference to the root PaneNode.
+    pub fn root(&self) -> &PaneNode {
+        &self.root
+    }
+
+    /// Set focus to a specific pane ID. No-op if the pane doesn't exist.
+    pub fn set_focus(&mut self, pane_id: PaneId) {
+        if self.root.leaf_ids().contains(&pane_id) {
+            self.focused = pane_id;
+        }
+    }
+
+    /// Update the ratio of the split node at the given pre-order split_index.
+    /// Returns true if the split was found and updated.
+    pub fn set_split_ratio_by_index(&mut self, split_index: usize, new_ratio: f32) -> bool {
+        let mut current = 0;
+        Self::set_ratio_recursive(&mut self.root, split_index, new_ratio, &mut current)
+    }
+
+    fn set_ratio_recursive(
+        node: &mut PaneNode,
+        target: usize,
+        new_ratio: f32,
+        current: &mut usize,
+    ) -> bool {
+        match node {
+            PaneNode::Leaf { .. } => false,
+            PaneNode::Split {
+                ratio,
+                first,
+                second,
+                ..
+            } => {
+                if *current == target {
+                    *ratio = new_ratio;
+                    return true;
+                }
+                *current += 1;
+                if Self::set_ratio_recursive(first, target, new_ratio, current) {
+                    return true;
+                }
+                Self::set_ratio_recursive(second, target, new_ratio, current)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -845,5 +891,84 @@ mod tests {
         let mut tree = PaneTree::new();
         tree.zoom_toggle();
         assert!(!tree.is_zoomed());
+    }
+
+    // ── root() accessor ──────────────────────────────────────────────
+
+    #[test]
+    fn root_returns_reference_to_root_node() {
+        let tree = PaneTree::new();
+        assert!(tree.root().is_leaf());
+    }
+
+    #[test]
+    fn root_reflects_splits() {
+        let mut tree = PaneTree::new();
+        tree.split_focused(SplitDirection::Vertical);
+        assert!(!tree.root().is_leaf());
+        assert_eq!(tree.root().leaf_count(), 2);
+    }
+
+    // ── set_focus() ──────────────────────────────────────────────────
+
+    #[test]
+    fn set_focus_changes_focused_pane() {
+        let mut tree = PaneTree::new();
+        let first_id = tree.focused_pane_id();
+        let second_id = tree.split_focused(SplitDirection::Vertical).unwrap();
+        assert_eq!(tree.focused_pane_id(), second_id);
+        tree.set_focus(first_id);
+        assert_eq!(tree.focused_pane_id(), first_id);
+    }
+
+    #[test]
+    fn set_focus_with_invalid_id_is_no_op() {
+        let mut tree = PaneTree::new();
+        let original = tree.focused_pane_id();
+        tree.set_focus(PaneId(99999));
+        assert_eq!(tree.focused_pane_id(), original);
+    }
+
+    // ── set_split_ratio_by_index() ──────────────────────────────────
+
+    #[test]
+    fn set_split_ratio_updates_root_split() {
+        let mut tree = PaneTree::new();
+        tree.split_focused(SplitDirection::Vertical);
+        assert!(tree.set_split_ratio_by_index(0, 0.3));
+        // Verify by checking layout: first pane should be ~30% of width
+        let layout = tree.calculate_layout(1000.0, 500.0);
+        let first_width = layout[0].1.width;
+        assert!((first_width - 300.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn set_split_ratio_updates_nested_split() {
+        let mut tree = PaneTree::new();
+        // [A | B] → [A | [B / C]]
+        tree.split_focused(SplitDirection::Vertical); // index 0
+        tree.split_focused(SplitDirection::Horizontal); // index 1
+        assert!(tree.set_split_ratio_by_index(1, 0.25));
+        // The horizontal split is at index 1
+        let layout = tree.calculate_layout(1000.0, 1000.0);
+        // Right side is split horizontally: top should be ~25% of 1000
+        // Right side starts at x=500, so find the panes with x >= 500
+        let right_panes: Vec<_> = layout.iter().filter(|(_, r)| r.x >= 499.0).collect();
+        assert_eq!(right_panes.len(), 2);
+        let top_height = right_panes.iter().map(|(_, r)| r.height).min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
+        assert!(top_height < 300.0, "top pane should be ~25% of height");
+    }
+
+    #[test]
+    fn set_split_ratio_with_invalid_index_returns_false() {
+        let mut tree = PaneTree::new();
+        tree.split_focused(SplitDirection::Vertical);
+        assert!(!tree.set_split_ratio_by_index(5, 0.3));
+    }
+
+    #[test]
+    fn set_split_ratio_on_single_pane_returns_false() {
+        let mut tree = PaneTree::new();
+        assert!(!tree.set_split_ratio_by_index(0, 0.5));
     }
 }

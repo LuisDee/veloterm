@@ -401,6 +401,11 @@ impl Renderer {
         self.atlas.cell_height
     }
 
+    /// Get a reference to the active theme.
+    pub fn theme(&self) -> &Theme {
+        &self.theme
+    }
+
     /// Get a mutable reference to the per-pane damage map.
     pub fn pane_damage_mut(&mut self) -> &mut PaneDamageMap {
         &mut self.pane_damage
