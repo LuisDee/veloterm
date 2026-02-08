@@ -29,21 +29,21 @@
 
 ## Phase 2: Terminal Padding & Scissor Rect
 
-### Task 2.1: Padding-aware grid dimensions
+### Task 2.1: Padding-aware grid dimensions [x] <!-- a58f7b8 -->
 - [ ] Modify `GridDimensions::from_pane_rect()` to accept padding parameters
 - [ ] Subtract padding from available area before calculating columns/rows: `cols = floor((width - left - right) / cell_width)`
 - [ ] Store padding in `GridDimensions` for downstream use
 - [ ] Update `grid_dims_for_rect()` in `window.rs` to pass padding from config
 - [ ] Write tests: padding reduces cols/rows, zero padding = no change, large padding clamps to min 1 col/1 row
 
-### Task 2.2: Scissor rect rendering with padding offset
+### Task 2.2: Scissor rect rendering with padding offset [x] <!-- a58f7b8 -->
 - [ ] Update pane rendering in `Renderer::render_frame()` to apply padding offset to scissor rects
 - [ ] Each pane's scissor rect is inset by padding: `(x + left, y + top, width - left - right, height - top - bottom)`
 - [ ] Padding area fills with terminal background color (clear color handles this)
 - [ ] Update cursor rendering to operate in content-area coordinates (no padding knowledge needed)
 - [ ] Write tests: scissor rect calculation with various padding values, cursor position unaffected by padding
 
-### Task 2.3: Mouse coordinate translation with padding
+### Task 2.3: Mouse coordinate translation with padding [x] <!-- a58f7b8 -->
 - [ ] Update mouse-to-cell mapping in `window.rs` to subtract padding offset before dividing by cell size
 - [ ] Clicks in the padding area are ignored (no cell hit)
 - [ ] Selection drag respects padding offset
