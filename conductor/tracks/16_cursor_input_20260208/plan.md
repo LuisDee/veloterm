@@ -10,7 +10,7 @@
 - Update `Config::from_toml()` and `Config::diff()`
 - Write tests: defaults, parsing, validation bounds, delta detection
 
-### Task 1.2: Wire cursor position from terminal to CursorState [ ]
+### Task 1.2: Wire cursor position from terminal to CursorState [x] <!-- c2acf64 -->
 - Add `CursorState` field to Renderer (or window state)
 - After each PTY drain in window.rs, extract cursor position from terminal via `Term::cursor()`
 - Update `CursorState` position each frame before rendering
@@ -18,7 +18,7 @@
 - Wire `WindowEvent::Focused(bool)` to `CursorState::set_focused()`
 - Write tests: cursor position updates after terminal state change, focus transitions
 
-### Task 1.3: Render cursor as cell instance overlay [ ]
+### Task 1.3: Render cursor as cell instance overlay [x] <!-- c2acf64 -->
 - In render_frame(), call `CursorState::to_cell_instance()` to generate cursor overlay
 - Inject cursor cell instance into the render pipeline (append to instance buffer)
 - Apply padding offset to cursor position (content-area coordinates)
