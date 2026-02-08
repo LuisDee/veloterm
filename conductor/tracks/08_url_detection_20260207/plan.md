@@ -1,6 +1,6 @@
 # Track 08: URL & Path Detection — Plan
 
-## Phase 1: Link Detection Engine
+## Phase 1: Link Detection Engine [checkpoint: a30aa07]
 
 ### Task 1.1: DetectedLink data model and LinkKind <!-- 307fc6d -->
 - [x] Write tests for DetectedLink creation with Url and FilePath kinds
@@ -32,7 +32,7 @@
 - [x] Implement `LinkDetector` in `src/link/mod.rs`
 
 ### Phase 1 Completion
-- [ ] Phase completion verification and checkpointing
+- [x] Phase completion verification and checkpointing
 
 ## Phase 2: Grid Shader Underline & App Integration
 
