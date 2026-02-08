@@ -26,7 +26,7 @@
 ### Phase 1 Completion
 - [x] Phase completion verification and checkpointing
 
-## Phase 2: Tab Commands & Tab Bar Rendering
+## Phase 2: Tab Commands & Tab Bar Rendering [checkpoint: 86fe2ec]
 
 ### Task 2.1: TabCommand keybinding matching <!-- 5436b8b -->
 - [x] Write tests for Ctrl+Shift+T → NewTab
