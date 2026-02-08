@@ -1,5 +1,12 @@
 // Vi-mode: modal keyboard-driven navigation and selection for terminal scrollback.
 
+/// Direction of the last search.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchDirection {
+    Forward,
+    Backward,
+}
+
 /// The current sub-mode within vi-mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViMode {
@@ -35,6 +42,12 @@ pub struct ViState {
     pub count: Option<usize>,
     /// Whether we're in the middle of a multi-key sequence (e.g., 'g' waiting for second key).
     pub pending_key: Option<char>,
+    /// Whether search input mode is active (collecting query text).
+    pub search_input_active: bool,
+    /// The current search query (being typed, or last executed).
+    pub search_query: String,
+    /// Direction of the current/last search.
+    pub search_direction: SearchDirection,
 }
 
 /// Actions that the vi-mode handler can produce.
@@ -58,6 +71,10 @@ pub enum ViAction {
     NextMatch,
     /// Jump to previous search match.
     PrevMatch,
+    /// Search query confirmed (Enter pressed in search input mode).
+    SearchExecute,
+    /// Search input cancelled (Escape pressed in search input mode).
+    SearchCancel,
     /// No action (key consumed but nothing to do).
     None,
 }
@@ -93,6 +110,9 @@ impl ViState {
             anchor: None,
             count: None,
             pending_key: None,
+            search_input_active: false,
+            search_query: String::new(),
+            search_direction: SearchDirection::Forward,
         }
     }
 
@@ -121,6 +141,11 @@ impl ViState {
     /// Process a key input and return the resulting action.
     /// This handles mode transitions, count prefixes, and motion commands.
     pub fn process_key(&mut self, ch: char, ctrl: bool) -> ViAction {
+        // Handle search input mode first
+        if self.search_input_active {
+            return self.process_search_input(ch, ctrl);
+        }
+
         // Handle pending multi-key sequences (e.g., 'g' prefix)
         if let Some(pending) = self.pending_key.take() {
             return self.process_pending(pending, ch);
@@ -178,8 +203,18 @@ impl ViState {
                 self.anchor = Some(self.cursor);
                 ViAction::EnterVisual(ViMode::VisualLine)
             }
-            '/' => ViAction::SearchForward,
-            '?' => ViAction::SearchBackward,
+            '/' => {
+                self.search_input_active = true;
+                self.search_query.clear();
+                self.search_direction = SearchDirection::Forward;
+                ViAction::SearchForward
+            }
+            '?' => {
+                self.search_input_active = true;
+                self.search_query.clear();
+                self.search_direction = SearchDirection::Backward;
+                ViAction::SearchBackward
+            }
             'n' => ViAction::NextMatch,
             'N' => ViAction::PrevMatch,
             '\x1b' => ViAction::ExitViMode, // Escape
@@ -240,8 +275,18 @@ impl ViState {
                 }
             }
             // Search
-            '/' => ViAction::SearchForward,
-            '?' => ViAction::SearchBackward,
+            '/' => {
+                self.search_input_active = true;
+                self.search_query.clear();
+                self.search_direction = SearchDirection::Forward;
+                ViAction::SearchForward
+            }
+            '?' => {
+                self.search_input_active = true;
+                self.search_query.clear();
+                self.search_direction = SearchDirection::Backward;
+                ViAction::SearchBackward
+            }
             'n' => ViAction::NextMatch,
             'N' => ViAction::PrevMatch,
             // Escape → back to Normal
@@ -302,6 +347,56 @@ impl ViState {
             ViMode::Visual => "-- VISUAL --",
             ViMode::VisualLine => "-- VISUAL LINE --",
             ViMode::VisualBlock => "-- VISUAL BLOCK --",
+        }
+    }
+
+    /// Whether search input is currently active (collecting query text).
+    pub fn is_search_active(&self) -> bool {
+        self.search_input_active
+    }
+
+    /// Get the search prompt text for display (e.g., "/ hello" or "? hello").
+    pub fn search_prompt(&self) -> String {
+        let prefix = match self.search_direction {
+            SearchDirection::Forward => "/",
+            SearchDirection::Backward => "?",
+        };
+        format!("{} {}", prefix, self.search_query)
+    }
+
+    /// Move the vi cursor to a match position.
+    pub fn move_to_match(&mut self, row: usize, col: usize) {
+        self.cursor.row = row;
+        self.cursor.col = col;
+    }
+
+    /// Process a key during search input mode.
+    fn process_search_input(&mut self, ch: char, ctrl: bool) -> ViAction {
+        if ctrl {
+            return ViAction::None;
+        }
+        match ch {
+            '\x1b' => {
+                // Escape: cancel search
+                self.search_input_active = false;
+                self.search_query.clear();
+                ViAction::SearchCancel
+            }
+            '\r' | '\n' => {
+                // Enter: confirm search
+                self.search_input_active = false;
+                ViAction::SearchExecute
+            }
+            '\x08' | '\x7f' => {
+                // Backspace: remove last character
+                self.search_query.pop();
+                ViAction::None
+            }
+            _ => {
+                // Append character to query
+                self.search_query.push(ch);
+                ViAction::None
+            }
         }
     }
 
@@ -1528,5 +1623,158 @@ mod tests {
         let cells = make_cells(&["hello"], 20);
         let state = ViState::new(0, 0);
         assert_eq!(state.yank_text(&cells, 20), None);
+    }
+
+    // ── Search input mode ─────────────────────────────────────────────
+
+    #[test]
+    fn slash_activates_search_input_forward() {
+        let mut state = ViState::new(5, 3);
+        let action = state.process_key('/', false);
+        assert_eq!(action, ViAction::SearchForward);
+        assert!(state.is_search_active());
+        assert_eq!(state.search_direction, SearchDirection::Forward);
+        assert_eq!(state.search_query, "");
+    }
+
+    #[test]
+    fn question_mark_activates_search_input_backward() {
+        let mut state = ViState::new(5, 3);
+        let action = state.process_key('?', false);
+        assert_eq!(action, ViAction::SearchBackward);
+        assert!(state.is_search_active());
+        assert_eq!(state.search_direction, SearchDirection::Backward);
+    }
+
+    #[test]
+    fn search_input_collects_characters() {
+        let mut state = ViState::new(5, 3);
+        state.process_key('/', false);
+        state.process_key('h', false);
+        state.process_key('e', false);
+        state.process_key('l', false);
+        assert_eq!(state.search_query, "hel");
+        assert!(state.is_search_active());
+    }
+
+    #[test]
+    fn search_input_backspace_removes_char() {
+        let mut state = ViState::new(5, 3);
+        state.process_key('/', false);
+        state.process_key('a', false);
+        state.process_key('b', false);
+        assert_eq!(state.search_query, "ab");
+        state.process_key('\x7f', false); // Backspace
+        assert_eq!(state.search_query, "a");
+    }
+
+    #[test]
+    fn search_input_enter_confirms() {
+        let mut state = ViState::new(5, 3);
+        state.process_key('/', false);
+        state.process_key('f', false);
+        state.process_key('o', false);
+        state.process_key('o', false);
+        let action = state.process_key('\r', false); // Enter
+        assert_eq!(action, ViAction::SearchExecute);
+        assert!(!state.is_search_active());
+        assert_eq!(state.search_query, "foo"); // query preserved after confirm
+    }
+
+    #[test]
+    fn search_input_escape_cancels() {
+        let mut state = ViState::new(5, 3);
+        state.process_key('/', false);
+        state.process_key('f', false);
+        state.process_key('o', false);
+        let action = state.process_key('\x1b', false); // Escape
+        assert_eq!(action, ViAction::SearchCancel);
+        assert!(!state.is_search_active());
+        assert_eq!(state.search_query, ""); // query cleared on cancel
+    }
+
+    #[test]
+    fn search_prompt_forward() {
+        let mut state = ViState::new(5, 3);
+        state.process_key('/', false);
+        state.process_key('h', false);
+        state.process_key('i', false);
+        assert_eq!(state.search_prompt(), "/ hi");
+    }
+
+    #[test]
+    fn search_prompt_backward() {
+        let mut state = ViState::new(5, 3);
+        state.process_key('?', false);
+        state.process_key('x', false);
+        assert_eq!(state.search_prompt(), "? x");
+    }
+
+    #[test]
+    fn search_input_ignores_ctrl_keys() {
+        let mut state = ViState::new(5, 3);
+        state.process_key('/', false);
+        state.process_key('a', false);
+        let action = state.process_key('c', true); // Ctrl+C during search
+        assert_eq!(action, ViAction::None);
+        assert_eq!(state.search_query, "a"); // unchanged
+        assert!(state.is_search_active());
+    }
+
+    #[test]
+    fn move_to_match_updates_cursor() {
+        let mut state = ViState::new(5, 3);
+        state.move_to_match(10, 7);
+        assert_eq!(state.cursor, CursorPos { row: 10, col: 7 });
+    }
+
+    #[test]
+    fn search_from_visual_mode() {
+        let mut state = ViState::new(5, 3);
+        state.process_key('v', false); // enter Visual
+        let action = state.process_key('/', false);
+        assert_eq!(action, ViAction::SearchForward);
+        assert!(state.is_search_active());
+        assert_eq!(state.mode, ViMode::Visual); // still in visual mode
+    }
+
+    #[test]
+    fn n_after_search_returns_next_match() {
+        let mut state = ViState::new(5, 3);
+        state.process_key('/', false);
+        state.process_key('x', false);
+        state.process_key('\r', false); // confirm search
+        let action = state.process_key('n', false);
+        assert_eq!(action, ViAction::NextMatch);
+        assert_eq!(state.search_direction, SearchDirection::Forward);
+    }
+
+    #[test]
+    fn uppercase_n_after_search_returns_prev_match() {
+        let mut state = ViState::new(5, 3);
+        state.process_key('?', false);
+        state.process_key('y', false);
+        state.process_key('\r', false); // confirm search
+        let action = state.process_key('N', false);
+        assert_eq!(action, ViAction::PrevMatch);
+        assert_eq!(state.search_direction, SearchDirection::Backward);
+    }
+
+    #[test]
+    fn new_search_clears_previous_query() {
+        let mut state = ViState::new(5, 3);
+        state.process_key('/', false);
+        state.process_key('o', false);
+        state.process_key('l', false);
+        state.process_key('d', false);
+        state.process_key('\r', false); // confirm
+        assert_eq!(state.search_query, "old");
+        state.process_key('/', false); // new search
+        assert_eq!(state.search_query, ""); // cleared
+        state.process_key('n', false);
+        state.process_key('e', false);
+        state.process_key('w', false);
+        state.process_key('\r', false);
+        assert_eq!(state.search_query, "new");
     }
 }
