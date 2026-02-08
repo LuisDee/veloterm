@@ -71,7 +71,7 @@
 - [ ] Invalid font names: log warning, fall back to next in chain
 - [ ] Write tests: config delta detection for font and padding changes
 
-### Task 3.4: Final integration and validation
+### Task 3.4: Final integration and validation [x] <!-- a4f91fc -->
 - [ ] Run full test suite — all existing + new tests pass
 - [ ] Build and run application — verify JetBrains Mono renders at 13px with 1.5x line-height
 - [ ] Verify 12px padding visible on all sides (text not flush against pane edges)
