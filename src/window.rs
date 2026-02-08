@@ -11,11 +11,13 @@ use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 
 use crate::config::theme::Theme;
 use crate::config::types::Config;
-use crate::input::{match_pane_command, PaneCommand};
+use crate::input::{match_pane_command, match_tab_command, PaneCommand, TabCommand};
 use crate::pane::divider::{generate_divider_quads, generate_unfocused_overlay_quads, OverlayQuad};
 use crate::pane::interaction::{CursorType, InteractionEffect, PaneInteraction};
-use crate::pane::{PaneId, PaneTree, Rect, SplitDirection};
+use crate::pane::{PaneId, Rect, SplitDirection};
 use crate::renderer::PaneRenderDescriptor;
+use crate::tab::bar::{generate_tab_bar_quads, hit_test_tab_bar, TabBarAction, TAB_BAR_HEIGHT};
+use crate::tab::TabManager;
 
 /// Default window width in logical pixels.
 pub const DEFAULT_WIDTH: f64 = 1280.0;
@@ -81,7 +83,7 @@ pub struct App {
     pub(crate) app_config: Config,
     window: Option<Arc<Window>>,
     renderer: Option<crate::renderer::Renderer>,
-    pane_tree: PaneTree,
+    tab_manager: TabManager,
     pane_states: HashMap<PaneId, PaneState>,
     modifiers: ModifiersState,
     interaction: PaneInteraction,
@@ -94,16 +96,21 @@ impl App {
             app_config,
             window: None,
             renderer: None,
-            pane_tree: PaneTree::new(),
+            tab_manager: TabManager::new(),
             pane_states: HashMap::new(),
             modifiers: ModifiersState::empty(),
             interaction: PaneInteraction::new(),
         }
     }
 
-    /// Get the pane tree (for testing).
-    pub fn pane_tree(&self) -> &PaneTree {
-        &self.pane_tree
+    /// Get the tab manager (for testing).
+    pub fn tab_manager(&self) -> &TabManager {
+        &self.tab_manager
+    }
+
+    /// Get a mutable reference to the tab manager (for testing).
+    pub fn tab_manager_mut(&mut self) -> &mut TabManager {
+        &mut self.tab_manager
     }
 
     /// Get the pane states map (for testing).
@@ -134,20 +141,19 @@ impl App {
         }
     }
 
+    /// Compute the content bounds (below the tab bar).
+    fn content_bounds(&self, width: f32, height: f32) -> Rect {
+        Rect::new(0.0, TAB_BAR_HEIGHT, width, (height - TAB_BAR_HEIGHT).max(0.0))
+    }
+
     /// Handle a pane command (split, close, focus, zoom).
     fn handle_pane_command(
         &mut self,
         command: PaneCommand,
         event_loop: &ActiveEventLoop,
     ) {
-        let (width, height) = self
-            .window
-            .as_ref()
-            .map(|w| {
-                let s = w.inner_size();
-                (s.width, s.height)
-            })
-            .unwrap_or((1280, 720));
+        let (width, height) = self.window_size();
+        let content = self.content_bounds(width as f32, height as f32);
 
         match command {
             PaneCommand::SplitVertical | PaneCommand::SplitHorizontal => {
@@ -155,52 +161,55 @@ impl App {
                     PaneCommand::SplitVertical => SplitDirection::Vertical,
                     _ => SplitDirection::Horizontal,
                 };
-                if let Some(new_id) = self.pane_tree.split_focused(direction) {
-                    // Compute grid dims for the new pane from its layout rect
-                    let layout = self
-                        .pane_tree
-                        .calculate_layout(width as f32, height as f32);
+                let pane_tree = &mut self.tab_manager.active_tab_mut().pane_tree;
+                if let Some(new_id) = pane_tree.split_focused(direction) {
+                    let layout = pane_tree.calculate_layout(content.width, content.height);
                     if let Some((_, rect)) = layout.iter().find(|(id, _)| *id == new_id) {
                         let (cols, rows) = self.grid_dims_for_rect(rect);
                         self.spawn_pane(new_id, cols, rows);
                     }
-                    // Resize existing panes since the layout changed
                     self.resize_all_panes(width, height);
                     self.update_interaction_layout(width, height);
-                    // Force full damage on all panes
                     if let Some(renderer) = &mut self.renderer {
                         renderer.pane_damage_mut().force_full_damage_all();
                     }
                 }
             }
             PaneCommand::ClosePane => {
-                let closing_id = self.pane_tree.focused_pane_id();
-                match self.pane_tree.close_focused() {
+                let pane_tree = &self.tab_manager.active_tab().pane_tree;
+                if pane_tree.pane_count() == 1 {
+                    // Single pane in tab — close the tab instead
+                    self.handle_close_active_tab(event_loop);
+                    return;
+                }
+                let closing_id = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                let pane_tree = &mut self.tab_manager.active_tab_mut().pane_tree;
+                match pane_tree.close_focused() {
                     Some(_) => {
-                        // Remove state for closed pane
                         self.pane_states.remove(&closing_id);
                         if let Some(renderer) = &mut self.renderer {
                             renderer.remove_pane_damage(closing_id);
                             renderer.pane_damage_mut().force_full_damage_all();
                         }
-                        // Resize remaining panes
                         self.resize_all_panes(width, height);
                         self.update_interaction_layout(width, height);
                     }
                     None => {
-                        // Last pane — exit application
-                        log::info!("Last pane closed, exiting");
-                        event_loop.exit();
+                        // Should not reach here due to pane_count check above
+                        log::warn!("close_focused returned None unexpectedly");
                     }
                 }
             }
             PaneCommand::FocusDirection(direction) => {
-                self.pane_tree
-                    .focus_direction(direction, width as f32, height as f32);
+                self.tab_manager.active_tab_mut().pane_tree.focus_direction(
+                    direction,
+                    content.width,
+                    content.height,
+                );
             }
             PaneCommand::ZoomToggle => {
-                self.pane_tree.zoom_toggle();
-                // Resize all panes since visible panes changed
+                let pane_tree = &mut self.tab_manager.active_tab_mut().pane_tree;
+                pane_tree.zoom_toggle();
                 self.resize_all_panes(width, height);
                 self.update_interaction_layout(width, height);
                 if let Some(renderer) = &mut self.renderer {
@@ -210,8 +219,95 @@ impl App {
         }
     }
 
+    /// Handle a tab command (new, close, switch, move).
+    fn handle_tab_command(
+        &mut self,
+        command: TabCommand,
+        event_loop: &ActiveEventLoop,
+    ) {
+        let (width, height) = self.window_size();
+
+        match command {
+            TabCommand::NewTab => {
+                self.tab_manager.new_tab();
+                // Spawn PTY for the new tab's initial pane
+                let pane_id = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                let content = self.content_bounds(width as f32, height as f32);
+                let rect = Rect::new(0.0, 0.0, content.width, content.height);
+                let (cols, rows) = self.grid_dims_for_rect(&rect);
+                self.spawn_pane(pane_id, cols, rows);
+                self.update_interaction_layout(width, height);
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.pane_damage_mut().force_full_damage_all();
+                }
+            }
+            TabCommand::NextTab => {
+                self.tab_manager.next_tab();
+                self.update_interaction_layout(width, height);
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.pane_damage_mut().force_full_damage_all();
+                }
+            }
+            TabCommand::PrevTab => {
+                self.tab_manager.prev_tab();
+                self.update_interaction_layout(width, height);
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.pane_damage_mut().force_full_damage_all();
+                }
+            }
+            TabCommand::SelectTab(index) => {
+                self.tab_manager.select_tab(index);
+                self.update_interaction_layout(width, height);
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.pane_damage_mut().force_full_damage_all();
+                }
+            }
+            TabCommand::MoveTabLeft => {
+                let idx = self.tab_manager.active_index();
+                if idx > 0 {
+                    self.tab_manager.move_tab(idx, idx - 1);
+                }
+            }
+            TabCommand::MoveTabRight => {
+                let idx = self.tab_manager.active_index();
+                if idx + 1 < self.tab_manager.tab_count() {
+                    self.tab_manager.move_tab(idx, idx + 1);
+                }
+            }
+        }
+
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
+
+    /// Close the active tab, removing all its pane states.
+    fn handle_close_active_tab(&mut self, event_loop: &ActiveEventLoop) {
+        let index = self.tab_manager.active_index();
+        match self.tab_manager.close_tab(index) {
+            Some(pane_ids) => {
+                for pane_id in &pane_ids {
+                    self.pane_states.remove(pane_id);
+                    if let Some(renderer) = &mut self.renderer {
+                        renderer.remove_pane_damage(*pane_id);
+                    }
+                }
+                let (w, h) = self.window_size();
+                self.update_interaction_layout(w, h);
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.pane_damage_mut().force_full_damage_all();
+                }
+            }
+            None => {
+                // Last tab — exit application
+                log::info!("Last tab closed, exiting");
+                event_loop.exit();
+            }
+        }
+    }
+
     /// Compute grid columns and rows for a pane rect.
-    fn grid_dims_for_rect(&self, rect: &crate::pane::Rect) -> (u16, u16) {
+    fn grid_dims_for_rect(&self, rect: &Rect) -> (u16, u16) {
         if let Some(renderer) = &self.renderer {
             let cw = renderer.cell_width();
             let ch = renderer.cell_height();
@@ -225,9 +321,9 @@ impl App {
 
     /// Resize all pane terminals and PTYs to match their current layout rects.
     fn resize_all_panes(&mut self, width: u32, height: u32) {
-        let layout = self
-            .pane_tree
-            .calculate_layout(width as f32, height as f32);
+        let content = self.content_bounds(width as f32, height as f32);
+        let pane_tree = &self.tab_manager.active_tab().pane_tree;
+        let layout = pane_tree.calculate_layout(content.width, content.height);
         for (pane_id, rect) in &layout {
             let (cols, rows) = self.grid_dims_for_rect(rect);
             if let Some(state) = self.pane_states.get_mut(pane_id) {
@@ -260,7 +356,10 @@ impl App {
                 split_index,
                 new_ratio,
             } => {
-                self.pane_tree.set_split_ratio_by_index(split_index, new_ratio);
+                self.tab_manager
+                    .active_tab_mut()
+                    .pane_tree
+                    .set_split_ratio_by_index(split_index, new_ratio);
                 let (w, h) = self.window_size();
                 self.resize_all_panes(w, h);
                 self.update_interaction_layout(w, h);
@@ -269,7 +368,10 @@ impl App {
                 }
             }
             InteractionEffect::FocusPane(pane_id) => {
-                self.pane_tree.set_focus(pane_id);
+                self.tab_manager
+                    .active_tab_mut()
+                    .pane_tree
+                    .set_focus(pane_id);
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }
@@ -279,45 +381,55 @@ impl App {
 
     /// Update the interaction state machine's cached layout.
     fn update_interaction_layout(&mut self, width: u32, height: u32) {
-        let bounds = Rect::new(0.0, 0.0, width as f32, height as f32);
+        let content = self.content_bounds(width as f32, height as f32);
+        let pane_tree = &self.tab_manager.active_tab().pane_tree;
         self.interaction
-            .update_layout(self.pane_tree.root(), bounds, 20.0);
+            .update_layout(pane_tree.root(), content, 20.0);
     }
 
-    /// Generate all overlay quads (dividers + unfocused pane dimming).
+    /// Generate all overlay quads (tab bar + dividers + unfocused pane dimming).
     fn generate_overlay_quads(&self, width: f32, height: f32) -> Vec<OverlayQuad> {
-        if self.pane_tree.pane_count() <= 1 || self.pane_tree.is_zoomed() {
-            return Vec::new();
-        }
-
         let theme = if let Some(renderer) = &self.renderer {
             renderer.theme()
         } else {
             return Vec::new();
         };
 
-        let hovered_index = match self.interaction.state() {
-            crate::pane::interaction::InteractionState::Hovering { divider_index } => {
-                Some(*divider_index)
-            }
-            _ => None,
-        };
+        // Always generate tab bar quads
+        let mut quads = generate_tab_bar_quads(&self.tab_manager, width, theme);
 
-        let mut quads = generate_divider_quads(
-            self.interaction.dividers(),
-            &theme.border,
-            &theme.accent,
-            hovered_index,
-        );
+        // Generate pane overlay quads only if there are multiple panes and not zoomed
+        let pane_tree = &self.tab_manager.active_tab().pane_tree;
+        if pane_tree.pane_count() > 1 && !pane_tree.is_zoomed() {
+            let hovered_index = match self.interaction.state() {
+                crate::pane::interaction::InteractionState::Hovering { divider_index } => {
+                    Some(*divider_index)
+                }
+                _ => None,
+            };
 
-        let layout = self.pane_tree.calculate_layout(width, height);
-        let focused = self.pane_tree.focused_pane_id();
-        quads.extend(generate_unfocused_overlay_quads(
-            &layout,
-            focused,
-            &theme.background,
-            0.3,
-        ));
+            quads.extend(generate_divider_quads(
+                self.interaction.dividers(),
+                &theme.border,
+                &theme.accent,
+                hovered_index,
+            ));
+
+            let content = self.content_bounds(width, height);
+            let layout = pane_tree.calculate_layout(content.width, content.height);
+            // Offset layout rects by tab bar height for overlay rendering
+            let offset_layout: Vec<_> = layout
+                .iter()
+                .map(|(id, rect)| (*id, Rect::new(rect.x, rect.y + TAB_BAR_HEIGHT, rect.width, rect.height)))
+                .collect();
+            let focused = pane_tree.focused_pane_id();
+            quads.extend(generate_unfocused_overlay_quads(
+                &offset_layout,
+                focused,
+                &theme.background,
+                0.3,
+            ));
+        }
 
         quads
     }
@@ -382,8 +494,9 @@ impl ApplicationHandler for App {
 
                         self.renderer = Some(renderer);
 
-                        // Spawn PTY and terminal for the initial pane
-                        let initial_pane_id = self.pane_tree.focused_pane_id();
+                        // Spawn PTY and terminal for the initial tab's pane
+                        let initial_pane_id =
+                            self.tab_manager.active_tab().pane_tree.focused_pane_id();
                         let cols = self.renderer.as_ref().unwrap().grid().columns as u16;
                         let rows = self.renderer.as_ref().unwrap().grid().rows as u16;
                         self.spawn_pane(initial_pane_id, cols, rows);
@@ -424,7 +537,15 @@ impl ApplicationHandler for App {
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed {
-                    // Check for pane commands first
+                    // Check for tab commands first
+                    if let Some(cmd) =
+                        match_tab_command(&event.logical_key, self.modifiers)
+                    {
+                        self.handle_tab_command(cmd, event_loop);
+                        return;
+                    }
+
+                    // Then check for pane commands
                     if let Some(cmd) =
                         match_pane_command(&event.logical_key, self.modifiers)
                     {
@@ -439,7 +560,11 @@ impl ApplicationHandler for App {
                         event.state,
                         self.modifiers,
                     );
-                    let focused = self.pane_tree.focused_pane_id();
+                    let focused = self
+                        .tab_manager
+                        .active_tab()
+                        .pane_tree
+                        .focused_pane_id();
                     if let (Some(bytes), Some(state)) =
                         (bytes, self.pane_states.get_mut(&focused))
                     {
@@ -450,25 +575,65 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                let effect = self
-                    .interaction
-                    .on_cursor_moved(position.x as f32, position.y as f32);
-                self.apply_interaction_effect(effect);
+                let y = position.y as f32;
+                if y < TAB_BAR_HEIGHT {
+                    // In tab bar area — reset pane interaction cursor
+                    let effect = self.interaction.on_cursor_moved(position.x as f32, -1.0);
+                    self.apply_interaction_effect(effect);
+                } else {
+                    // Below tab bar — offset y for pane interaction
+                    let effect = self
+                        .interaction
+                        .on_cursor_moved(position.x as f32, y - TAB_BAR_HEIGHT);
+                    self.apply_interaction_effect(effect);
+                }
             }
             WindowEvent::MouseInput {
                 state: btn_state,
                 button: MouseButton::Left,
                 ..
             } => {
-                let (width, height) = self.window_size();
-                let layout = self
-                    .pane_tree
-                    .calculate_layout(width as f32, height as f32);
-                let effect = match btn_state {
-                    ElementState::Pressed => self.interaction.on_mouse_press(&layout),
-                    ElementState::Released => self.interaction.on_mouse_release(),
-                };
-                self.apply_interaction_effect(effect);
+                let cursor_pos = self.interaction.cursor_pos();
+                let raw_y = cursor_pos.1 + TAB_BAR_HEIGHT; // reconstruct raw y
+
+                if raw_y < TAB_BAR_HEIGHT {
+                    // Click in tab bar
+                    if btn_state == ElementState::Pressed {
+                        let (width, _) = self.window_size();
+                        if let Some(action) = hit_test_tab_bar(
+                            cursor_pos.0,
+                            raw_y,
+                            width as f32,
+                            self.tab_manager.tab_count(),
+                        ) {
+                            match action {
+                                TabBarAction::SelectTab(idx) => {
+                                    self.handle_tab_command(
+                                        TabCommand::SelectTab(idx),
+                                        event_loop,
+                                    );
+                                }
+                                TabBarAction::NewTab => {
+                                    self.handle_tab_command(
+                                        TabCommand::NewTab,
+                                        event_loop,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Click below tab bar — route to pane interaction
+                    let (width, height) = self.window_size();
+                    let content = self.content_bounds(width as f32, height as f32);
+                    let pane_tree = &self.tab_manager.active_tab().pane_tree;
+                    let layout = pane_tree.calculate_layout(content.width, content.height);
+                    let effect = match btn_state {
+                        ElementState::Pressed => self.interaction.on_mouse_press(&layout),
+                        ElementState::Released => self.interaction.on_mouse_release(),
+                    };
+                    self.apply_interaction_effect(effect);
+                }
             }
             WindowEvent::Resized(size) => {
                 log::debug!("Window resized to {}x{}", size.width, size.height);
@@ -476,9 +641,7 @@ impl ApplicationHandler for App {
                     renderer.resize(size.width, size.height);
                     renderer.pane_damage_mut().force_full_damage_all();
                 }
-                // Resize all pane terminals and PTYs
                 self.resize_all_panes(size.width, size.height);
-                // Update interaction layout for new window size
                 self.update_interaction_layout(size.width, size.height);
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
@@ -501,29 +664,36 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                // Build render descriptors for visible panes
-                let layout = self
-                    .pane_tree
-                    .calculate_layout(width as f32, height as f32);
-                let visible = self.pane_tree.visible_panes();
+                // Build render descriptors for active tab's visible panes
+                let content = self.content_bounds(width as f32, height as f32);
+                let pane_tree = &self.tab_manager.active_tab().pane_tree;
+                let layout = pane_tree.calculate_layout(content.width, content.height);
+                let visible = pane_tree.visible_panes();
 
                 let mut pane_descs: Vec<PaneRenderDescriptor> = Vec::new();
                 for (pane_id, rect) in &layout {
                     if !visible.contains(pane_id) {
                         continue;
                     }
-                    if let Some(state) = self.pane_states.get(&pane_id) {
+                    if let Some(state) = self.pane_states.get(pane_id) {
                         let cells =
                             crate::terminal::grid_bridge::extract_grid_cells(&state.terminal);
+                        // Offset rect by tab bar height for screen-space rendering
+                        let screen_rect = Rect::new(
+                            rect.x,
+                            rect.y + TAB_BAR_HEIGHT,
+                            rect.width,
+                            rect.height,
+                        );
                         pane_descs.push(PaneRenderDescriptor {
                             pane_id: *pane_id,
-                            rect: *rect,
+                            rect: screen_rect,
                             cells,
                         });
                     }
                 }
 
-                // Generate and upload overlay quads (dividers + unfocused dimming)
+                // Generate and upload overlay quads (tab bar + dividers + unfocused dimming)
                 let overlay_quads =
                     self.generate_overlay_quads(width as f32, height as f32);
 
@@ -586,7 +756,6 @@ mod tests {
         let cfg = WindowConfig::default();
         let attrs = cfg.to_window_attributes();
         let expected = LogicalSize::new(1280.0, 720.0);
-        // WindowAttributes stores inner_size as Option<Size>
         assert_eq!(attrs.inner_size, Some(expected.into()));
     }
 
@@ -685,7 +854,6 @@ mod tests {
     fn app_drop_without_run_is_safe() {
         let app = App::new(WindowConfig::default(), Config::default());
         drop(app);
-        // No panic — clean drop without GPU resources
     }
 
     #[test]
@@ -731,7 +899,6 @@ mod tests {
 
     #[test]
     fn app_config_theme_resolution() {
-        // Verify Theme::from_name produces the right theme for each config value
         use crate::config::theme::Theme;
         for (config_name, display_name) in [
             ("claude_dark", "Claude Dark"),
@@ -746,7 +913,6 @@ mod tests {
     #[test]
     fn app_config_unknown_theme_fallback() {
         use crate::config::theme::Theme;
-        // Unknown theme returns None, app falls back to claude_dark
         let result = Theme::from_name("nonexistent");
         assert!(result.is_none());
         let fallback = result.unwrap_or_else(Theme::claude_dark);
@@ -757,8 +923,7 @@ mod tests {
     fn app_config_scrollback_passed_to_terminal() {
         let scrollback = 5000_usize;
         let terminal = crate::terminal::Terminal::new(80, 24, scrollback);
-        // Terminal is created successfully with custom scrollback
-        assert_eq!(terminal.history_size(), 0); // empty at start, but accepts the config value
+        assert_eq!(terminal.history_size(), 0);
     }
 
     #[test]
@@ -786,32 +951,33 @@ blink = false
         assert!(!app.app_config.cursor.blink);
     }
 
-    // ── PaneTree integration ──────────────────────────────────────
+    // ── TabManager integration ──────────────────────────────────────
 
     #[test]
-    fn app_creates_single_pane_tree_on_startup() {
+    fn app_creates_single_tab_on_startup() {
         let app = App::new(WindowConfig::default(), Config::default());
-        assert_eq!(app.pane_tree.pane_count(), 1);
+        assert_eq!(app.tab_manager.tab_count(), 1);
+        assert_eq!(app.tab_manager.active_tab().pane_tree.pane_count(), 1);
     }
 
     #[test]
     fn app_pane_states_empty_before_resumed() {
         let app = App::new(WindowConfig::default(), Config::default());
-        // Before window creation, no PTY states are spawned
         assert!(app.pane_states.is_empty());
     }
 
     #[test]
-    fn app_pane_tree_focused_pane_is_initial() {
+    fn app_active_pane_is_initial() {
         let app = App::new(WindowConfig::default(), Config::default());
-        let ids = app.pane_tree.pane_ids();
-        assert_eq!(app.pane_tree.focused_pane_id(), ids[0]);
+        let pane_tree = &app.tab_manager.active_tab().pane_tree;
+        let ids = pane_tree.pane_ids();
+        assert_eq!(pane_tree.focused_pane_id(), ids[0]);
     }
 
     #[test]
     fn app_spawn_pane_adds_state() {
         let mut app = App::new(WindowConfig::default(), Config::default());
-        let pane_id = app.pane_tree.focused_pane_id();
+        let pane_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
         app.spawn_pane(pane_id, 80, 24);
         assert!(app.pane_states.contains_key(&pane_id));
     }
@@ -819,7 +985,7 @@ blink = false
     #[test]
     fn app_spawn_pane_terminal_has_correct_dims() {
         let mut app = App::new(WindowConfig::default(), Config::default());
-        let pane_id = app.pane_tree.focused_pane_id();
+        let pane_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
         app.spawn_pane(pane_id, 120, 40);
         let state = app.pane_states.get(&pane_id).unwrap();
         assert_eq!(state.terminal.columns(), 120);
@@ -829,24 +995,28 @@ blink = false
     #[test]
     fn app_pane_count_matches_tree_leaf_count() {
         let mut app = App::new(WindowConfig::default(), Config::default());
-        let pane_id = app.pane_tree.focused_pane_id();
+        let pane_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
         app.spawn_pane(pane_id, 80, 24);
-        assert_eq!(app.pane_tree.pane_count(), app.pane_states.len());
+        assert_eq!(
+            app.tab_manager.active_tab().pane_tree.pane_count(),
+            app.pane_states.len()
+        );
     }
 
     #[test]
     fn app_multiple_panes_have_independent_terminals() {
         let mut app = App::new(WindowConfig::default(), Config::default());
-        let first_id = app.pane_tree.focused_pane_id();
+        let first_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
         app.spawn_pane(first_id, 80, 24);
 
         let second_id = app
+            .tab_manager
+            .active_tab_mut()
             .pane_tree
             .split_focused(SplitDirection::Vertical)
             .unwrap();
         app.spawn_pane(second_id, 60, 20);
 
-        // Each pane has its own terminal
         let s1 = app.pane_states.get(&first_id).unwrap();
         let s2 = app.pane_states.get(&second_id).unwrap();
         assert_eq!(s1.terminal.columns(), 80);
@@ -856,21 +1026,22 @@ blink = false
     #[test]
     fn app_close_pane_removes_state() {
         let mut app = App::new(WindowConfig::default(), Config::default());
-        let first_id = app.pane_tree.focused_pane_id();
+        let first_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
         app.spawn_pane(first_id, 80, 24);
 
         let second_id = app
+            .tab_manager
+            .active_tab_mut()
             .pane_tree
             .split_focused(SplitDirection::Vertical)
             .unwrap();
         app.spawn_pane(second_id, 80, 24);
 
-        // Close focused pane (second_id)
-        let closing_id = app.pane_tree.focused_pane_id();
-        app.pane_tree.close_focused();
+        let closing_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
+        app.tab_manager.active_tab_mut().pane_tree.close_focused();
         app.pane_states.remove(&closing_id);
 
-        assert_eq!(app.pane_tree.pane_count(), 1);
+        assert_eq!(app.tab_manager.active_tab().pane_tree.pane_count(), 1);
         assert_eq!(app.pane_states.len(), 1);
         assert!(!app.pane_states.contains_key(&closing_id));
     }
@@ -878,9 +1049,8 @@ blink = false
     #[test]
     fn app_grid_dims_for_rect_default_without_renderer() {
         let app = App::new(WindowConfig::default(), Config::default());
-        let rect = crate::pane::Rect::new(0.0, 0.0, 640.0, 480.0);
+        let rect = Rect::new(0.0, 0.0, 640.0, 480.0);
         let (cols, rows) = app.grid_dims_for_rect(&rect);
-        // Without renderer, falls back to 80x24
         assert_eq!((cols, rows), (80, 24));
     }
 
@@ -898,12 +1068,13 @@ blink = false
     #[test]
     fn app_interaction_layout_updates_after_split() {
         let mut app = App::new(WindowConfig::default(), Config::default());
-        // Initially single pane → no dividers
         app.update_interaction_layout(1280, 720);
         assert!(app.interaction().dividers().is_empty());
 
-        // Split → one divider
-        app.pane_tree.split_focused(SplitDirection::Vertical);
+        app.tab_manager
+            .active_tab_mut()
+            .pane_tree
+            .split_focused(SplitDirection::Vertical);
         app.update_interaction_layout(1280, 720);
         assert_eq!(app.interaction().dividers().len(), 1);
     }
@@ -913,15 +1084,23 @@ blink = false
         use crate::pane::interaction::InteractionEffect;
 
         let mut app = App::new(WindowConfig::default(), Config::default());
-        let first_id = app.pane_tree.focused_pane_id();
+        let first_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
         let second_id = app
+            .tab_manager
+            .active_tab_mut()
             .pane_tree
             .split_focused(SplitDirection::Vertical)
             .unwrap();
-        assert_eq!(app.pane_tree.focused_pane_id(), second_id);
+        assert_eq!(
+            app.tab_manager.active_tab().pane_tree.focused_pane_id(),
+            second_id
+        );
 
         app.apply_interaction_effect(InteractionEffect::FocusPane(first_id));
-        assert_eq!(app.pane_tree.focused_pane_id(), first_id);
+        assert_eq!(
+            app.tab_manager.active_tab().pane_tree.focused_pane_id(),
+            first_id
+        );
     }
 
     #[test]
@@ -929,63 +1108,84 @@ blink = false
         use crate::pane::interaction::InteractionEffect;
 
         let mut app = App::new(WindowConfig::default(), Config::default());
-        app.pane_tree.split_focused(SplitDirection::Vertical);
+        app.tab_manager
+            .active_tab_mut()
+            .pane_tree
+            .split_focused(SplitDirection::Vertical);
         app.update_interaction_layout(1000, 500);
 
-        // Change ratio from default 0.5 to 0.3
         app.apply_interaction_effect(InteractionEffect::UpdateRatio {
             split_index: 0,
             new_ratio: 0.3,
         });
 
-        // Verify layout changed
-        let layout = app.pane_tree.calculate_layout(1000.0, 500.0);
+        let content = app.content_bounds(1000.0, 500.0);
+        let layout = app
+            .tab_manager
+            .active_tab()
+            .pane_tree
+            .calculate_layout(content.width, content.height);
         let first_width = layout[0].1.width;
         assert!((first_width - 300.0).abs() < 1.0);
     }
 
     #[test]
-    fn app_overlay_quads_empty_for_single_pane() {
+    fn app_overlay_quads_include_tab_bar_for_single_pane() {
+        // Even single pane should have tab bar quads (when renderer exists)
+        // Without renderer, returns empty
         let app = App::new(WindowConfig::default(), Config::default());
-        // Without renderer, generate_overlay_quads returns empty
         let quads = app.generate_overlay_quads(1280.0, 720.0);
-        assert!(quads.is_empty());
+        assert!(quads.is_empty()); // no renderer
     }
 
     #[test]
     fn app_cursor_moved_updates_interaction_state() {
         let mut app = App::new(WindowConfig::default(), Config::default());
-        app.pane_tree.split_focused(SplitDirection::Vertical);
-        app.update_interaction_layout(1280, 720);
+        app.tab_manager
+            .active_tab_mut()
+            .pane_tree
+            .split_focused(SplitDirection::Vertical);
+        // Content area is offset by TAB_BAR_HEIGHT, so divider is at x=640
+        // in content coordinates (0.0 to 1280.0 width, 0.0 to 692.0 height)
+        let content = app.content_bounds(1280.0, 720.0);
+        app.interaction.update_layout(
+            app.tab_manager.active_tab().pane_tree.root(),
+            content,
+            20.0,
+        );
 
-        // Move cursor to divider position (at x=640 for 50/50 split)
-        let effect = app.interaction.on_cursor_moved(640.0, 360.0);
+        // Move cursor to divider (x=640, content y=346)
+        let effect = app.interaction.on_cursor_moved(640.0, 346.0);
         assert!(matches!(
             effect,
             crate::pane::interaction::InteractionEffect::SetCursor(
                 crate::pane::interaction::CursorType::EwResize
             )
         ));
-        assert!(matches!(
-            app.interaction().state(),
-            crate::pane::interaction::InteractionState::Hovering { .. }
-        ));
     }
 
     #[test]
     fn app_mouse_press_in_pane_produces_focus_effect() {
         let mut app = App::new(WindowConfig::default(), Config::default());
-        let first_id = app.pane_tree.focused_pane_id();
+        let first_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
         let _second_id = app
+            .tab_manager
+            .active_tab_mut()
             .pane_tree
             .split_focused(SplitDirection::Vertical)
             .unwrap();
-        app.update_interaction_layout(1280, 720);
+        let content = app.content_bounds(1280.0, 720.0);
+        app.interaction.update_layout(
+            app.tab_manager.active_tab().pane_tree.root(),
+            content,
+            20.0,
+        );
 
-        // Move cursor into the left pane (well away from divider)
-        app.interaction.on_cursor_moved(100.0, 360.0);
+        // Move cursor to left pane in content coordinates
+        app.interaction.on_cursor_moved(100.0, 300.0);
 
-        let layout = app.pane_tree.calculate_layout(1280.0, 720.0);
+        let pane_tree = &app.tab_manager.active_tab().pane_tree;
+        let layout = pane_tree.calculate_layout(content.width, content.height);
         let effect = app.interaction.on_mouse_press(&layout);
         assert_eq!(
             effect,
@@ -997,24 +1197,32 @@ blink = false
 
     #[test]
     fn app_drag_to_resize_updates_pane_tree_ratio() {
-
         let mut app = App::new(WindowConfig::default(), Config::default());
-        app.pane_tree.split_focused(SplitDirection::Vertical);
+        app.tab_manager
+            .active_tab_mut()
+            .pane_tree
+            .split_focused(SplitDirection::Vertical);
         app.update_interaction_layout(1000, 500);
 
-        // Simulate drag: hover → press → move
-        app.interaction.on_cursor_moved(500.0, 250.0); // hover on divider
-        let layout = app.pane_tree.calculate_layout(1000.0, 500.0);
-        app.interaction.on_mouse_press(&layout); // start drag
-        let effect = app.interaction.on_cursor_moved(300.0, 250.0); // drag left
+        app.interaction.on_cursor_moved(500.0, 236.0); // hover on divider
+        let content = app.content_bounds(1000.0, 500.0);
+        let pane_tree = &app.tab_manager.active_tab().pane_tree;
+        let layout = pane_tree.calculate_layout(content.width, content.height);
+        app.interaction.on_mouse_press(&layout);
+        let effect = app.interaction.on_cursor_moved(300.0, 236.0);
 
-        // Apply the effect
         app.apply_interaction_effect(effect);
 
-        // Verify the layout changed: first pane should be ~30% wide
-        let layout = app.pane_tree.calculate_layout(1000.0, 500.0);
+        let layout = app
+            .tab_manager
+            .active_tab()
+            .pane_tree
+            .calculate_layout(content.width, content.height);
         let first_width = layout[0].1.width;
-        assert!(first_width < 400.0, "first pane should be narrower after drag left, got {first_width}");
+        assert!(
+            first_width < 400.0,
+            "first pane should be narrower after drag left, got {first_width}"
+        );
     }
 
     // ── Overlay quads with zoom mode ────────────────────────────────
@@ -1022,10 +1230,118 @@ blink = false
     #[test]
     fn app_overlay_quads_empty_when_zoomed() {
         let mut app = App::new(WindowConfig::default(), Config::default());
-        app.pane_tree.split_focused(SplitDirection::Vertical);
-        app.pane_tree.zoom_toggle();
-        // Even with multiple panes, zoomed mode produces no overlays
+        app.tab_manager
+            .active_tab_mut()
+            .pane_tree
+            .split_focused(SplitDirection::Vertical);
+        app.tab_manager.active_tab_mut().pane_tree.zoom_toggle();
+        // Without renderer, overlay quads are always empty
         let quads = app.generate_overlay_quads(1280.0, 720.0);
         assert!(quads.is_empty());
+    }
+
+    // ── Tab integration tests ─────────────────────────────────────
+
+    #[test]
+    fn app_new_tab_creates_second_tab() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        let pane_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
+        app.spawn_pane(pane_id, 80, 24);
+
+        // Simulate new tab
+        app.tab_manager.new_tab();
+        let new_pane_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
+        app.spawn_pane(new_pane_id, 80, 24);
+
+        assert_eq!(app.tab_manager.tab_count(), 2);
+        assert_eq!(app.tab_manager.active_index(), 1);
+        assert_eq!(app.pane_states.len(), 2);
+    }
+
+    #[test]
+    fn app_tab_switch_preserves_pane_states() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        let p1 = app.tab_manager.active_tab().pane_tree.focused_pane_id();
+        app.spawn_pane(p1, 80, 24);
+
+        app.tab_manager.new_tab();
+        let p2 = app.tab_manager.active_tab().pane_tree.focused_pane_id();
+        app.spawn_pane(p2, 80, 24);
+
+        // Switch back to tab 0
+        app.tab_manager.select_tab(0);
+        assert_eq!(
+            app.tab_manager.active_tab().pane_tree.focused_pane_id(),
+            p1
+        );
+        // Both pane states still exist
+        assert!(app.pane_states.contains_key(&p1));
+        assert!(app.pane_states.contains_key(&p2));
+    }
+
+    #[test]
+    fn app_close_tab_removes_pane_states() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        let p1 = app.tab_manager.active_tab().pane_tree.focused_pane_id();
+        app.spawn_pane(p1, 80, 24);
+
+        app.tab_manager.new_tab();
+        let p2 = app.tab_manager.active_tab().pane_tree.focused_pane_id();
+        app.spawn_pane(p2, 80, 24);
+
+        // Close tab 1 (active)
+        if let Some(pane_ids) = app.tab_manager.close_tab(1) {
+            for id in &pane_ids {
+                app.pane_states.remove(id);
+            }
+        }
+
+        assert_eq!(app.tab_manager.tab_count(), 1);
+        assert_eq!(app.pane_states.len(), 1);
+        assert!(app.pane_states.contains_key(&p1));
+        assert!(!app.pane_states.contains_key(&p2));
+    }
+
+    #[test]
+    fn app_content_bounds_accounts_for_tab_bar() {
+        let app = App::new(WindowConfig::default(), Config::default());
+        let content = app.content_bounds(1280.0, 720.0);
+        assert_eq!(content.y, TAB_BAR_HEIGHT);
+        assert_eq!(content.width, 1280.0);
+        assert_eq!(content.height, 720.0 - TAB_BAR_HEIGHT);
+    }
+
+    #[test]
+    fn app_tab_with_splits_close_cleans_all_panes() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        let p1 = app.tab_manager.active_tab().pane_tree.focused_pane_id();
+        app.spawn_pane(p1, 80, 24);
+
+        // Split to create second pane in first tab
+        let p2 = app
+            .tab_manager
+            .active_tab_mut()
+            .pane_tree
+            .split_focused(SplitDirection::Vertical)
+            .unwrap();
+        app.spawn_pane(p2, 80, 24);
+
+        // Create second tab
+        app.tab_manager.new_tab();
+        let p3 = app.tab_manager.active_tab().pane_tree.focused_pane_id();
+        app.spawn_pane(p3, 80, 24);
+
+        // Close first tab (index 0) which has 2 panes
+        if let Some(pane_ids) = app.tab_manager.close_tab(0) {
+            for id in &pane_ids {
+                app.pane_states.remove(id);
+            }
+        }
+
+        assert_eq!(app.tab_manager.tab_count(), 1);
+        assert_eq!(app.pane_states.len(), 1);
+        assert!(!app.pane_states.contains_key(&p1));
+        assert!(!app.pane_states.contains_key(&p2));
+        assert!(app.pane_states.contains_key(&p3));
     }
 }

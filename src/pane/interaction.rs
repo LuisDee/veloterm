@@ -68,6 +68,11 @@ impl PaneInteraction {
         &self.state
     }
 
+    /// Get the current cursor position in layout coordinates.
+    pub fn cursor_pos(&self) -> (f32, f32) {
+        self.cursor_pos
+    }
+
     /// Get the cached dividers.
     pub fn dividers(&self) -> &[DividerInfo] {
         &self.dividers
