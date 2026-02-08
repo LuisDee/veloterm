@@ -33,14 +33,14 @@ Core infrastructure: custom event listener, shell state struct, OSC 133/7/0 pars
 - [x] Add ShellState to PaneState in window.rs
 
 ### 1.5 Write tests for config shell section
-- [ ] Test default shell config values (enabled=true, threshold=10)
-- [ ] Test TOML parsing of `[shell]` section
-- [ ] Test hot-reload of shell config values
+- [x] Test default shell config values (enabled=true, threshold=10)
+- [x] Test TOML parsing of `[shell]` section
+- [x] Test hot-reload of shell config values
 
-### 1.6 Implement shell configuration
-- [ ] Add `ShellConfig` to config types
-- [ ] Add TOML deserialization support
-- [ ] Wire into existing config hot-reload system
+### 1.6 Implement shell configuration <!-- 1714958 -->
+- [x] Add `ShellConfig` to config types
+- [x] Add TOML deserialization support
+- [x] Wire into existing config hot-reload system
 
 ### Phase 1 Completion: Verification and Checkpointing
 
