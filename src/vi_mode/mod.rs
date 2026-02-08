@@ -539,7 +539,10 @@ impl ViState {
     }
 }
 
-use crate::input::selection::{Selection, SelectionType};
+use crate::input::selection::{
+    Selection, SelectionType, selected_text, selected_text_block, selected_text_lines,
+};
+use crate::renderer::grid_renderer::GridCell;
 
 impl ViState {
     /// Convert the current vi-mode visual selection to a Selection for rendering.
@@ -570,6 +573,18 @@ impl ViState {
             end,
             selection_type,
         })
+    }
+
+    /// Extract the selected text for yank, based on the current visual mode.
+    /// Returns None if not in a visual mode.
+    pub fn yank_text(&self, cells: &[GridCell], cols: usize) -> Option<String> {
+        let selection = self.to_selection()?;
+        let text = match selection.selection_type {
+            SelectionType::VisualBlock => selected_text_block(cells, &selection, cols),
+            SelectionType::Line => selected_text_lines(cells, &selection, cols),
+            _ => selected_text(cells, &selection, cols),
+        };
+        Some(text)
     }
 }
 
@@ -1457,5 +1472,61 @@ mod tests {
         let sel = state.to_selection().unwrap();
         assert_eq!(sel.start, (5, 0)); // normalized: min row first
         assert_eq!(sel.end.0, 8);
+    }
+
+    // ── Yank text extraction ────────────────────────────────────────
+
+    fn make_cells(lines: &[&str], cols: usize) -> Vec<GridCell> {
+        use crate::config::theme::Color;
+        let fg = Color::new(1.0, 1.0, 1.0, 1.0);
+        let bg = Color::new(0.0, 0.0, 0.0, 1.0);
+        let mut cells = Vec::new();
+        for line in lines {
+            for ch in line.chars().take(cols) {
+                cells.push(GridCell::new(ch, fg, bg));
+            }
+            let line_len = line.chars().count().min(cols);
+            for _ in line_len..cols {
+                cells.push(GridCell::new(' ', fg, bg));
+            }
+        }
+        cells
+    }
+
+    #[test]
+    fn yank_text_visual_mode() {
+        let cells = make_cells(&["hello world"], 20);
+        let mut state = ViState::new(0, 0);
+        state.process_key('v', false);
+        state.cursor = CursorPos { row: 0, col: 4 };
+        let text = state.yank_text(&cells, 20).unwrap();
+        assert_eq!(text, "hello");
+    }
+
+    #[test]
+    fn yank_text_visual_line_mode() {
+        let cells = make_cells(&["hello world", "second line"], 20);
+        let mut state = ViState::new(0, 3);
+        state.process_key('V', false);
+        state.cursor = CursorPos { row: 1, col: 0 };
+        let text = state.yank_text(&cells, 20).unwrap();
+        assert_eq!(text, "hello world\nsecond line");
+    }
+
+    #[test]
+    fn yank_text_visual_block_mode() {
+        let cells = make_cells(&["hello world", "abcde fghij"], 20);
+        let mut state = ViState::new(0, 0);
+        state.process_key('v', true); // Ctrl+V
+        state.cursor = CursorPos { row: 1, col: 4 };
+        let text = state.yank_text(&cells, 20).unwrap();
+        assert_eq!(text, "hello\nabcde");
+    }
+
+    #[test]
+    fn yank_text_returns_none_in_normal() {
+        let cells = make_cells(&["hello"], 20);
+        let state = ViState::new(0, 0);
+        assert_eq!(state.yank_text(&cells, 20), None);
     }
 }
