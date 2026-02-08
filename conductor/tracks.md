@@ -52,7 +52,7 @@ _Link: [./conductor/tracks/09_scrollback_search_20260207/](./conductor/tracks/09
 ### [x] Track 10: Shell Integration (M)
 _Link: [./conductor/tracks/10_shell_integration_20260207/](./conductor/tracks/10_shell_integration_20260207/)_
 
-### [ ] Track 11: Vi-Mode Selection (M)
+### [x] Track 11: Vi-Mode Selection (M)
 _Link: [./conductor/tracks/11_vi_mode_20260207/](./conductor/tracks/11_vi_mode_20260207/)_
 
 ### [ ] Track 14: Quick Terminal (S)
