@@ -65,10 +65,10 @@ _Link: [./conductor/tracks/15_font_padding_20260208/](./conductor/tracks/15_font
 ### [x] Track 16: Cursor & Input Polish (S)
 _Link: [./conductor/tracks/16_cursor_input_20260208/](./conductor/tracks/16_cursor_input_20260208/)_
 
-### [ ] Track 17: Text Selection & Clipboard (M)
+### [x] Track 17: Text Selection & Clipboard (M)
 _Link: [./conductor/tracks/17_selection_clipboard_20260208/](./conductor/tracks/17_selection_clipboard_20260208/)_
 
-### [ ] Track 18: Scrollback & Scrollbar (M)
+### [x] Track 18: Scrollback & Scrollbar (M)
 _Link: [./conductor/tracks/18_scrollback_scrollbar_20260208/](./conductor/tracks/18_scrollback_scrollbar_20260208/)_
 
 ---
