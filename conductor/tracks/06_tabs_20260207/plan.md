@@ -54,26 +54,26 @@
 
 ## Phase 3: App Integration & Visual Validation
 
-### Task 3.1: Wire TabManager into App
-- [ ] Replace `App.pane_tree: PaneTree` with `App.tab_manager: TabManager`
-- [ ] Update all pane_tree references to go through `tab_manager.active_tab().pane_tree`
-- [ ] Update pane state cleanup: on close_tab(), remove all tab's PaneIds from pane_states
-- [ ] Add tab bar quad generation to RedrawRequested (before pane rendering)
-- [ ] Offset pane layout bounds by TAB_BAR_HEIGHT (28px)
-- [ ] Write integration tests for tab creation, switching, closing
+### Task 3.1: Wire TabManager into App <!-- aa7df7b -->
+- [x] Replace `App.pane_tree: PaneTree` with `App.tab_manager: TabManager`
+- [x] Update all pane_tree references to go through `tab_manager.active_tab().pane_tree`
+- [x] Update pane state cleanup: on close_tab(), remove all tab's PaneIds from pane_states
+- [x] Add tab bar quad generation to RedrawRequested (before pane rendering)
+- [x] Offset pane layout bounds by TAB_BAR_HEIGHT (28px)
+- [x] Write integration tests for tab creation, switching, closing
 
-### Task 3.2: Wire tab keyboard shortcuts
-- [ ] Add match_tab_command() check in KeyboardInput handler (before pane commands)
-- [ ] Update Ctrl+Shift+W: close pane if multiple panes, close tab if single pane
-- [ ] On NewTab: create tab + spawn pane with PTY
-- [ ] On tab switch: update interaction layout for new active tab's PaneTree
-- [ ] Write integration tests for keyboard-driven tab operations
+### Task 3.2: Wire tab keyboard shortcuts <!-- aa7df7b -->
+- [x] Add match_tab_command() check in KeyboardInput handler (before pane commands)
+- [x] Update Ctrl+Shift+W: close pane if multiple panes, close tab if single pane
+- [x] On NewTab: create tab + spawn pane with PTY
+- [x] On tab switch: update interaction layout for new active tab's PaneTree
+- [x] Write integration tests for keyboard-driven tab operations
 
-### Task 3.3: Wire tab bar mouse interaction
-- [ ] Route CursorMoved/MouseInput to tab bar hit test when y < TAB_BAR_HEIGHT
-- [ ] Offset y-coordinate for pane interaction when y >= TAB_BAR_HEIGHT
-- [ ] Handle tab click → select_tab, "+" click → new_tab
-- [ ] Write integration tests for mouse-driven tab operations
+### Task 3.3: Wire tab bar mouse interaction <!-- aa7df7b -->
+- [x] Route CursorMoved/MouseInput to tab bar hit test when y < TAB_BAR_HEIGHT
+- [x] Offset y-coordinate for pane interaction when y >= TAB_BAR_HEIGHT
+- [x] Handle tab click → select_tab, "+" click → new_tab
+- [x] Write integration tests for mouse-driven tab operations
 
 ### Task 3.4: Tab title rendering
 - [ ] Render tab titles using glyph atlas text (reuse GridRenderer text capabilities)
