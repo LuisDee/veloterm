@@ -28,13 +28,13 @@
 
 ## Phase 2: Tab Commands & Tab Bar Rendering
 
-### Task 2.1: TabCommand keybinding matching
-- [ ] Write tests for Ctrl+Shift+T → NewTab
-- [ ] Write tests for Ctrl+Shift+Tab → NextTab
-- [ ] Write tests for Ctrl+Shift+PageUp → PrevTab, PageDown → NextTab
-- [ ] Write tests for Ctrl+Shift+1..9 → SelectTab(n)
-- [ ] Write tests for Ctrl+Shift+{ → MoveTabLeft, } → MoveTabRight
-- [ ] Implement `TabCommand` enum and `match_tab_command()` in `src/input/mod.rs`
+### Task 2.1: TabCommand keybinding matching <!-- 5436b8b -->
+- [x] Write tests for Ctrl+Shift+T → NewTab
+- [x] Write tests for Ctrl+Shift+Tab → NextTab
+- [x] Write tests for Ctrl+Shift+PageUp → PrevTab, PageDown → NextTab
+- [x] Write tests for Ctrl+Shift+1..9 → SelectTab(n)
+- [x] Write tests for Ctrl+Shift+{ → MoveTabLeft, } → MoveTabRight
+- [x] Implement `TabCommand` enum and `match_tab_command()` in `src/input/mod.rs`
 
 ### Task 2.2: Tab bar quad generation <!-- 73c0b42 -->
 - [x] Write tests for generating tab background quads (active vs inactive colors)
@@ -50,7 +50,7 @@
 - [x] Implement `hit_test_tab_bar()` in `src/tab/bar.rs`
 
 ### Phase 2 Completion
-- [ ] Phase completion verification and checkpointing
+- [x] Phase completion verification and checkpointing
 
 ## Phase 3: App Integration & Visual Validation
 
