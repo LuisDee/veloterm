@@ -49,7 +49,7 @@ _Link: [./conductor/tracks/08_url_detection_20260207/](./conductor/tracks/08_url
 ### [x] Track 09: Scrollback Search (M)
 _Link: [./conductor/tracks/09_scrollback_search_20260207/](./conductor/tracks/09_scrollback_search_20260207/)_
 
-### [ ] Track 10: Shell Integration (M)
+### [x] Track 10: Shell Integration (M)
 _Link: [./conductor/tracks/10_shell_integration_20260207/](./conductor/tracks/10_shell_integration_20260207/)_
 
 ### [ ] Track 11: Vi-Mode Selection (M)

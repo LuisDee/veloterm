@@ -79,7 +79,7 @@ Build on shell state to enable prompt jumping and command duration tracking.
 
 ---
 
-## Phase 3: Notifications, Tab Titles & Shell Scripts [checkpoint: PENDING]
+## Phase 3: Notifications, Tab Titles & Shell Scripts [checkpoint: 6942905]
 
 In-app notification badges, CWD-driven tab titles, and shell integration scripts.
 
