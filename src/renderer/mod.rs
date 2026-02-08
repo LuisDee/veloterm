@@ -640,12 +640,6 @@ impl Renderer {
             grid: GridDimensions,
             instances: Vec<gpu::CellInstance>,
         }
-        let surface_grid = GridDimensions::new(
-            self.surface_config.width,
-            self.surface_config.height,
-            self.cell_width(),
-            self.cell_height(),
-        );
         let mut text_overlay_data: Vec<TextOverlayDrawData> = Vec::new();
         for (rect, cells) in text_overlays {
             let local_grid =

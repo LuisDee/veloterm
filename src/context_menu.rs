@@ -46,6 +46,7 @@ pub fn show_context_menu(
 #[cfg(target_os = "macos")]
 mod macos {
     use super::ContextMenuAction;
+    use objc2::sel;
     use objc2::MainThreadMarker;
     use objc2_app_kit::{NSEvent, NSMenu, NSMenuItem, NSView};
     use objc2_foundation::NSString;
@@ -59,11 +60,14 @@ mod macos {
     ) -> objc2::rc::Retained<NSMenuItem> {
         let ns_title = NSString::from_str(title);
         let key_equiv = NSString::from_str("");
+        // Provide a dummy action selector so macOS doesn't grey out the item.
+        // Items with action: None are treated as non-actionable regardless of
+        // setEnabled/setAutoenablesItems. We detect selection via highlightedItem.
         let item = unsafe {
             NSMenuItem::initWithTitle_action_keyEquivalent(
                 mtm.alloc(),
                 &ns_title,
-                None,
+                Some(sel!(performClick:)),
                 &key_equiv,
             )
         };
@@ -90,8 +94,8 @@ mod macos {
 
         // Build the menu
         let menu = NSMenu::new(mtm);
-        // Disable auto-enable so items without action selectors remain enabled
-        unsafe { menu.setAutoenablesItems(false) };
+        // Disable auto-enable so items retain their enabled/disabled state
+        menu.setAutoenablesItems(false);
 
         let copy_item = make_item(mtm, "Copy", 1, has_selection);
         let paste_item = make_item(mtm, "Paste", 2, true);
@@ -109,18 +113,17 @@ mod macos {
         menu.addItem(&close_item);
 
         // Get mouse location and convert to view coords
-        let mouse_location = unsafe { NSEvent::mouseLocation() };
+        let mouse_location = NSEvent::mouseLocation();
         let ns_window = ns_view.window()?;
-        let window_point = unsafe { ns_window.convertPointFromScreen(mouse_location) };
-        let view_point = unsafe { ns_view.convertPoint_fromView(window_point, None) };
+        let window_point = ns_window.convertPointFromScreen(mouse_location);
+        let view_point = ns_view.convertPoint_fromView(window_point, None);
 
         // Show popup menu — blocks until user selects or dismisses
-        let _result = unsafe {
-            menu.popUpMenuPositioningItem_atLocation_inView(None, view_point, Some(ns_view))
-        };
+        let _result =
+            menu.popUpMenuPositioningItem_atLocation_inView(None, view_point, Some(ns_view));
 
         // Check which item was selected via highlightedItem
-        let highlighted = unsafe { menu.highlightedItem() };
+        let highlighted = menu.highlightedItem();
         let selected = highlighted.as_deref()?;
         let tag = selected.tag();
 
