@@ -767,6 +767,40 @@ impl App {
             }
         }
 
+        // Generate scrollbar overlay quads for each visible pane with scrollback
+        {
+            let now = std::time::Instant::now();
+            let content = self.content_bounds(width, height);
+            let layout = pane_tree.calculate_layout(content.width, content.height);
+            let padding = self.renderer.as_ref().map(|r| r.padding()).unwrap_or([0.0; 4]);
+            for (pane_id, rect) in &layout {
+                if let Some(state) = self.pane_states.get(pane_id) {
+                    let alpha = state.scroll_state.scrollbar_alpha(now);
+                    if alpha > 0.0 {
+                        let history_size = state.terminal.history_size();
+                        let visible_rows = state.terminal.rows();
+                        let display_offset = state.scroll_state.current_line_offset();
+                        let screen_rect = Rect::new(
+                            rect.x,
+                            rect.y + TAB_BAR_HEIGHT,
+                            rect.width,
+                            rect.height,
+                        );
+                        if let Some(thumb) = crate::scroll::scrollbar_thumb_rect(
+                            screen_rect.x, screen_rect.y,
+                            screen_rect.width, screen_rect.height,
+                            padding, visible_rows, history_size, display_offset,
+                        ) {
+                            quads.push(OverlayQuad {
+                                rect: Rect::new(thumb.x, thumb.y, thumb.width, thumb.height),
+                                color: [1.0, 1.0, 1.0, alpha],
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
         quads
     }
 
