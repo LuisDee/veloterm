@@ -27,16 +27,43 @@ pub fn generate_pane_header_quads(
 ) -> Vec<OverlayQuad> {
     let mut quads = Vec::new();
 
-    // Header background
+    // Rounded pane border: outer filled rounded rect (border color) with inner
+    // filled rounded rect (terminal_bg) inset by 1px, creating a 1px border.
+    let border_color = if is_active {
+        &theme.accent
+    } else {
+        &theme.border
+    };
+    let bc = [border_color.r, border_color.g, border_color.b, 1.0];
+    // Outer border fill (full pane, 8px radius)
+    quads.push(OverlayQuad {
+        rect: Rect::new(pane_rect.x, pane_rect.y, pane_rect.width, pane_rect.height),
+        color: bc,
+        border_radius: 8.0,
+    });
+    // Inner fill (terminal bg, inset 1px, 7px radius)
+    let tbg = &theme.terminal_bg;
+    quads.push(OverlayQuad {
+        rect: Rect::new(
+            pane_rect.x + 1.0,
+            pane_rect.y + 1.0,
+            pane_rect.width - 2.0,
+            pane_rect.height - 2.0,
+        ),
+        color: [tbg.r, tbg.g, tbg.b, 1.0],
+        border_radius: 7.0,
+    });
+
+    // Header background (on top of inner fill)
     let bg = if is_active {
         &theme.surface_raised
     } else {
         &theme.surface
     };
     quads.push(OverlayQuad {
-        rect: Rect::new(pane_rect.x, pane_rect.y, pane_rect.width, PANE_HEADER_HEIGHT),
+        rect: Rect::new(pane_rect.x + 1.0, pane_rect.y + 1.0, pane_rect.width - 2.0, PANE_HEADER_HEIGHT),
         color: [bg.r, bg.g, bg.b, 1.0],
-        border_radius: 8.0,
+        border_radius: 7.0,
     });
 
     // Accent stripe below the header (separator between header and terminal content)
@@ -46,40 +73,8 @@ pub fn generate_pane_header_quads(
         (&theme.border_subtle, INACTIVE_STRIPE_HEIGHT)
     };
     quads.push(OverlayQuad {
-        rect: Rect::new(pane_rect.x, pane_rect.y + PANE_HEADER_HEIGHT, pane_rect.width, stripe_h),
+        rect: Rect::new(pane_rect.x + 1.0, pane_rect.y + 1.0 + PANE_HEADER_HEIGHT, pane_rect.width - 2.0, stripe_h),
         color: [stripe_color.r, stripe_color.g, stripe_color.b, 1.0],
-        border_radius: 0.0,
-    });
-
-    // Pane border (1px around the full pane container including header)
-    let border_color = if is_active {
-        &theme.accent
-    } else {
-        &theme.border
-    };
-    let bc = [border_color.r, border_color.g, border_color.b, 1.0];
-    // Top
-    quads.push(OverlayQuad {
-        rect: Rect::new(pane_rect.x, pane_rect.y, pane_rect.width, 1.0),
-        color: bc,
-        border_radius: 0.0,
-    });
-    // Bottom
-    quads.push(OverlayQuad {
-        rect: Rect::new(pane_rect.x, pane_rect.y + pane_rect.height - 1.0, pane_rect.width, 1.0),
-        color: bc,
-        border_radius: 0.0,
-    });
-    // Left
-    quads.push(OverlayQuad {
-        rect: Rect::new(pane_rect.x, pane_rect.y, 1.0, pane_rect.height),
-        color: bc,
-        border_radius: 0.0,
-    });
-    // Right
-    quads.push(OverlayQuad {
-        rect: Rect::new(pane_rect.x + pane_rect.width - 1.0, pane_rect.y, 1.0, pane_rect.height),
-        color: bc,
         border_radius: 0.0,
     });
 
@@ -212,13 +207,17 @@ mod tests {
         let active_quads = generate_pane_header_quads(rect, true, &theme);
         let inactive_quads = generate_pane_header_quads(rect, false, &theme);
 
-        // Both should have quads (bg + stripe + 4 border sides)
-        assert_eq!(active_quads.len(), 6);
-        assert_eq!(inactive_quads.len(), 6);
+        // Both should have quads (outer border + inner fill + header bg + stripe)
+        assert_eq!(active_quads.len(), 4);
+        assert_eq!(inactive_quads.len(), 4);
 
-        // Active stripe is 2px, inactive is 1px
-        assert_eq!(active_quads[1].rect.height, ACTIVE_STRIPE_HEIGHT);
-        assert_eq!(inactive_quads[1].rect.height, INACTIVE_STRIPE_HEIGHT);
+        // Outer border has 8px radius, inner fill has 7px radius
+        assert_eq!(active_quads[0].border_radius, 8.0);
+        assert_eq!(active_quads[1].border_radius, 7.0);
+
+        // Active stripe is 2px, inactive is 1px (index 3)
+        assert_eq!(active_quads[3].rect.height, ACTIVE_STRIPE_HEIGHT);
+        assert_eq!(inactive_quads[3].rect.height, INACTIVE_STRIPE_HEIGHT);
     }
 
     #[test]
