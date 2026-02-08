@@ -85,6 +85,8 @@ pub struct PaneState {
     pub pty: crate::pty::PtySession,
     /// Per-pane vi-mode state. None = vi-mode not active.
     pub vi_state: Option<crate::vi_mode::ViState>,
+    /// Per-pane cursor state for rendering and blink.
+    pub cursor: crate::renderer::cursor::CursorState,
 }
 
 /// Main application state implementing the winit event loop handler.
@@ -160,7 +162,18 @@ impl App {
                     rows as usize,
                     scrollback,
                 );
-                self.pane_states.insert(pane_id, PaneState { terminal, pty, vi_state: None });
+                let mut cursor = crate::renderer::cursor::CursorState::with_blink_rate(
+                    self.app_config.cursor.blink_rate,
+                );
+                if let Some(style) = crate::renderer::cursor::CursorStyle::from_config_str(
+                    &self.app_config.cursor.style,
+                ) {
+                    cursor.set_style(style);
+                }
+                if !self.app_config.cursor.blink {
+                    cursor.set_blink_rate(0);
+                }
+                self.pane_states.insert(pane_id, PaneState { terminal, pty, vi_state: None, cursor });
             }
             Err(e) => {
                 log::error!("Failed to spawn PTY for pane {:?}: {e}", pane_id);
@@ -1307,6 +1320,7 @@ impl ApplicationHandler<UserEvent> for App {
                         if let Err(e) = state.pty.write(&bytes) {
                             log::warn!("PTY write error: {e}");
                         }
+                        state.cursor.on_keystroke();
                     }
                 }
             }
@@ -1405,6 +1419,14 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 log::debug!("Scale factor changed to {scale_factor:.2}");
             }
+            WindowEvent::Focused(focused) => {
+                for state in self.pane_states.values_mut() {
+                    state.cursor.set_focused(focused);
+                }
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
             WindowEvent::RedrawRequested => {
                 let (width, height) = self
                     .window
@@ -1415,11 +1437,15 @@ impl ApplicationHandler<UserEvent> for App {
                     })
                     .unwrap_or((1280, 720));
 
-                // Drain PTY output into terminals for all panes
+                // Drain PTY output into terminals for all panes, update cursor positions
                 for state in self.pane_states.values_mut() {
                     while let Ok(bytes) = state.pty.reader_rx.try_recv() {
                         state.terminal.feed(&bytes);
                     }
+                    // Sync cursor position from terminal state
+                    let (row, col) = state.terminal.cursor_position();
+                    state.cursor.update_position(row, col);
+                    state.cursor.tick_blink();
                 }
 
                 // Process shell integration: notifications and CWD tab titles
@@ -1491,10 +1517,18 @@ impl ApplicationHandler<UserEvent> for App {
                             rect.width,
                             rect.height,
                         );
+                        // Generate cursor instance for this pane
+                        let cursor_instance = if let Some(state) = self.pane_states.get(pane_id) {
+                            state.cursor.to_cell_instance()
+                        } else {
+                            None
+                        };
+
                         pane_descs.push(PaneRenderDescriptor {
                             pane_id: *pane_id,
                             rect: screen_rect,
                             cells,
+                            cursor_instance,
                         });
                     }
                 }
@@ -2260,6 +2294,7 @@ blink = false
                 terminal,
                 pty: crate::pty::PtySession::new(&crate::pty::default_shell(), 80, 24).unwrap(),
                 vi_state: None,
+                cursor: crate::renderer::cursor::CursorState::new(),
             },
         );
 
@@ -2287,6 +2322,7 @@ blink = false
                 terminal,
                 pty: crate::pty::PtySession::new(&crate::pty::default_shell(), 80, 24).unwrap(),
                 vi_state: None,
+                cursor: crate::renderer::cursor::CursorState::new(),
             },
         );
 

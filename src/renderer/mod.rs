@@ -33,6 +33,8 @@ pub struct PaneRenderDescriptor {
     pub rect: PaneRect,
     /// The pane's terminal cells (row-major).
     pub cells: Vec<GridCell>,
+    /// Optional cursor overlay instance for this pane.
+    pub cursor_instance: Option<gpu::CellInstance>,
 }
 
 /// Top-level render coordinator.
@@ -595,12 +597,17 @@ impl Renderer {
             // When text overlays exist, always regenerate pane instances since the
             // render pass clears the screen — we can't rely on the previous frame.
             // Without text overlays, damage tracking still skips unchanged panes.
-            let force_redraw = !text_overlays.is_empty();
-            let instances = if any_dirty || force_redraw {
+            let force_redraw = !text_overlays.is_empty() || pane.cursor_instance.is_some();
+            let mut instances = if any_dirty || force_redraw {
                 generate_instances(&pane_grid, &pane.cells, &self.atlas)
             } else {
                 Vec::new()
             };
+
+            // Append cursor overlay instance
+            if let Some(cursor_inst) = &pane.cursor_instance {
+                instances.push(*cursor_inst);
+            }
 
             draw_data.push(PaneDrawData {
                 rect: pane.rect,

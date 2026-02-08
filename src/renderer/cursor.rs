@@ -38,8 +38,12 @@ pub struct CursorState {
     pub style: CursorStyle,
     pub visible: bool,
     pub focused: bool,
-    blink_visible: bool,
-    last_blink: Instant,
+    pub(crate) blink_visible: bool,
+    pub(crate) last_blink: Instant,
+    /// Blink rate in milliseconds. 0 = disabled.
+    pub blink_rate_ms: u64,
+    /// Timestamp of last keystroke for blink-pause behavior.
+    pub(crate) last_keystroke: Option<Instant>,
 }
 
 impl Default for CursorState {
@@ -62,8 +66,13 @@ impl CursorStyle {
 }
 
 impl CursorState {
-    /// Create a new cursor at the origin.
+    /// Create a new cursor at the origin with default 500ms blink rate.
     pub fn new() -> Self {
+        Self::with_blink_rate(500)
+    }
+
+    /// Create a new cursor with a specific blink rate (0 = disabled).
+    pub fn with_blink_rate(blink_rate_ms: u64) -> Self {
         Self {
             row: 0,
             col: 0,
@@ -72,6 +81,8 @@ impl CursorState {
             focused: true,
             blink_visible: true,
             last_blink: Instant::now(),
+            blink_rate_ms,
+            last_keystroke: None,
         }
     }
 
@@ -91,10 +102,36 @@ impl CursorState {
         self.focused = focused;
     }
 
+    /// Set the blink rate in milliseconds. 0 = disabled.
+    pub fn set_blink_rate(&mut self, blink_rate_ms: u64) {
+        self.blink_rate_ms = blink_rate_ms;
+    }
+
+    /// Notify cursor of a keystroke: force visible and reset blink timer.
+    pub fn on_keystroke(&mut self) {
+        self.blink_visible = true;
+        self.last_blink = Instant::now();
+        self.last_keystroke = Some(Instant::now());
+    }
+
     /// Advance the blink timer. Returns true if blink state changed.
     pub fn tick_blink(&mut self) -> bool {
+        // Blinking disabled
+        if self.blink_rate_ms == 0 {
+            return false;
+        }
+
+        let interval = Duration::from_millis(self.blink_rate_ms);
         let now = Instant::now();
-        if now.duration_since(self.last_blink) >= BLINK_INTERVAL {
+
+        // Pause blinking while typing (within one blink interval of last keystroke)
+        if let Some(last_key) = self.last_keystroke {
+            if now.duration_since(last_key) < interval {
+                return false;
+            }
+        }
+
+        if now.duration_since(self.last_blink) >= interval {
             self.blink_visible = !self.blink_visible;
             self.last_blink = now;
             true
@@ -383,5 +420,80 @@ mod tests {
     #[test]
     fn from_config_str_unknown() {
         assert_eq!(CursorStyle::from_config_str("box"), None);
+    }
+
+    // ── Configurable blink rate ────────────────────────────────────
+
+    #[test]
+    fn new_with_blink_rate_uses_custom_interval() {
+        let cursor = CursorState::with_blink_rate(750);
+        assert_eq!(cursor.blink_rate_ms, 750);
+    }
+
+    #[test]
+    fn set_blink_rate_updates_interval() {
+        let mut cursor = CursorState::new();
+        cursor.set_blink_rate(1000);
+        assert_eq!(cursor.blink_rate_ms, 1000);
+    }
+
+    #[test]
+    fn zero_blink_rate_disables_blinking() {
+        let mut cursor = CursorState::with_blink_rate(0);
+        // Force enough time to pass
+        cursor.last_blink = Instant::now() - Duration::from_secs(10);
+        let changed = cursor.tick_blink();
+        assert!(!changed);
+        assert!(cursor.blink_visible); // Always visible when disabled
+    }
+
+    #[test]
+    fn custom_blink_rate_toggles_at_interval() {
+        let mut cursor = CursorState::with_blink_rate(200);
+        cursor.last_blink = Instant::now() - Duration::from_millis(201);
+        let changed = cursor.tick_blink();
+        assert!(changed);
+        assert!(!cursor.blink_visible);
+    }
+
+    // ── Keystroke blink pause ──────────────────────────────────────
+
+    #[test]
+    fn on_keystroke_forces_visible_and_resets_blink() {
+        let mut cursor = CursorState::new();
+        cursor.blink_visible = false;
+        cursor.on_keystroke();
+        assert!(cursor.blink_visible);
+    }
+
+    #[test]
+    fn blink_paused_after_keystroke_during_interval() {
+        let mut cursor = CursorState::new();
+        cursor.on_keystroke();
+        // Immediately after keystroke, tick should NOT toggle
+        let changed = cursor.tick_blink();
+        assert!(!changed);
+        assert!(cursor.blink_visible);
+    }
+
+    #[test]
+    fn blink_resumes_after_idle() {
+        let mut cursor = CursorState::new();
+        cursor.on_keystroke();
+        // Simulate idle for longer than blink interval
+        cursor.last_keystroke = Some(Instant::now() - BLINK_INTERVAL - Duration::from_millis(1));
+        cursor.last_blink = Instant::now() - BLINK_INTERVAL - Duration::from_millis(1);
+        let changed = cursor.tick_blink();
+        assert!(changed);
+    }
+
+    // ── PaneRenderDescriptor cursor instance ───────────────────────
+
+    #[test]
+    fn cursor_instance_has_correct_position_after_update() {
+        let mut cursor = CursorState::new();
+        cursor.update_position(10, 25);
+        let instance = cursor.to_cell_instance().unwrap();
+        assert_eq!(instance.position, [25.0, 10.0]); // [col, row]
     }
 }
