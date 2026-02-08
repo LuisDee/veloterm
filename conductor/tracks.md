@@ -43,7 +43,7 @@ _Link: [./conductor/tracks/06_tabs_20260207/](./conductor/tracks/06_tabs_2026020
 
 ## Wave 4 — Developer Workflow Features
 
-### [ ] Track 08: URL & Path Detection (S)
+### [~] Track 08: URL & Path Detection (S)
 _Link: [./conductor/tracks/08_url_detection_20260207/](./conductor/tracks/08_url_detection_20260207/)_
 
 ### [ ] Track 09: Scrollback Search (M)
