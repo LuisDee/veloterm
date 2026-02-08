@@ -36,29 +36,29 @@
 
 ## Phase 2: Grid Shader Underline & App Integration
 
-### Task 2.1: Grid shader underline rendering
-- [ ] Write tests for CELL_FLAG_UNDERLINE being passed to shader correctly (existing tests verify flag propagation)
-- [ ] Extend grid.wgsl vertex shader to pass underline flag to fragment shader
-- [ ] Extend grid.wgsl fragment shader: draw 1px underline at cell bottom when flag is set
-- [ ] Write visual validation test: render cells with underline flag, verify via screenshot
+### Task 2.1: Grid shader underline rendering <!-- 911e52a -->
+- [x] Write tests for CELL_FLAG_UNDERLINE being passed to shader correctly (existing tests verify flag propagation)
+- [x] Extend grid.wgsl vertex shader to pass underline flag to fragment shader
+- [x] Extend grid.wgsl fragment shader: draw 1px underline at cell bottom when flag is set
+- [x] Write visual validation test: render cells with underline flag, verify via screenshot
 
-### Task 2.2: LinksConfig and opener
-- [ ] Write tests for LinksConfig defaults (enabled: true, auto-detect modifier)
-- [ ] Write tests for LinksConfig parsing from TOML
-- [ ] Write tests for open_link() dispatching Url vs FilePath
-- [ ] Write tests for platform command construction (open/xdg-open, $EDITOR)
-- [ ] Implement `LinksConfig` in `src/config/types.rs`
-- [ ] Implement `open_link()` in `src/link/opener.rs`
+### Task 2.2: LinksConfig and opener <!-- 911e52a -->
+- [x] Write tests for LinksConfig defaults (enabled: true, auto-detect modifier)
+- [x] Write tests for LinksConfig parsing from TOML
+- [x] Write tests for open_link() dispatching Url vs FilePath
+- [x] Write tests for platform command construction (open/xdg-open, $EDITOR)
+- [x] Implement `LinksConfig` in `src/config/types.rs`
+- [x] Implement `open_link()` in `src/link/opener.rs`
 
-### Task 2.3: Wire link detection into App
-- [ ] Add `link_detector: LinkDetector` to App struct
-- [ ] Trigger re-scan when terminal content changes (on PTY read, not per-frame)
-- [ ] Track modifier key state via ModifiersChanged event
-- [ ] On CursorMoved with modifier held: check link_at(), set cursor to Pointer, mark cells for underline highlight
-- [ ] On CursorMoved without modifier: clear any link highlight
-- [ ] On MouseInput with modifier: check link_at(), call open_link(), consume event
-- [ ] Request redraw when link highlight changes
-- [ ] Write integration tests for hover highlight and click dispatch
+### Task 2.3: Wire link detection into App <!-- 911e52a -->
+- [x] Add `link_detector: LinkDetector` to App struct
+- [x] Trigger re-scan when terminal content changes (on PTY read, not per-frame)
+- [x] Track modifier key state via ModifiersChanged event
+- [x] On CursorMoved with modifier held: check link_at(), set cursor to Pointer, mark cells for underline highlight
+- [x] On CursorMoved without modifier: clear any link highlight
+- [x] On MouseInput with modifier: check link_at(), call open_link(), consume event
+- [x] Request redraw when link highlight changes
+- [x] Write integration tests for hover highlight and click dispatch
 
 ### Task 2.4: Visual Validation
 - [ ] Build and run application
