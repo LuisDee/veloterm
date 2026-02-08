@@ -33,7 +33,7 @@ _Link: [./conductor/tracks/04_pane_layout_20260207/](./conductor/tracks/04_pane_
 
 ## Wave 3 — Pane UI & Tabs
 
-### [ ] Track 05: Pane UI & Interaction (M)
+### [x] Track 05: Pane UI & Interaction (M)
 _Link: [./conductor/tracks/05_pane_ui_20260207/](./conductor/tracks/05_pane_ui_20260207/)_
 
 ### [ ] Track 06: Tab System (M)

@@ -40,7 +40,7 @@
 ### Phase 2 Completion
 - [x] Phase completion verification and checkpointing
 
-## Phase 3: Drag-to-Resize & Polish [checkpoint: pending]
+## Phase 3: Drag-to-Resize & Polish [checkpoint: 889834b]
 
 ### Task 3.1: Drag-to-Resize <!-- cd99e98 -->
 - [x] Write tests for ratio updates during drag with minimum pane size enforcement
