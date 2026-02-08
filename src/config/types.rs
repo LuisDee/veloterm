@@ -9,6 +9,7 @@ const VALID_CURSOR_STYLES: &[&str] = &["block", "beam", "underline"];
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Config {
     pub font: FontConfig,
+    pub padding: PaddingConfig,
     pub colors: ColorsConfig,
     pub keys: KeysConfig,
     pub cursor: CursorConfig,
@@ -24,6 +25,21 @@ pub struct Config {
 pub struct FontConfig {
     pub family: String,
     pub size: f64,
+    /// Line-height as a multiplier of font size (e.g., 1.5 = 150%).
+    pub line_height: f64,
+    /// UI chrome font family (tab bar, menus, status).
+    pub ui_family: String,
+    /// Display/header font family (welcome screen, about dialog).
+    pub display_family: String,
+}
+
+/// Terminal content padding in pixels.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PaddingConfig {
+    pub top: f64,
+    pub bottom: f64,
+    pub left: f64,
+    pub right: f64,
 }
 
 /// Colors/theme configuration.
@@ -122,6 +138,7 @@ pub enum ConfigError {
 #[serde(default)]
 struct RawConfig {
     font: RawFontConfig,
+    padding: RawPaddingConfig,
     colors: RawColorsConfig,
     keys: RawKeysConfig,
     cursor: RawCursorConfig,
@@ -137,13 +154,39 @@ struct RawConfig {
 struct RawFontConfig {
     family: String,
     size: f64,
+    line_height: f64,
+    ui_family: String,
+    display_family: String,
 }
 
 impl Default for RawFontConfig {
     fn default() -> Self {
         Self {
-            family: "monospace".to_string(),
-            size: 14.0,
+            family: "JetBrains Mono".to_string(),
+            size: 13.0,
+            line_height: 1.5,
+            ui_family: "Inter".to_string(),
+            display_family: "Georgia".to_string(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(default)]
+struct RawPaddingConfig {
+    top: f64,
+    bottom: f64,
+    left: f64,
+    right: f64,
+}
+
+impl Default for RawPaddingConfig {
+    fn default() -> Self {
+        Self {
+            top: 12.0,
+            bottom: 12.0,
+            left: 12.0,
+            right: 12.0,
         }
     }
 }
@@ -258,8 +301,22 @@ impl Default for RawViModeConfig {
 impl Default for FontConfig {
     fn default() -> Self {
         Self {
-            family: "monospace".to_string(),
-            size: 14.0,
+            family: "JetBrains Mono".to_string(),
+            size: 13.0,
+            line_height: 1.5,
+            ui_family: "Inter".to_string(),
+            display_family: "Georgia".to_string(),
+        }
+    }
+}
+
+impl Default for PaddingConfig {
+    fn default() -> Self {
+        Self {
+            top: 12.0,
+            bottom: 12.0,
+            left: 12.0,
+            right: 12.0,
         }
     }
 }
@@ -317,6 +374,15 @@ impl Config {
             font: FontConfig {
                 family: raw.font.family,
                 size: raw.font.size,
+                line_height: raw.font.line_height,
+                ui_family: raw.font.ui_family,
+                display_family: raw.font.display_family,
+            },
+            padding: PaddingConfig {
+                top: raw.padding.top,
+                bottom: raw.padding.bottom,
+                left: raw.padding.left,
+                right: raw.padding.right,
             },
             colors: ColorsConfig {
                 theme: raw.colors.theme,
@@ -353,8 +419,26 @@ impl Config {
 
     /// Validate the config, returning an error if any values are out of range.
     pub fn validate(&self) -> Result<(), ConfigError> {
-        if self.font.size <= 0.0 {
-            return Err(ConfigError::Validation("font size must be > 0".to_string()));
+        if self.font.size < 8.0 {
+            return Err(ConfigError::Validation(
+                "font size must be >= 8".to_string(),
+            ));
+        }
+
+        if self.font.line_height < 0.5 || self.font.line_height > 3.0 {
+            return Err(ConfigError::Validation(
+                "font line_height must be between 0.5 and 3.0".to_string(),
+            ));
+        }
+
+        if self.padding.top < 0.0
+            || self.padding.bottom < 0.0
+            || self.padding.left < 0.0
+            || self.padding.right < 0.0
+        {
+            return Err(ConfigError::Validation(
+                "padding values must be >= 0".to_string(),
+            ));
         }
 
         if !VALID_THEMES.contains(&self.colors.theme.as_str()) {
@@ -390,6 +474,7 @@ impl Config {
     pub fn diff(&self, other: &Config) -> ConfigDelta {
         ConfigDelta {
             font_changed: self.font != other.font,
+            padding_changed: self.padding != other.padding,
             colors_changed: self.colors != other.colors,
             keys_changed: self.keys != other.keys,
             cursor_changed: self.cursor != other.cursor,
@@ -407,10 +492,23 @@ impl Config {
 # Place this file at ~/.config/veloterm/veloterm.toml
 
 [font]
-# Font family name
-family = "monospace"
+# Terminal content font family (with fallback: JetBrains Mono -> SF Mono -> Menlo -> system)
+family = "JetBrains Mono"
 # Font size in points
-size = 14.0
+size = 13.0
+# Line-height multiplier (1.5 = 150% of font size)
+line_height = 1.5
+# UI chrome font (tab bar, menus, status)
+ui_family = "Inter"
+# Display/header font (welcome screen, about)
+display_family = "Georgia"
+
+[padding]
+# Terminal content padding in pixels
+top = 12.0
+bottom = 12.0
+left = 12.0
+right = 12.0
 
 [colors]
 # Theme: "claude_dark", "claude_light", or "claude_warm"
@@ -456,6 +554,7 @@ entry_key = "ctrl+shift+space"
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConfigDelta {
     pub font_changed: bool,
+    pub padding_changed: bool,
     pub colors_changed: bool,
     pub keys_changed: bool,
     pub cursor_changed: bool,
@@ -470,6 +569,7 @@ impl ConfigDelta {
     /// Returns true if no sections changed.
     pub fn is_empty(&self) -> bool {
         !self.font_changed
+            && !self.padding_changed
             && !self.colors_changed
             && !self.keys_changed
             && !self.cursor_changed
@@ -491,13 +591,40 @@ mod tests {
     #[test]
     fn default_font_size() {
         let config = Config::default();
-        assert_eq!(config.font.size, 14.0);
+        assert_eq!(config.font.size, 13.0);
     }
 
     #[test]
     fn default_font_family() {
         let config = Config::default();
-        assert_eq!(config.font.family, "monospace");
+        assert_eq!(config.font.family, "JetBrains Mono");
+    }
+
+    #[test]
+    fn default_font_line_height() {
+        let config = Config::default();
+        assert_eq!(config.font.line_height, 1.5);
+    }
+
+    #[test]
+    fn default_font_ui_family() {
+        let config = Config::default();
+        assert_eq!(config.font.ui_family, "Inter");
+    }
+
+    #[test]
+    fn default_font_display_family() {
+        let config = Config::default();
+        assert_eq!(config.font.display_family, "Georgia");
+    }
+
+    #[test]
+    fn default_padding() {
+        let config = Config::default();
+        assert_eq!(config.padding.top, 12.0);
+        assert_eq!(config.padding.bottom, 12.0);
+        assert_eq!(config.padding.left, 12.0);
+        assert_eq!(config.padding.right, 12.0);
     }
 
     #[test]
@@ -588,20 +715,24 @@ size = 18.0
 "#;
         let config = Config::from_toml(toml).unwrap();
         assert_eq!(config.font.size, 18.0);
-        assert_eq!(config.font.family, "monospace");
+        assert_eq!(config.font.family, "JetBrains Mono");
+        assert_eq!(config.font.line_height, 1.5);
         assert_eq!(config.colors.theme, "claude_dark");
         assert_eq!(config.cursor.style, "block");
         assert!(config.cursor.blink);
         assert_eq!(config.scrollback.lines, 10_000);
         assert_eq!(config.performance.fps_limit, 60);
+        assert_eq!(config.padding.top, 12.0);
     }
 
     #[test]
     fn parse_empty_toml_uses_all_defaults() {
         let config = Config::from_toml("").unwrap();
-        assert_eq!(config.font.size, 14.0);
-        assert_eq!(config.font.family, "monospace");
+        assert_eq!(config.font.size, 13.0);
+        assert_eq!(config.font.family, "JetBrains Mono");
+        assert_eq!(config.font.line_height, 1.5);
         assert_eq!(config.colors.theme, "claude_dark");
+        assert_eq!(config.padding.top, 12.0);
     }
 
     #[test]
@@ -704,6 +835,65 @@ entry_key = "ctrl+space"
         assert!(delta.vi_mode_changed);
     }
 
+    // ── Padding & line_height config tests ────────────────────────
+
+    #[test]
+    fn parse_padding_config() {
+        let toml = r#"
+[padding]
+top = 16.0
+bottom = 16.0
+left = 20.0
+right = 20.0
+"#;
+        let config = Config::from_toml(toml).unwrap();
+        assert_eq!(config.padding.top, 16.0);
+        assert_eq!(config.padding.bottom, 16.0);
+        assert_eq!(config.padding.left, 20.0);
+        assert_eq!(config.padding.right, 20.0);
+    }
+
+    #[test]
+    fn parse_font_line_height() {
+        let toml = r#"
+[font]
+line_height = 1.8
+"#;
+        let config = Config::from_toml(toml).unwrap();
+        assert_eq!(config.font.line_height, 1.8);
+    }
+
+    #[test]
+    fn parse_font_ui_and_display_families() {
+        let toml = r#"
+[font]
+ui_family = "SF Pro"
+display_family = "Galaxie Copernicus"
+"#;
+        let config = Config::from_toml(toml).unwrap();
+        assert_eq!(config.font.ui_family, "SF Pro");
+        assert_eq!(config.font.display_family, "Galaxie Copernicus");
+    }
+
+    #[test]
+    fn diff_detects_padding_change() {
+        let a = Config::default();
+        let mut b = Config::default();
+        b.padding.left = 20.0;
+        let delta = a.diff(&b);
+        assert!(delta.padding_changed);
+        assert!(!delta.font_changed);
+    }
+
+    #[test]
+    fn diff_detects_line_height_change() {
+        let a = Config::default();
+        let mut b = Config::default();
+        b.font.line_height = 1.8;
+        let delta = a.diff(&b);
+        assert!(delta.font_changed);
+    }
+
     #[test]
     fn parse_unknown_keys_ignored() {
         let toml = r#"
@@ -731,13 +921,76 @@ size = -1.0
     }
 
     #[test]
-    fn invalid_zero_font_size() {
+    fn invalid_font_size_below_minimum() {
         let toml = r#"
 [font]
-size = 0.0
+size = 7.0
 "#;
         let result = Config::from_toml(toml);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn valid_font_size_at_minimum() {
+        let toml = r#"
+[font]
+size = 8.0
+"#;
+        let result = Config::from_toml(toml);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn invalid_line_height_too_low() {
+        let toml = r#"
+[font]
+line_height = 0.3
+"#;
+        let result = Config::from_toml(toml);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn invalid_line_height_too_high() {
+        let toml = r#"
+[font]
+line_height = 3.5
+"#;
+        let result = Config::from_toml(toml);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn valid_line_height_boundary() {
+        let toml = r#"
+[font]
+line_height = 0.5
+"#;
+        let result = Config::from_toml(toml);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn invalid_negative_padding() {
+        let toml = r#"
+[padding]
+left = -5.0
+"#;
+        let result = Config::from_toml(toml);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn valid_zero_padding() {
+        let toml = r#"
+[padding]
+top = 0.0
+bottom = 0.0
+left = 0.0
+right = 0.0
+"#;
+        let result = Config::from_toml(toml);
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -799,7 +1052,7 @@ fps_limit = 0
     fn load_missing_file_returns_defaults() {
         let path = Path::new("/tmp/nonexistent_veloterm_config_test.toml");
         let config = Config::load(path).unwrap();
-        assert_eq!(config.font.size, 14.0);
+        assert_eq!(config.font.size, 13.0);
         assert_eq!(config.colors.theme, "claude_dark");
     }
 

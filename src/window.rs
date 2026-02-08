@@ -1552,7 +1552,7 @@ mod tests {
     fn app_config_defaults_match_expected_values() {
         let app = App::new(WindowConfig::default(), Config::default());
         assert_eq!(app.app_config.colors.theme, "claude_dark");
-        assert_eq!(app.app_config.font.size, 14.0);
+        assert_eq!(app.app_config.font.size, 13.0);
         assert_eq!(app.app_config.scrollback.lines, 10_000);
         assert_eq!(app.app_config.cursor.style, "block");
         assert!(app.app_config.cursor.blink);
