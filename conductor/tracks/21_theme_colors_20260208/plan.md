@@ -35,24 +35,24 @@ Restructure the Theme struct and update claude_dark to reference values.
 Apply theme tokens to tab bar, terminal area, pane borders, and cursor.
 
 ### Task 2.1: Tab bar styling with reference tokens
-- [ ] Tab bar background: use `surface` instead of `pane_background`
-- [ ] Active tab: use `accent` for indicator stripe (2px at bottom)
-- [ ] Active tab text: use `text` color
-- [ ] Inactive tab text: use `text_secondary` color
-- [ ] Tab separators: use `border` color
-- [ ] TDD: tests for tab bar quad colors matching theme tokens
+- [x] Tab bar background: use `surface` instead of `pane_background` <!-- 3a1042a -->
+- [x] Active tab: use `accent` for indicator stripe (2px at bottom) <!-- f204b22 -->
+- [x] Active tab text: use `text` color <!-- f204b22 -->
+- [x] Inactive tab text: use `text_secondary` color <!-- 3a1042a -->
+- [x] Tab separators: use `border` color <!-- 3a1042a -->
+- [x] TDD: tests for tab bar quad colors matching theme tokens <!-- f204b22 -->
 
 ### Task 2.2: Terminal content area and window background
-- [ ] Clear color (window background): use `background` (#141413)
-- [ ] Terminal content area: use `terminal_bg` (#181715)
-- [ ] Ensure visual distinction between chrome and content areas
-- [ ] TDD: verify background colors in renderer
+- [x] Clear color (window background): use `background` (#141413) <!-- f204b22 -->
+- [x] Terminal content area: use `terminal_bg` (#181715) <!-- 3a1042a -->
+- [x] Ensure visual distinction between chrome and content areas <!-- f204b22 -->
+- [x] TDD: verify background colors in renderer <!-- f204b22 -->
 
 ### Task 2.3: Cursor rendering in accent color
-- [ ] Block cursor fill: use `accent` (#D97757)
-- [ ] Character under cursor: use `text` or `background` for contrast
-- [ ] Verify cursor blink still works with new colors
-- [ ] TDD: tests for cursor color values
+- [x] Block cursor fill: use `accent` (#D97757) <!-- f204b22 -->
+- [x] Character under cursor: use `text` or `background` for contrast <!-- f204b22 -->
+- [x] Verify cursor blink still works with new colors <!-- f204b22 -->
+- [x] TDD: tests for cursor color values <!-- f204b22 -->
 
 ### Phase 2 Completion
 - [ ] Phase completion verification and checkpointing protocol
