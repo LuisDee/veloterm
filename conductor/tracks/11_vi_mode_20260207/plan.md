@@ -8,7 +8,7 @@
 - Define `ViCommand` for parsed input → action mapping
 - **Tests:** State machine transitions (Normal→Visual→Normal, Normal→VisualLine→Normal, Normal→VisualBlock→Normal, Escape behavior)
 
-### 1.2 [ ] Implement count prefix parsing and basic motion commands
+### 1.2 [x] Implement count prefix parsing and basic motion commands <!-- 67e9e2c -->
 - Implement count accumulation (digits 1-9, with 0 as LineStart unless mid-count)
 - Implement character motions: h, l, j, k with count support
 - Implement line motions: 0, $, ^
