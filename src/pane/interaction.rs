@@ -53,6 +53,12 @@ pub struct PaneInteraction {
     layout_bounds: Rect,
 }
 
+impl Default for PaneInteraction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PaneInteraction {
     pub fn new() -> Self {
         Self {

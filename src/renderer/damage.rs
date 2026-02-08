@@ -149,6 +149,12 @@ pub struct PaneDamageMap {
     states: std::collections::HashMap<crate::pane::PaneId, DamageState>,
 }
 
+impl Default for PaneDamageMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PaneDamageMap {
     /// Create a new empty PaneDamageMap.
     pub fn new() -> Self {

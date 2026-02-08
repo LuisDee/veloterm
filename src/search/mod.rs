@@ -23,6 +23,12 @@ pub struct SearchResult {
 /// Regex search engine over terminal content lines.
 pub struct SearchEngine;
 
+impl Default for SearchEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SearchEngine {
     pub fn new() -> Self {
         Self
@@ -79,6 +85,12 @@ pub struct SearchState {
     pub is_active: bool,
     pub error: Option<String>,
     engine: SearchEngine,
+}
+
+impl Default for SearchState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SearchState {

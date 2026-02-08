@@ -12,6 +12,12 @@ static NEXT_TAB_ID: AtomicU32 = AtomicU32::new(1);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TabId(pub u32);
 
+impl Default for TabId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TabId {
     pub fn new() -> Self {
         Self(NEXT_TAB_ID.fetch_add(1, Ordering::Relaxed))
@@ -28,6 +34,12 @@ pub struct Tab {
     pub id: TabId,
     pub title: String,
     pub pane_tree: PaneTree,
+}
+
+impl Default for Tab {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Tab {
@@ -50,6 +62,12 @@ impl Tab {
 pub struct TabManager {
     tabs: Vec<Tab>,
     active_index: usize,
+}
+
+impl Default for TabManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TabManager {

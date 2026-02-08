@@ -271,6 +271,12 @@ pub struct PaneTree {
     zoomed: Option<PaneId>,
 }
 
+impl Default for PaneTree {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PaneTree {
     /// Create a new PaneTree with a single root pane.
     pub fn new() -> Self {

@@ -39,6 +39,12 @@ pub struct LinkDetector {
     generation: u64,
 }
 
+impl Default for LinkDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LinkDetector {
     pub fn new() -> Self {
         Self {
