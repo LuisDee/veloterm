@@ -89,6 +89,8 @@ pub struct PaneState {
     pub cursor: crate::renderer::cursor::CursorState,
     /// Per-pane mouse selection state (click counting, drag, active selection).
     pub mouse_selection: crate::input::mouse::MouseSelectionState,
+    /// Per-pane scroll state for smooth animation and auto-hide.
+    pub scroll_state: crate::scroll::ScrollState,
 }
 
 /// Main application state implementing the winit event loop handler.
@@ -175,7 +177,7 @@ impl App {
                 if !self.app_config.cursor.blink {
                     cursor.set_blink_rate(0);
                 }
-                self.pane_states.insert(pane_id, PaneState { terminal, pty, vi_state: None, cursor, mouse_selection: crate::input::mouse::MouseSelectionState::new() });
+                self.pane_states.insert(pane_id, PaneState { terminal, pty, vi_state: None, cursor, mouse_selection: crate::input::mouse::MouseSelectionState::new(), scroll_state: crate::scroll::ScrollState::new() });
             }
             Err(e) => {
                 log::error!("Failed to spawn PTY for pane {:?}: {e}", pane_id);
@@ -1474,6 +1476,9 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         state.cursor.on_keystroke();
                         state.mouse_selection.clear_selection();
+                        // Snap scroll to bottom on keyboard input (return to live view)
+                        state.scroll_state.snap_to_bottom();
+                        state.terminal.set_display_offset(0);
                     }
                 }
             }
@@ -1642,6 +1647,34 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 }
             }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let focused_pane = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                if let Some(state) = self.pane_states.get_mut(&focused_pane) {
+                    let history_size = state.terminal.history_size();
+                    match delta {
+                        winit::event::MouseScrollDelta::LineDelta(_, y) => {
+                            state.scroll_state.apply_line_delta(y, history_size);
+                        }
+                        winit::event::MouseScrollDelta::PixelDelta(pos) => {
+                            let cell_height = self
+                                .renderer
+                                .as_ref()
+                                .map(|r| r.cell_height())
+                                .unwrap_or(20.0);
+                            state.scroll_state.apply_pixel_delta(
+                                pos.y as f32,
+                                cell_height,
+                                history_size,
+                            );
+                        }
+                    }
+                    let offset = state.scroll_state.current_line_offset();
+                    state.terminal.set_display_offset(offset);
+                }
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
             WindowEvent::Resized(size) => {
                 log::debug!("Window resized to {}x{}", size.width, size.height);
                 if let Some(renderer) = &mut self.renderer {
@@ -1681,6 +1714,12 @@ impl ApplicationHandler<UserEvent> for App {
                     let (row, col) = state.terminal.cursor_position();
                     state.cursor.update_position(row, col);
                     state.cursor.tick_blink();
+                    // Tick scroll animation (~60fps assumed)
+                    state.scroll_state.tick(1.0 / 60.0);
+                    let offset = state.scroll_state.current_line_offset();
+                    state.terminal.set_display_offset(offset);
+                    // Clamp scroll to current history size (may have shrunk)
+                    state.scroll_state.clamp_to_history(state.terminal.history_size());
                 }
 
                 // Process shell integration: notifications and CWD tab titles
@@ -2537,6 +2576,7 @@ blink = false
                 vi_state: None,
                 cursor: crate::renderer::cursor::CursorState::new(),
                 mouse_selection: crate::input::mouse::MouseSelectionState::new(),
+                scroll_state: crate::scroll::ScrollState::new(),
             },
         );
 
@@ -2566,6 +2606,7 @@ blink = false
                 vi_state: None,
                 cursor: crate::renderer::cursor::CursorState::new(),
                 mouse_selection: crate::input::mouse::MouseSelectionState::new(),
+                scroll_state: crate::scroll::ScrollState::new(),
             },
         );
 
@@ -2800,6 +2841,7 @@ blink = false
                 vi_state: None,
                 cursor: crate::renderer::cursor::CursorState::new(),
                 mouse_selection: crate::input::mouse::MouseSelectionState::new(),
+                scroll_state: crate::scroll::ScrollState::new(),
             },
         );
 
@@ -2829,6 +2871,7 @@ blink = false
                 vi_state: None,
                 cursor: crate::renderer::cursor::CursorState::new(),
                 mouse_selection: crate::input::mouse::MouseSelectionState::new(),
+                scroll_state: crate::scroll::ScrollState::new(),
             },
         );
 
@@ -2854,6 +2897,7 @@ blink = false
                 vi_state: None,
                 cursor: crate::renderer::cursor::CursorState::new(),
                 mouse_selection: crate::input::mouse::MouseSelectionState::new(),
+                scroll_state: crate::scroll::ScrollState::new(),
             },
         );
 
