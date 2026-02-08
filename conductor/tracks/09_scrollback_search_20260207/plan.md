@@ -70,7 +70,7 @@
 
 ---
 
-## Phase 3: Match Highlighting & App Integration
+## Phase 3: Match Highlighting & App Integration [checkpoint: 9a0611f]
 
 ### 3.1 Write tests for match highlighting in grid
 - [x] 3.1.1 Write tests: `apply_search_highlights()` modifies GridCell background for matched cells <!-- 644aa9e -->
