@@ -393,6 +393,62 @@ mod tests {
         );
     }
 
+    // ── ANSI standard color spot checks ──────────────────────────────
+
+    #[test]
+    fn all_16_named_colors_are_distinct() {
+        let colors: Vec<Color> = [
+            NamedColor::Black,
+            NamedColor::Red,
+            NamedColor::Green,
+            NamedColor::Yellow,
+            NamedColor::Blue,
+            NamedColor::Magenta,
+            NamedColor::Cyan,
+            NamedColor::White,
+            NamedColor::BrightBlack,
+            NamedColor::BrightRed,
+            NamedColor::BrightGreen,
+            NamedColor::BrightYellow,
+            NamedColor::BrightBlue,
+            NamedColor::BrightMagenta,
+            NamedColor::BrightCyan,
+            NamedColor::BrightWhite,
+        ]
+        .iter()
+        .map(|n| ansi_named_color(*n))
+        .collect();
+        for i in 0..colors.len() {
+            for j in (i + 1)..colors.len() {
+                assert_ne!(colors[i], colors[j], "colors {i} and {j} should differ");
+            }
+        }
+    }
+
+    #[test]
+    fn truecolor_exact_passthrough() {
+        let color = convert_color(
+            AnsiColor::Spec(Rgb {
+                r: 0xD9,
+                g: 0x77,
+                b: 0x57,
+            }),
+            DEFAULT_FG,
+        );
+        assert!((color.r - 0xD9 as f32 / 255.0).abs() < 0.001);
+        assert!((color.g - 0x77 as f32 / 255.0).abs() < 0.001);
+        assert!((color.b - 0x57 as f32 / 255.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn color_cube_index_196_is_pure_red() {
+        // Index 196 = 16 + 5*36 + 0*6 + 0 = pure red in 6x6x6 cube
+        let color = ansi_indexed_color(196);
+        assert!(color.r > 0.9);
+        assert!(color.g < 0.01);
+        assert!(color.b < 0.01);
+    }
+
     #[test]
     fn extract_bold_red_text_uses_bright_color() {
         let mut term = Terminal::new(80, 24, 10_000);

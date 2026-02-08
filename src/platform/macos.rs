@@ -1,4 +1,5 @@
 use core_graphics::display::CGDisplay;
+use winit::raw_window_handle::HasWindowHandle;
 
 /// Check HiDPI status and log a warning if running without a .app bundle on Retina.
 ///
@@ -47,5 +48,34 @@ pub fn detect_display_scale(winit_scale: f64) -> f64 {
         detected
     } else {
         winit_scale
+    }
+}
+
+/// Set the NSWindow background color to blend the title bar with app chrome.
+///
+/// Uses the raw window handle to access the underlying NSWindow and set its
+/// backgroundColor to the given RGB values (0.0–1.0 range).
+pub fn set_titlebar_color(window: &winit::window::Window, r: f64, g: f64, b: f64) {
+    use objc2_app_kit::NSColor;
+
+    let handle = match window.window_handle() {
+        Ok(h) => h,
+        Err(e) => {
+            log::warn!("Failed to get window handle for titlebar color: {e}");
+            return;
+        }
+    };
+
+    let raw = handle.as_raw();
+    if let winit::raw_window_handle::RawWindowHandle::AppKit(appkit) = raw {
+        unsafe {
+            let ns_view: &objc2_app_kit::NSView =
+                appkit.ns_view.cast::<objc2_app_kit::NSView>().as_ref();
+            if let Some(ns_window) = ns_view.window() {
+                let color = NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, 1.0);
+                ns_window.setBackgroundColor(Some(&color));
+                ns_window.setTitlebarAppearsTransparent(true);
+            }
+        }
     }
 }

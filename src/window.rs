@@ -1295,6 +1295,16 @@ impl ApplicationHandler<UserEvent> for App {
                     );
                     Theme::claude_dark()
                 });
+
+                // Set macOS title bar color to match tab bar surface
+                #[cfg(target_os = "macos")]
+                crate::platform::macos::set_titlebar_color(
+                    &window,
+                    theme.surface.r as f64,
+                    theme.surface.g as f64,
+                    theme.surface.b as f64,
+                );
+
                 let font_size = self.app_config.font.size as f32;
                 let font_family = self.app_config.font.family.as_str();
                 let line_height = self.app_config.font.line_height as f32;
