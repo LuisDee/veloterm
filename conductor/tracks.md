@@ -75,7 +75,7 @@ _Link: [./conductor/tracks/18_scrollback_scrollbar_20260208/](./conductor/tracks
 
 ## Wave 7 — Tab & Window Management
 
-### [ ] Track 19: Tab Management Polish (M)
+### [x] Track 19: Tab Management Polish (M)
 _Link: [./conductor/tracks/19_tab_management_20260208/](./conductor/tracks/19_tab_management_20260208/)_
 
 ### [ ] Track 20: Context Menus (M)

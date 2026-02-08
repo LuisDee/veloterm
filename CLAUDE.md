@@ -19,10 +19,25 @@ CoreGraphics even without a bundle, but the `.app` path is preferred.
 
 ## Screenshots
 
-Use `./take-screenshot.sh` to capture the terminal programmatically:
-- Builds, launches via `open` (proper .app bundle), sends Cmd+Shift+S
-- Saves to `veloterm-latest.png` (overwrites previous)
-- View with: `Read("/Users/luisdeburnay/work/terminal-em/veloterm-latest.png")`
+**Always use `./take-screenshot.sh`** — it is the only reliable method:
+
+```bash
+./take-screenshot.sh
+# Then view with:
+Read("/Users/luisdeburnay/work/terminal-em/veloterm-latest.png")
+```
+
+How it works:
+1. Builds VeloTerm and creates the `.app` bundle (with `VELOTERM_PROJECT_DIR` set)
+2. Launches via `open` for proper Retina scaling
+3. Sends Cmd+Shift+S to trigger GPU buffer capture
+4. Saves to `veloterm-latest.png` (overwrites previous)
+
+**DO NOT manually build the .app wrapper in bash commands.** The script sets
+`VELOTERM_PROJECT_DIR` in the wrapper so the GPU capture knows where to write
+the PNG. If you construct the wrapper yourself and forget this env var, the
+capture fails with "Read-only file system" because it tries to write inside
+the `.app` bundle. Just run the script.
 
 ## Testing
 
