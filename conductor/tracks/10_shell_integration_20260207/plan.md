@@ -22,15 +22,15 @@ Core infrastructure: custom event listener, shell state struct, OSC 133/7/0 pars
 - [x] Implement bounded prompt position storage (VecDeque, max 1000)
 
 ### 1.3 Write tests for custom EventListener
-- [ ] Test custom listener captures title change events
-- [ ] Test listener stores events in a queue for later processing
-- [ ] Test listener integrates with alacritty_terminal Term
+- [x] Test custom listener captures title change events
+- [x] Test listener stores events in a queue for later processing
+- [x] Test listener integrates with alacritty_terminal Term
 
-### 1.4 Implement custom EventListener and Terminal integration
-- [ ] Create `VeloTermListener` implementing alacritty_terminal's `EventListener` trait
-- [ ] Replace `VoidListener` with `VeloTermListener` in Terminal struct
-- [ ] Wire event listener to drain events during `feed()` and update ShellState
-- [ ] Add ShellState to PaneState in window.rs
+### 1.4 Implement custom EventListener and Terminal integration <!-- 2bd23ab -->
+- [x] Create `VeloTermListener` implementing alacritty_terminal's `EventListener` trait
+- [x] Replace `VoidListener` with `VeloTermListener` in Terminal struct
+- [x] Wire event listener to drain events during `feed()` and update ShellState
+- [x] Add ShellState to PaneState in window.rs
 
 ### 1.5 Write tests for config shell section
 - [ ] Test default shell config values (enabled=true, threshold=10)
