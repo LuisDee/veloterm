@@ -29,13 +29,13 @@
 - [x] Write tests for generating translucent overlay quads for unfocused panes
 - [x] Implement overlay quad generation (one full-pane quad per unfocused pane, bg with alpha ~0.3), appended after pane content
 
-### Task 2.3: Wire Mouse Events into App
-- [ ] Write tests for mouse event routing (CursorMoved, MouseInput → PaneInteraction)
-- [ ] Add `CursorMoved` and `MouseInput` handlers in `App::window_event()`, delegate to `PaneInteraction`, apply effects (cursor icon change, request redraw)
+### Task 2.3: Wire Mouse Events into App <!-- 2789a5c -->
+- [x] Write tests for mouse event routing (CursorMoved, MouseInput → PaneInteraction)
+- [x] Add `CursorMoved` and `MouseInput` handlers in `App::window_event()`, delegate to `PaneInteraction`, apply effects (cursor icon change, request redraw)
 
-### Task 2.4: Click-to-Focus
-- [ ] Write tests for click-to-focus logic (click inside pane area → set focused pane)
-- [ ] Implement click-to-focus: on mouse press in pane area (not divider), call `pane_tree.set_focus(pane_id)` and consume the click
+### Task 2.4: Click-to-Focus <!-- 2789a5c -->
+- [x] Write tests for click-to-focus logic (click inside pane area → set focused pane)
+- [x] Implement click-to-focus: on mouse press in pane area (not divider), call `pane_tree.set_focus(pane_id)` and consume the click
 
 ### Phase 2 Completion
 - [ ] Phase completion verification and checkpointing
