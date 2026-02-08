@@ -251,11 +251,17 @@ impl App {
             AppCommand::IncreaseFontSize => (current * 1.1).round(),
             AppCommand::DecreaseFontSize => (current / 1.1).round(),
             AppCommand::ResetFontSize => default,
+            AppCommand::NewWindow => return current, // handled before compute
         };
         raw.clamp(MIN_FONT, MAX_FONT)
     }
 
     fn handle_app_command(&mut self, command: AppCommand) {
+        if command == AppCommand::NewWindow {
+            self.spawn_new_window();
+            return;
+        }
+
         let new_size = Self::compute_font_size(
             self.current_font_size,
             command,
@@ -277,6 +283,19 @@ impl App {
         self.resize_all_panes(w, h);
         if let Some(window) = &self.window {
             window.request_redraw();
+        }
+    }
+
+    /// Spawn a new VeloTerm window by launching a new process.
+    fn spawn_new_window(&self) {
+        match std::env::current_exe() {
+            Ok(exe_path) => {
+                match std::process::Command::new(&exe_path).spawn() {
+                    Ok(_) => log::info!("Spawned new VeloTerm window"),
+                    Err(e) => log::error!("Failed to spawn new window: {e}"),
+                }
+            }
+            Err(e) => log::error!("Failed to get current exe path: {e}"),
         }
     }
 

@@ -280,6 +280,7 @@ pub enum AppCommand {
     IncreaseFontSize,
     DecreaseFontSize,
     ResetFontSize,
+    NewWindow,
 }
 
 /// Return the platform-appropriate "primary" modifier.
@@ -312,6 +313,7 @@ pub fn match_app_command(
                 "=" | "+" => Some(AppCommand::IncreaseFontSize),
                 "-" => Some(AppCommand::DecreaseFontSize),
                 "0" => Some(AppCommand::ResetFontSize),
+                "n" | "N" => Some(AppCommand::NewWindow),
                 _ => None,
             }
         }
@@ -1287,6 +1289,24 @@ mod tests {
     #[test]
     fn app_cmd_no_match_unbound_key() {
         let result = match_app_command(&Key::Character("a".into()), primary_mod());
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn app_cmd_new_window() {
+        let result = match_app_command(&Key::Character("n".into()), primary_mod());
+        assert_eq!(result, Some(AppCommand::NewWindow));
+    }
+
+    #[test]
+    fn app_cmd_new_window_uppercase() {
+        let result = match_app_command(&Key::Character("N".into()), primary_mod());
+        assert_eq!(result, Some(AppCommand::NewWindow));
+    }
+
+    #[test]
+    fn app_cmd_new_window_no_match_without_modifier() {
+        let result = match_app_command(&Key::Character("n".into()), no_mods());
         assert_eq!(result, None);
     }
 }
