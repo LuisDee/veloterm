@@ -748,14 +748,19 @@ impl Renderer {
 
                 render_pass.set_bind_group(0, &self.bind_group, &[]);
 
-                // Set scissor rect for this pane's content area (inset by padding)
-                let sx = (rect.x + pad_left).max(0.0) as u32;
-                let sy = (rect.y + pad_top).max(0.0) as u32;
-                let content_w = (rect.width - pad_left - pad_right).max(0.0);
-                let content_h = (rect.height - pad_top - pad_bottom).max(0.0);
+                // Set viewport and scissor to the content area (inset by padding).
+                // The viewport maps NDC (-1..1) to the content rect, so cell (0,0)
+                // renders at the content origin, not the surface origin.
+                let cx = rect.x + pad_left;
+                let cy = rect.y + pad_top;
+                let content_w = (rect.width - pad_left - pad_right).max(1.0);
+                let content_h = (rect.height - pad_top - pad_bottom).max(1.0);
+                let sx = cx.max(0.0) as u32;
+                let sy = cy.max(0.0) as u32;
                 let sw = (content_w as u32).min(self.surface_config.width.saturating_sub(sx));
                 let sh = (content_h as u32).min(self.surface_config.height.saturating_sub(sy));
                 if sw > 0 && sh > 0 {
+                    render_pass.set_viewport(cx, cy, content_w, content_h, 0.0, 1.0);
                     render_pass.set_scissor_rect(sx, sy, sw, sh);
                     render_pass.draw(0..6, *start..*start + *count);
                 }
@@ -764,6 +769,15 @@ impl Renderer {
             // Phase 2: Draw UI overlays (dividers, focus dimming, tab/search bar backgrounds)
             if self.overlay_instance_count > 0 {
                 if let Some(ref overlay_buf) = self.overlay_instance_buffer {
+                    // Reset viewport to full surface for overlay rendering
+                    render_pass.set_viewport(
+                        0.0,
+                        0.0,
+                        self.surface_config.width as f32,
+                        self.surface_config.height as f32,
+                        0.0,
+                        1.0,
+                    );
                     render_pass.set_scissor_rect(
                         0,
                         0,
@@ -804,6 +818,14 @@ impl Renderer {
                     let sh =
                         (rect.height as u32).min(self.surface_config.height.saturating_sub(sy));
                     if sw > 0 && sh > 0 {
+                        render_pass.set_viewport(
+                            rect.x,
+                            rect.y,
+                            rect.width,
+                            rect.height,
+                            0.0,
+                            1.0,
+                        );
                         render_pass.set_scissor_rect(sx, sy, sw, sh);
                         render_pass.draw(0..6, *start..*start + *count);
                     }
