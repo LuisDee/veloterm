@@ -12,6 +12,8 @@ use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 use crate::config::theme::Theme;
 use crate::config::types::Config;
 use crate::input::{match_pane_command, match_tab_command, PaneCommand, TabCommand};
+use crate::link::opener::open_link;
+use crate::link::LinkDetector;
 use crate::pane::divider::{generate_divider_quads, generate_unfocused_overlay_quads, OverlayQuad};
 use crate::pane::interaction::{CursorType, InteractionEffect, PaneInteraction};
 use crate::pane::{PaneId, Rect, SplitDirection};
@@ -87,6 +89,8 @@ pub struct App {
     pane_states: HashMap<PaneId, PaneState>,
     modifiers: ModifiersState,
     interaction: PaneInteraction,
+    link_detector: LinkDetector,
+    link_hover_active: bool,
 }
 
 impl App {
@@ -100,6 +104,8 @@ impl App {
             pane_states: HashMap::new(),
             modifiers: ModifiersState::empty(),
             interaction: PaneInteraction::new(),
+            link_detector: LinkDetector::new(),
+            link_hover_active: false,
         }
     }
 
@@ -445,6 +451,90 @@ impl App {
             .unwrap_or((1280, 720))
     }
 
+    /// Returns true if the "super" modifier is held (Cmd on macOS, Ctrl on Linux).
+    fn is_link_modifier_held(&self) -> bool {
+        if !self.app_config.links.enabled {
+            return false;
+        }
+        if cfg!(target_os = "macos") {
+            self.modifiers.super_key()
+        } else {
+            self.modifiers.control_key()
+        }
+    }
+
+    /// Rescan terminal content for links in the focused pane.
+    fn rescan_links(&mut self) {
+        let focused = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+        if let Some(state) = self.pane_states.get(&focused) {
+            let lines = crate::terminal::grid_bridge::extract_text_lines(&state.terminal);
+            self.link_detector.scan(&lines);
+        }
+    }
+
+    /// Check if cursor is over a link and update highlight state.
+    /// Returns true if cursor is over a link.
+    fn update_link_hover(&mut self, pixel_x: f32, pixel_y: f32) -> bool {
+        if !self.is_link_modifier_held() {
+            if self.link_hover_active {
+                self.link_hover_active = false;
+            }
+            return false;
+        }
+
+        let renderer = match &self.renderer {
+            Some(r) => r,
+            None => return false,
+        };
+
+        let cell_width = renderer.cell_width();
+        let cell_height = renderer.cell_height();
+
+        // Convert pixel position (in content space, already offset) to grid coords
+        let col = (pixel_x / cell_width).floor() as usize;
+        let row = (pixel_y / cell_height).floor() as usize;
+
+        if let Some(_link) = self.link_detector.link_at(row, col) {
+            self.link_hover_active = true;
+            true
+        } else {
+            if self.link_hover_active {
+                self.link_hover_active = false;
+            }
+            false
+        }
+    }
+
+    /// Handle modifier+click on a link.
+    fn handle_link_click(&self, pixel_x: f32, pixel_y: f32) -> bool {
+        if !self.is_link_modifier_held() {
+            return false;
+        }
+
+        let renderer = match &self.renderer {
+            Some(r) => r,
+            None => return false,
+        };
+
+        let cell_width = renderer.cell_width();
+        let cell_height = renderer.cell_height();
+
+        let col = (pixel_x / cell_width).floor() as usize;
+        let row = (pixel_y / cell_height).floor() as usize;
+
+        if let Some(link) = self.link_detector.link_at(row, col) {
+            open_link(link);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get the link detector (for testing).
+    pub fn link_detector(&self) -> &LinkDetector {
+        &self.link_detector
+    }
+
     /// Run the application event loop. This blocks until the window is closed.
     pub fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         let event_loop = EventLoop::new()?;
@@ -577,15 +667,29 @@ impl ApplicationHandler for App {
             WindowEvent::CursorMoved { position, .. } => {
                 let y = position.y as f32;
                 if y < TAB_BAR_HEIGHT {
-                    // In tab bar area — reset pane interaction cursor
+                    // In tab bar area — reset pane interaction cursor and link hover
+                    if self.link_hover_active {
+                        self.link_hover_active = false;
+                    }
                     let effect = self.interaction.on_cursor_moved(position.x as f32, -1.0);
                     self.apply_interaction_effect(effect);
                 } else {
-                    // Below tab bar — offset y for pane interaction
-                    let effect = self
-                        .interaction
-                        .on_cursor_moved(position.x as f32, y - TAB_BAR_HEIGHT);
-                    self.apply_interaction_effect(effect);
+                    let content_y = y - TAB_BAR_HEIGHT;
+                    // Check for link hover when modifier is held
+                    // Use focused pane's local coordinates
+                    let on_link = self.update_link_hover(position.x as f32, content_y);
+
+                    if on_link {
+                        if let Some(window) = &self.window {
+                            window.set_cursor(CursorIcon::Pointer);
+                        }
+                    } else {
+                        // Below tab bar — offset y for pane interaction
+                        let effect = self
+                            .interaction
+                            .on_cursor_moved(position.x as f32, content_y);
+                        self.apply_interaction_effect(effect);
+                    }
                 }
             }
             WindowEvent::MouseInput {
@@ -623,6 +727,14 @@ impl ApplicationHandler for App {
                         }
                     }
                 } else {
+                    // Check for modifier+click link activation first
+                    if btn_state == ElementState::Pressed {
+                        let content_y = cursor_pos.1; // already in content space
+                        if self.handle_link_click(cursor_pos.0, content_y) {
+                            return; // Link click consumed the event
+                        }
+                    }
+
                     // Click below tab bar — route to pane interaction
                     let (width, height) = self.window_size();
                     let content = self.content_bounds(width as f32, height as f32);
@@ -663,6 +775,9 @@ impl ApplicationHandler for App {
                         state.terminal.feed(&bytes);
                     }
                 }
+
+                // Rescan links for the focused pane after PTY drain
+                self.rescan_links();
 
                 // Build render descriptors for active tab's visible panes
                 let content = self.content_bounds(width as f32, height as f32);
@@ -1343,5 +1458,82 @@ blink = false
         assert!(!app.pane_states.contains_key(&p1));
         assert!(!app.pane_states.contains_key(&p2));
         assert!(app.pane_states.contains_key(&p3));
+    }
+
+    // ── Link detection integration ──────────────────────────────────
+
+    #[test]
+    fn app_link_detector_starts_empty() {
+        let app = App::new(WindowConfig::default(), Config::default());
+        assert!(app.link_detector().links().is_empty());
+        assert_eq!(app.link_detector().generation(), 0);
+    }
+
+    #[test]
+    fn app_link_hover_starts_inactive() {
+        let app = App::new(WindowConfig::default(), Config::default());
+        assert!(!app.link_hover_active);
+    }
+
+    #[test]
+    fn app_rescan_links_detects_urls_in_terminal() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        let pane_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
+        // Create terminal directly (no PTY needed for this test)
+        let terminal = crate::terminal::Terminal::new(80, 24, 10_000);
+        app.pane_states.insert(
+            pane_id,
+            PaneState {
+                terminal,
+                pty: crate::pty::PtySession::new(&crate::pty::default_shell(), 80, 24).unwrap(),
+            },
+        );
+
+        // Feed a URL into the terminal
+        app.pane_states
+            .get_mut(&pane_id)
+            .unwrap()
+            .terminal
+            .feed(b"Visit https://example.com here");
+
+        app.rescan_links();
+        assert_eq!(app.link_detector().generation(), 1);
+        assert_eq!(app.link_detector().links().len(), 1);
+        assert_eq!(app.link_detector().links()[0].text, "https://example.com");
+    }
+
+    #[test]
+    fn app_rescan_links_detects_file_paths() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        let pane_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
+        let terminal = crate::terminal::Terminal::new(80, 24, 10_000);
+        app.pane_states.insert(
+            pane_id,
+            PaneState {
+                terminal,
+                pty: crate::pty::PtySession::new(&crate::pty::default_shell(), 80, 24).unwrap(),
+            },
+        );
+
+        app.pane_states
+            .get_mut(&pane_id)
+            .unwrap()
+            .terminal
+            .feed(b"Edit /usr/local/bin/test here");
+
+        app.rescan_links();
+        assert_eq!(app.link_detector().links().len(), 1);
+        assert_eq!(
+            app.link_detector().links()[0].kind,
+            crate::link::LinkKind::FilePath
+        );
+    }
+
+    #[test]
+    fn app_is_link_modifier_disabled_when_links_disabled() {
+        let mut config = Config::default();
+        config.links.enabled = false;
+        let app = App::new(WindowConfig::default(), config);
+        assert!(!app.is_link_modifier_held());
     }
 }

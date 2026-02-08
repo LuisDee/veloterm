@@ -14,6 +14,7 @@ pub struct Config {
     pub cursor: CursorConfig,
     pub scrollback: ScrollbackConfig,
     pub performance: PerformanceConfig,
+    pub links: LinksConfig,
 }
 
 /// Font configuration.
@@ -54,6 +55,18 @@ pub struct PerformanceConfig {
     pub fps_limit: u32,
 }
 
+/// Link detection configuration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinksConfig {
+    pub enabled: bool,
+}
+
+impl Default for LinksConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 /// Errors that can occur during config loading and validation.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -76,6 +89,7 @@ struct RawConfig {
     cursor: RawCursorConfig,
     scrollback: RawScrollbackConfig,
     performance: RawPerformanceConfig,
+    links: RawLinksConfig,
 }
 
 #[derive(Deserialize)]
@@ -152,6 +166,18 @@ struct RawPerformanceConfig {
 impl Default for RawPerformanceConfig {
     fn default() -> Self {
         Self { fps_limit: 60 }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(default)]
+struct RawLinksConfig {
+    enabled: bool,
+}
+
+impl Default for RawLinksConfig {
+    fn default() -> Self {
+        Self { enabled: true }
     }
 }
 
@@ -236,6 +262,9 @@ impl Config {
             performance: PerformanceConfig {
                 fps_limit: raw.performance.fps_limit,
             },
+            links: LinksConfig {
+                enabled: raw.links.enabled,
+            },
         };
 
         config.validate()?;
@@ -286,6 +315,7 @@ impl Config {
             cursor_changed: self.cursor != other.cursor,
             scrollback_changed: self.scrollback != other.scrollback,
             performance_changed: self.performance != other.performance,
+            links_changed: self.links != other.links,
         }
     }
 
@@ -337,6 +367,7 @@ pub struct ConfigDelta {
     pub cursor_changed: bool,
     pub scrollback_changed: bool,
     pub performance_changed: bool,
+    pub links_changed: bool,
 }
 
 impl ConfigDelta {
@@ -348,6 +379,7 @@ impl ConfigDelta {
             && !self.cursor_changed
             && !self.scrollback_changed
             && !self.performance_changed
+            && !self.links_changed
     }
 }
 
@@ -404,6 +436,12 @@ mod tests {
     fn default_keys_empty() {
         let config = Config::default();
         assert!(config.keys.bindings.is_empty());
+    }
+
+    #[test]
+    fn default_links_enabled() {
+        let config = Config::default();
+        assert!(config.links.enabled);
     }
 
     // ── TOML parsing tests ──────────────────────────────────────────
@@ -466,6 +504,22 @@ size = 18.0
         assert_eq!(config.font.size, 14.0);
         assert_eq!(config.font.family, "monospace");
         assert_eq!(config.colors.theme, "claude_dark");
+    }
+
+    #[test]
+    fn parse_links_config() {
+        let toml = r#"
+[links]
+enabled = false
+"#;
+        let config = Config::from_toml(toml).unwrap();
+        assert!(!config.links.enabled);
+    }
+
+    #[test]
+    fn parse_links_default_enabled() {
+        let config = Config::from_toml("").unwrap();
+        assert!(config.links.enabled);
     }
 
     #[test]

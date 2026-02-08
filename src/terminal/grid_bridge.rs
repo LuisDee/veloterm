@@ -120,6 +120,29 @@ pub fn apply_dim(color: Color) -> Color {
     Color::new(color.r * 0.66, color.g * 0.66, color.b * 0.66, color.a)
 }
 
+/// Extract text content from a Terminal as one String per visible row.
+/// Used for link detection scanning. Trailing spaces are preserved so
+/// column indices in the returned strings match grid column positions.
+pub fn extract_text_lines(terminal: &super::Terminal) -> Vec<String> {
+    let term = terminal.inner();
+    let grid = term.grid();
+    let cols = grid.columns();
+    let rows = grid.screen_lines();
+    let offset = grid.display_offset() as i32;
+    let mut lines = Vec::with_capacity(rows);
+
+    for row in 0..rows {
+        let mut line = String::with_capacity(cols);
+        for col in 0..cols {
+            let point = Point::new(Line(row as i32 - offset), Column(col));
+            line.push(grid[point].c);
+        }
+        lines.push(line);
+    }
+
+    lines
+}
+
 /// Extract GridCell data from a Terminal for the current viewport.
 /// When scrolled up, reads from scrollback history; at bottom, reads the active screen.
 pub fn extract_grid_cells(terminal: &super::Terminal) -> Vec<GridCell> {
@@ -480,5 +503,45 @@ mod tests {
         let cells = extract_grid_cells(&term);
         assert_eq!(cells[0].ch, 'L');
         assert_eq!(cells[1].ch, '4');
+    }
+
+    // ── Text line extraction ────────────────────────────────────────
+
+    #[test]
+    fn extract_text_lines_empty_grid() {
+        let term = Terminal::new(10, 3, 10_000);
+        let lines = extract_text_lines(&term);
+        assert_eq!(lines.len(), 3);
+        // Each line should be 10 spaces
+        assert_eq!(lines[0].len(), 10);
+        assert!(lines[0].chars().all(|c| c == ' '));
+    }
+
+    #[test]
+    fn extract_text_lines_with_content() {
+        let mut term = Terminal::new(20, 3, 10_000);
+        term.feed(b"Hello world");
+        let lines = extract_text_lines(&term);
+        assert!(lines[0].starts_with("Hello world"));
+        assert_eq!(lines[0].len(), 20); // padded with spaces to column width
+    }
+
+    #[test]
+    fn extract_text_lines_preserves_column_positions() {
+        let mut term = Terminal::new(20, 3, 10_000);
+        term.feed(b"abc https://x.com end");
+        let lines = extract_text_lines(&term);
+        // 'h' of https:// should be at index 4
+        assert_eq!(&lines[0][4..17], "https://x.com");
+    }
+
+    #[test]
+    fn extract_text_lines_multiline() {
+        let mut term = Terminal::new(10, 3, 10_000);
+        term.feed(b"AAA\r\nBBB\r\nCCC");
+        let lines = extract_text_lines(&term);
+        assert!(lines[0].starts_with("AAA"));
+        assert!(lines[1].starts_with("BBB"));
+        assert!(lines[2].starts_with("CCC"));
     }
 }
