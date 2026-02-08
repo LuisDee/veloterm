@@ -33,7 +33,7 @@
 
 ---
 
-## Phase 2: Visual Selection & Yank
+## Phase 2: Visual Selection & Yank [checkpoint: 7a8f78c]
 
 ### 2.1 [x] Implement Visual (character-wise) selection <!-- a524f1a -->
 - On entering Visual mode, record anchor = current cursor position
@@ -60,7 +60,7 @@
 - After yank, transition to Normal mode and clear selection
 - **Tests:** Yank text extraction for each mode, mode transition after yank
 
-### 2.5 [ ] Phase 2 Completion — Verification and Checkpointing
+### 2.5 [x] Phase 2 Completion — Verification and Checkpointing <!-- 7a8f78c -->
 
 ---
 
