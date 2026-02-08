@@ -1,5 +1,7 @@
+use crate::config::theme::Color;
 use crate::pane::divider::OverlayQuad;
 use crate::pane::Rect;
+use crate::renderer::grid_renderer::GridCell;
 
 /// Parameters for generating the search bar overlay.
 pub struct SearchBarParams<'a> {
@@ -34,6 +36,82 @@ pub fn search_bar_rect(pane_rect: Rect, cell_width: f32, cell_height: f32) -> Re
     let x = pane_rect.x + pane_rect.width - RIGHT_PADDING - bar_width;
     let y = pane_rect.y + TOP_PADDING;
     Rect::new(x, y, bar_width, bar_height)
+}
+
+/// Generate GridCells for the search bar text content.
+///
+/// Returns the text rect (1 cell tall, centered in the bar) and a Vec of GridCells
+/// representing the query text and match count. Returns None if search is not active.
+pub fn generate_search_bar_text_cells(
+    params: &SearchBarParams,
+) -> Option<(Rect, Vec<GridCell>)> {
+    let bar = search_bar_rect(params.pane_rect, params.cell_width, params.cell_height);
+    let columns = (bar.width / params.cell_width).floor() as usize;
+    if columns == 0 {
+        return None;
+    }
+
+    // Text rect: 1 cell tall, centered vertically within the search bar background
+    let text_y = bar.y + (bar.height - params.cell_height) / 2.0;
+    let text_rect = Rect::new(bar.x, text_y, bar.width, params.cell_height);
+
+    let bar_bg = Color::new(
+        params.bar_color[0],
+        params.bar_color[1],
+        params.bar_color[2],
+        params.bar_color[3],
+    );
+    let text_fg = if params.has_error {
+        Color::new(1.0, 0.3, 0.3, 1.0)
+    } else {
+        Color::new(
+            params.text_color[0],
+            params.text_color[1],
+            params.text_color[2],
+            params.text_color[3],
+        )
+    };
+
+    let mut cells = vec![GridCell::empty(bar_bg); columns];
+
+    // Layout query text starting at column 1 (after left padding)
+    let query_chars: Vec<char> = params.query.chars().collect();
+    let query_start = 1;
+    for (i, &ch) in query_chars.iter().enumerate() {
+        let col = query_start + i;
+        if col >= columns {
+            break;
+        }
+        cells[col] = GridCell::new(ch, text_fg, bar_bg);
+    }
+
+    // Right-aligned match count
+    let status = if params.query.is_empty() {
+        String::new()
+    } else if params.total_matches == 0 {
+        "No results".to_string()
+    } else {
+        format!("{} of {}", params.current_match, params.total_matches)
+    };
+
+    if !status.is_empty() {
+        let status_chars: Vec<char> = status.chars().collect();
+        let status_start = columns.saturating_sub(status_chars.len() + 1);
+        let muted_fg = Color::new(
+            params.text_color[0] * 0.7,
+            params.text_color[1] * 0.7,
+            params.text_color[2] * 0.7,
+            params.text_color[3],
+        );
+        for (i, &ch) in status_chars.iter().enumerate() {
+            let col = status_start + i;
+            if col < columns {
+                cells[col] = GridCell::new(ch, muted_fg, bar_bg);
+            }
+        }
+    }
+
+    Some((text_rect, cells))
 }
 
 /// Width of the search bar in cells.
@@ -143,5 +221,69 @@ mod tests {
         let expected_height = BAR_HEIGHT_CELLS * CELL_H;
         assert!((rect.width - expected_width).abs() < 1.0);
         assert!((rect.height - expected_height).abs() < 1.0);
+    }
+
+    // ── Search bar text cells ────────────────────────────────────
+
+    #[test]
+    fn text_cells_contain_query_characters() {
+        let params = make_params(pane(), "hello", 1, 3);
+        let (_, cells) = generate_search_bar_text_cells(&params).unwrap();
+        assert_eq!(cells[1].ch, 'h');
+        assert_eq!(cells[2].ch, 'e');
+        assert_eq!(cells[3].ch, 'l');
+        assert_eq!(cells[4].ch, 'l');
+        assert_eq!(cells[5].ch, 'o');
+    }
+
+    #[test]
+    fn text_cells_match_count_right_aligned() {
+        let params = make_params(pane(), "test", 2, 5);
+        let (_, cells) = generate_search_bar_text_cells(&params).unwrap();
+        // "2 of 5" = 6 chars, right-aligned with 1 cell padding
+        // columns = floor(300/10) = 30, status_start = 30 - 6 - 1 = 23
+        let status: String = cells[23..29].iter().map(|c| c.ch).collect();
+        assert_eq!(status, "2 of 5");
+    }
+
+    #[test]
+    fn text_cells_empty_query_all_spaces() {
+        let params = make_params(pane(), "", 0, 0);
+        let (_, cells) = generate_search_bar_text_cells(&params).unwrap();
+        assert!(cells.iter().all(|c| c.ch == ' '));
+    }
+
+    #[test]
+    fn text_cells_rect_is_one_cell_tall() {
+        let params = make_params(pane(), "test", 1, 5);
+        let (text_rect, _) = generate_search_bar_text_cells(&params).unwrap();
+        assert!((text_rect.height - CELL_H).abs() < 0.1);
+    }
+
+    #[test]
+    fn text_cells_rect_centered_in_bar() {
+        let params = make_params(pane(), "test", 1, 5);
+        let bar = search_bar_rect(pane(), CELL_W, CELL_H);
+        let (text_rect, _) = generate_search_bar_text_cells(&params).unwrap();
+        let expected_y = bar.y + (bar.height - CELL_H) / 2.0;
+        assert!((text_rect.y - expected_y).abs() < 0.1);
+    }
+
+    #[test]
+    fn text_cells_error_state_uses_red() {
+        let mut params = make_params(pane(), "test", 0, 0);
+        params.has_error = true;
+        let (_, cells) = generate_search_bar_text_cells(&params).unwrap();
+        let fg = cells[1].fg;
+        assert!(fg.r > 0.9, "error fg.r should be high (red)");
+        assert!(fg.g < 0.5, "error fg.g should be low");
+    }
+
+    #[test]
+    fn text_cells_no_results_shows_status() {
+        let params = make_params(pane(), "xyz", 0, 0);
+        let (_, cells) = generate_search_bar_text_cells(&params).unwrap();
+        let text: String = cells.iter().map(|c| c.ch).collect();
+        assert!(text.contains("No results"));
     }
 }

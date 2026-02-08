@@ -1,8 +1,9 @@
 // Tab bar rendering: quad generation and hit testing for the tab bar UI.
 
-use crate::config::theme::Theme;
+use crate::config::theme::{Color, Theme};
 use crate::pane::divider::OverlayQuad;
 use crate::pane::Rect;
+use crate::renderer::grid_renderer::GridCell;
 
 use super::TabManager;
 
@@ -100,6 +101,102 @@ pub fn generate_tab_bar_quads(
     });
 
     quads
+}
+
+/// Generate GridCells for each tab label and the "+" button.
+///
+/// Returns a Vec of (Rect, Vec<GridCell>) pairs, one per tab plus one for the "+" button.
+/// Each rect is 1 cell tall, centered vertically within the tab bar.
+pub fn generate_tab_label_text_cells(
+    tab_manager: &TabManager,
+    window_width: f32,
+    cell_width: f32,
+    cell_height: f32,
+    theme: &Theme,
+) -> Vec<(Rect, Vec<GridCell>)> {
+    let mut result = Vec::new();
+    let count = tab_manager.tab_count();
+    let active = tab_manager.active_index();
+    let tw = tab_width(window_width, count);
+
+    if tw == 0.0 || cell_width == 0.0 {
+        return result;
+    }
+
+    let text_y = (TAB_BAR_HEIGHT - cell_height) / 2.0;
+
+    for i in 0..count {
+        let x = i as f32 * tw;
+        let columns = (tw / cell_width).floor() as usize;
+        if columns == 0 {
+            continue;
+        }
+
+        let text_rect = Rect::new(x, text_y.max(0.0), tw, cell_height);
+
+        let (fg, bg) = if i == active {
+            (
+                Color::new(1.0, 1.0, 1.0, 1.0),
+                Color::new(theme.accent.r, theme.accent.g, theme.accent.b, 1.0),
+            )
+        } else {
+            (
+                Color::new(
+                    theme.text_muted.r,
+                    theme.text_muted.g,
+                    theme.text_muted.b,
+                    1.0,
+                ),
+                Color::new(
+                    theme.pane_background.r,
+                    theme.pane_background.g,
+                    theme.pane_background.b,
+                    1.0,
+                ),
+            )
+        };
+
+        let mut cells = vec![GridCell::empty(bg); columns];
+
+        let label = format!("{}", i + 1);
+        let label_chars: Vec<char> = label.chars().collect();
+        let label_start = (columns.saturating_sub(label_chars.len())) / 2;
+        for (j, &ch) in label_chars.iter().enumerate() {
+            let col = label_start + j;
+            if col < columns {
+                cells[col] = GridCell::new(ch, fg, bg);
+            }
+        }
+
+        result.push((text_rect, cells));
+    }
+
+    // "+" button
+    let plus_x = (count as f32 * tw).min(window_width - NEW_TAB_BUTTON_WIDTH);
+    let plus_cols = (NEW_TAB_BUTTON_WIDTH / cell_width).floor() as usize;
+    if plus_cols > 0 {
+        let plus_rect = Rect::new(plus_x, text_y.max(0.0), NEW_TAB_BUTTON_WIDTH, cell_height);
+        let bg = Color::new(
+            theme.pane_background.r,
+            theme.pane_background.g,
+            theme.pane_background.b,
+            1.0,
+        );
+        let fg = Color::new(
+            theme.text_muted.r,
+            theme.text_muted.g,
+            theme.text_muted.b,
+            1.0,
+        );
+        let mut cells = vec![GridCell::empty(bg); plus_cols];
+        let center = plus_cols / 2;
+        if center < plus_cols {
+            cells[center] = GridCell::new('+', fg, bg);
+        }
+        result.push((plus_rect, cells));
+    }
+
+    result
 }
 
 /// Hit tests a point against the tab bar.
@@ -266,5 +363,55 @@ mod tests {
     fn hit_test_just_inside_tab_bar() {
         let result = hit_test_tab_bar(100.0, TAB_BAR_HEIGHT - 1.0, 1280.0, 3);
         assert_eq!(result, Some(TabBarAction::SelectTab(0)));
+    }
+
+    // ── generate_tab_label_text_cells ─────────────────────────────
+
+    #[test]
+    fn label_single_tab_generates_label_1() {
+        setup();
+        let mgr = TabManager::new();
+        let theme = Theme::claude_dark();
+        let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme);
+        assert_eq!(labels.len(), 2); // 1 tab + "+" button
+        assert!(labels[0].1.iter().any(|c| c.ch == '1'));
+    }
+
+    #[test]
+    fn label_active_tab_uses_accent_bg() {
+        setup();
+        let mgr = TabManager::new();
+        let theme = Theme::claude_dark();
+        let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme);
+        let tab_cell = labels[0].1.iter().find(|c| c.ch == '1').unwrap();
+        assert!((tab_cell.bg.r - theme.accent.r).abs() < 0.01);
+        assert!((tab_cell.bg.g - theme.accent.g).abs() < 0.01);
+        assert!((tab_cell.bg.b - theme.accent.b).abs() < 0.01);
+    }
+
+    #[test]
+    fn label_inactive_tab_uses_pane_background() {
+        setup();
+        let mut mgr = TabManager::new();
+        mgr.new_tab();
+        let theme = Theme::claude_dark();
+        let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme);
+        let tab0_cell = labels[0].1.iter().find(|c| c.ch == '1').unwrap();
+        assert!((tab0_cell.bg.r - theme.pane_background.r).abs() < 0.01);
+    }
+
+    #[test]
+    fn label_multiple_tabs_each_get_descriptor() {
+        setup();
+        let mut mgr = TabManager::new();
+        mgr.new_tab();
+        mgr.new_tab();
+        let theme = Theme::claude_dark();
+        let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme);
+        assert_eq!(labels.len(), 4); // 3 tabs + "+" button
+        assert!(labels[0].1.iter().any(|c| c.ch == '1'));
+        assert!(labels[1].1.iter().any(|c| c.ch == '2'));
+        assert!(labels[2].1.iter().any(|c| c.ch == '3'));
+        assert!(labels[3].1.iter().any(|c| c.ch == '+'));
     }
 }

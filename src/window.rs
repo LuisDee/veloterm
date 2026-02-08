@@ -19,11 +19,11 @@ use crate::link::opener::open_link;
 use crate::link::LinkDetector;
 use crate::search::SearchState;
 use crate::pane::divider::{generate_divider_quads, generate_unfocused_overlay_quads, OverlayQuad};
-use crate::search::overlay::{generate_search_bar_quads, SearchBarParams};
+use crate::search::overlay::{generate_search_bar_quads, generate_search_bar_text_cells, SearchBarParams};
 use crate::pane::interaction::{CursorType, InteractionEffect, PaneInteraction};
 use crate::pane::{PaneId, Rect, SplitDirection};
 use crate::renderer::PaneRenderDescriptor;
-use crate::tab::bar::{generate_tab_bar_quads, hit_test_tab_bar, TabBarAction, TAB_BAR_HEIGHT};
+use crate::tab::bar::{generate_tab_bar_quads, generate_tab_label_text_cells, hit_test_tab_bar, TabBarAction, TAB_BAR_HEIGHT};
 use crate::tab::TabManager;
 
 /// Default window width in logical pixels.
@@ -1003,9 +1003,73 @@ impl ApplicationHandler for App {
                 let overlay_quads =
                     self.generate_overlay_quads(width as f32, height as f32);
 
+                // Build text overlay descriptors (tab labels + search bar text)
+                let mut text_overlays: Vec<(
+                    crate::pane::Rect,
+                    Vec<crate::renderer::grid_renderer::GridCell>,
+                )> = Vec::new();
+
+                if let Some(renderer) = &self.renderer {
+                    let theme = renderer.theme();
+                    let cw = renderer.cell_width();
+                    let ch = renderer.cell_height();
+
+                    // Tab labels
+                    let labels = generate_tab_label_text_cells(
+                        &self.tab_manager,
+                        width as f32,
+                        cw,
+                        ch,
+                        theme,
+                    );
+                    text_overlays.extend(labels);
+
+                    // Search bar text
+                    if self.search_state.is_active {
+                        let pane_tree = &self.tab_manager.active_tab().pane_tree;
+                        let focused = pane_tree.focused_pane_id();
+                        let content = self.content_bounds(width as f32, height as f32);
+                        let layout = pane_tree.calculate_layout(content.width, content.height);
+                        if let Some((_, rect)) = layout.iter().find(|(id, _)| *id == focused) {
+                            let screen_rect = Rect::new(
+                                rect.x,
+                                rect.y + TAB_BAR_HEIGHT,
+                                rect.width,
+                                rect.height,
+                            );
+                            let params = SearchBarParams {
+                                pane_rect: screen_rect,
+                                cell_width: cw,
+                                cell_height: ch,
+                                query: &self.search_state.query,
+                                current_match: self.search_state.current_index + 1,
+                                total_matches: self.search_state.total_count(),
+                                has_error: self.search_state.error.is_some(),
+                                bar_color: [
+                                    theme.border.r,
+                                    theme.border.g,
+                                    theme.border.b,
+                                    0.95,
+                                ],
+                                text_color: [
+                                    theme.text_primary.r,
+                                    theme.text_primary.g,
+                                    theme.text_primary.b,
+                                    1.0,
+                                ],
+                            };
+                            if let Some((text_rect, cells)) =
+                                generate_search_bar_text_cells(&params)
+                            {
+                                text_overlays.push((text_rect, cells));
+                            }
+                        }
+                    }
+                }
+
                 if let Some(renderer) = &mut self.renderer {
                     renderer.update_overlays(&overlay_quads);
-                    match renderer.render_panes(&mut pane_descs) {
+                    match renderer.render_panes(&mut pane_descs, &text_overlays) {
                         Ok(()) => {}
                         Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                             renderer.resize(width, height);
