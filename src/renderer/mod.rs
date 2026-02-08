@@ -61,9 +61,15 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    /// Initialize the renderer with a window, theme, and font size.
+    /// Initialize the renderer with a window, theme, and font configuration.
     /// Creates GPU context, glyph atlas, grid, and all render resources.
-    pub async fn new(window: Arc<Window>, theme: Theme, font_size: f32) -> Result<Self, GpuError> {
+    pub async fn new(
+        window: Arc<Window>,
+        theme: Theme,
+        font_size: f32,
+        font_family: &str,
+        line_height_multiplier: f32,
+    ) -> Result<Self, GpuError> {
         let size = window.inner_size();
         let scale_factor = window.scale_factor() as f32;
 
@@ -122,7 +128,7 @@ impl Renderer {
         surface.configure(&device, &surface_config.to_wgpu_config());
 
         // Glyph atlas
-        let atlas = GlyphAtlas::new(font_size, scale_factor);
+        let atlas = GlyphAtlas::new(font_size, scale_factor, font_family, line_height_multiplier);
         log::info!(
             "Glyph atlas: {}x{} (cell: {:.1}x{:.1})",
             atlas.atlas_width,
@@ -742,7 +748,7 @@ mod tests {
     #[test]
     fn renderer_components_initialize() {
         // Test that all component pieces work together without a window
-        let atlas = GlyphAtlas::new(13.0, 2.0);
+        let atlas = GlyphAtlas::new(13.0, 2.0, "JetBrains Mono", 1.5);
         let grid = GridDimensions::new(1280, 720, atlas.cell_width, atlas.cell_height);
         let theme = Theme::claude_dark();
         let cells = generate_test_pattern(&grid, &theme);
@@ -755,7 +761,7 @@ mod tests {
 
     #[test]
     fn renderer_uniforms_match_grid() {
-        let atlas = GlyphAtlas::new(13.0, 2.0);
+        let atlas = GlyphAtlas::new(13.0, 2.0, "JetBrains Mono", 1.5);
         let grid = GridDimensions::new(1280, 720, atlas.cell_width, atlas.cell_height);
 
         let uniforms = GridUniforms {
@@ -772,7 +778,7 @@ mod tests {
 
     #[test]
     fn renderer_resize_changes_grid() {
-        let atlas = GlyphAtlas::new(13.0, 2.0);
+        let atlas = GlyphAtlas::new(13.0, 2.0, "JetBrains Mono", 1.5);
         let mut grid = GridDimensions::new(1280, 720, atlas.cell_width, atlas.cell_height);
         let original_cols = grid.columns;
         let original_rows = grid.rows;
@@ -784,7 +790,7 @@ mod tests {
 
     #[test]
     fn renderer_instances_have_correct_count_after_resize() {
-        let atlas = GlyphAtlas::new(13.0, 2.0);
+        let atlas = GlyphAtlas::new(13.0, 2.0, "JetBrains Mono", 1.5);
         let mut grid = GridDimensions::new(1280, 720, atlas.cell_width, atlas.cell_height);
         let theme = Theme::claude_dark();
 
@@ -803,7 +809,7 @@ mod tests {
             Err(_) => return, // Skip if no GPU
         };
 
-        let atlas = GlyphAtlas::new(13.0, 1.0);
+        let atlas = GlyphAtlas::new(13.0, 1.0, "JetBrains Mono", 1.5);
         let atlas_texture = create_atlas_texture(
             &ctx.device,
             &ctx.queue,
@@ -862,8 +868,8 @@ mod tests {
 
     #[test]
     fn config_font_size_affects_cell_dimensions() {
-        let small = GlyphAtlas::new(10.0, 1.0);
-        let large = GlyphAtlas::new(20.0, 1.0);
+        let small = GlyphAtlas::new(10.0, 1.0, "JetBrains Mono", 1.5);
+        let large = GlyphAtlas::new(20.0, 1.0, "JetBrains Mono", 1.5);
         // Larger font → larger cells
         assert!(large.cell_width > small.cell_width);
         assert!(large.cell_height > small.cell_height);
@@ -872,8 +878,8 @@ mod tests {
     #[test]
     fn config_larger_font_produces_fewer_grid_cells() {
         // Same window size, different font sizes → different grid dimensions
-        let small_atlas = GlyphAtlas::new(10.0, 1.0);
-        let large_atlas = GlyphAtlas::new(20.0, 1.0);
+        let small_atlas = GlyphAtlas::new(10.0, 1.0, "JetBrains Mono", 1.5);
+        let large_atlas = GlyphAtlas::new(20.0, 1.0, "JetBrains Mono", 1.5);
         let small_grid =
             GridDimensions::new(1280, 720, small_atlas.cell_width, small_atlas.cell_height);
         let large_grid =
@@ -890,7 +896,7 @@ mod tests {
 
     #[test]
     fn config_theme_from_name_works_in_renderer() {
-        let atlas = GlyphAtlas::new(13.0, 2.0);
+        let atlas = GlyphAtlas::new(13.0, 2.0, "JetBrains Mono", 1.5);
         let grid = GridDimensions::new(1280, 720, atlas.cell_width, atlas.cell_height);
 
         for name in &["claude_dark", "claude_light", "claude_warm"] {
@@ -903,7 +909,7 @@ mod tests {
 
     #[test]
     fn config_theme_produces_different_background_colors() {
-        let atlas = GlyphAtlas::new(13.0, 1.0);
+        let atlas = GlyphAtlas::new(13.0, 1.0, "JetBrains Mono", 1.5);
         let grid = GridDimensions::new(640, 480, atlas.cell_width, atlas.cell_height);
 
         let dark = Theme::from_name("claude_dark").unwrap();
@@ -988,7 +994,7 @@ mod tests {
     fn text_overlay_instances_generated_from_cells() {
         use crate::config::theme::Color;
 
-        let atlas = GlyphAtlas::new(13.0, 1.0);
+        let atlas = GlyphAtlas::new(13.0, 1.0, "JetBrains Mono", 1.5);
         let rect = PaneRect::new(100.0, 5.0, 200.0, atlas.cell_height);
         let grid = GridDimensions::from_pane_rect(&rect, atlas.cell_width, atlas.cell_height);
 
@@ -1013,7 +1019,7 @@ mod tests {
 
     #[test]
     fn text_overlay_grid_dimensions_match_rect() {
-        let atlas = GlyphAtlas::new(13.0, 1.0);
+        let atlas = GlyphAtlas::new(13.0, 1.0, "JetBrains Mono", 1.5);
         let rect = PaneRect::new(50.0, 10.0, 300.0, atlas.cell_height);
         let grid = GridDimensions::from_pane_rect(&rect, atlas.cell_width, atlas.cell_height);
         let expected_cols = (300.0 / atlas.cell_width).floor() as u32;

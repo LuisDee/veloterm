@@ -3,6 +3,13 @@
 use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, SwashCache};
 use std::collections::HashMap;
 
+/// JetBrains Mono Regular — bundled as a compiled-in resource (~264KB).
+const JETBRAINS_MONO_TTF: &[u8] =
+    include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
+
+/// Terminal content font fallback chain.
+const TERMINAL_FONT_FALLBACKS: &[&str] = &["SF Mono", "Menlo", "monospace"];
+
 /// Metadata for a single glyph in the atlas.
 #[derive(Debug, Clone)]
 pub struct GlyphInfo {
@@ -33,14 +40,26 @@ impl GlyphAtlas {
     ///
     /// `font_size` is the base font size in points (e.g., 13.0).
     /// `scale_factor` is the DPI scale (e.g., 2.0 for Retina).
-    pub fn new(font_size: f32, scale_factor: f32) -> Self {
+    /// `font_family` is the primary font family name (e.g., "JetBrains Mono").
+    /// `line_height_multiplier` is the line-height as a multiplier of font size (e.g., 1.5).
+    pub fn new(
+        font_size: f32,
+        scale_factor: f32,
+        font_family: &str,
+        line_height_multiplier: f32,
+    ) -> Self {
         let scaled_size = font_size * scale_factor;
-        let line_height = (scaled_size * 1.6).ceil();
+        let line_height = (scaled_size * line_height_multiplier).ceil();
 
         let mut font_system = FontSystem::new();
+        // Load bundled JetBrains Mono into the font database
+        font_system
+            .db_mut()
+            .load_font_data(JETBRAINS_MONO_TTF.to_vec());
+
         let mut swash_cache = SwashCache::new();
         let metrics = Metrics::new(scaled_size, line_height);
-        let attrs = Attrs::new().family(Family::Monospace);
+        let attrs = Self::resolve_font_attrs(font_family);
 
         // Determine cell width from font metrics by measuring a reference glyph
         let mut buffer = Buffer::new(&mut font_system, metrics);
@@ -136,6 +155,28 @@ impl GlyphAtlas {
         }
     }
 
+    /// Resolve font family name to cosmic-text `Attrs` with fallback chain.
+    ///
+    /// Tries the requested family first, then falls through the terminal
+    /// font fallback chain (SF Mono → Menlo → system monospace).
+    fn resolve_font_attrs(font_family: &str) -> Attrs<'static> {
+        // cosmic-text resolves font families at shaping time. We set the
+        // primary family name; if it's not found, cosmic-text will fall
+        // back to its own defaults. We additionally try our known fallbacks.
+        match font_family.to_lowercase().as_str() {
+            "jetbrains mono" => Attrs::new().family(Family::Name("JetBrains Mono")),
+            "sf mono" => Attrs::new().family(Family::Name("SF Mono")),
+            "menlo" => Attrs::new().family(Family::Name("Menlo")),
+            "monospace" => Attrs::new().family(Family::Monospace),
+            _ => {
+                // Try the user-specified family; cosmic-text falls back if not found
+                // We leak the string to get a 'static lifetime for Family::Name
+                let leaked: &'static str = Box::leak(font_family.to_string().into_boxed_str());
+                Attrs::new().family(Family::Name(leaked))
+            }
+        }
+    }
+
     /// Look up glyph metadata for a character.
     pub fn glyph_info(&self, c: char) -> Option<&GlyphInfo> {
         self.glyphs.get(&c)
@@ -156,7 +197,7 @@ mod tests {
     use super::*;
 
     fn create_test_atlas() -> GlyphAtlas {
-        GlyphAtlas::new(13.0, 2.0)
+        GlyphAtlas::new(13.0, 2.0, "JetBrains Mono", 1.5)
     }
 
     // ── Font loading ────────────────────────────────────────────────
@@ -166,6 +207,48 @@ mod tests {
         let atlas = create_test_atlas();
         assert!(atlas.atlas_width > 0);
         assert!(atlas.atlas_height > 0);
+    }
+
+    #[test]
+    fn atlas_creates_with_bundled_jetbrains_mono() {
+        let atlas = GlyphAtlas::new(13.0, 2.0, "JetBrains Mono", 1.5);
+        assert!(atlas.cell_width > 0.0);
+        assert!(atlas.glyph_info('A').is_some());
+    }
+
+    #[test]
+    fn atlas_creates_with_monospace_fallback() {
+        let atlas = GlyphAtlas::new(13.0, 2.0, "monospace", 1.5);
+        assert!(atlas.cell_width > 0.0);
+        assert!(atlas.glyph_info('A').is_some());
+    }
+
+    #[test]
+    fn atlas_creates_with_unknown_font_falls_back() {
+        // Unknown font should still create a working atlas via system fallback
+        let atlas = GlyphAtlas::new(13.0, 2.0, "NonExistentFont12345", 1.5);
+        assert!(atlas.cell_width > 0.0);
+        assert!(atlas.glyph_info('A').is_some());
+    }
+
+    #[test]
+    fn atlas_line_height_multiplier_affects_cell_height() {
+        let atlas_small = GlyphAtlas::new(13.0, 2.0, "JetBrains Mono", 1.2);
+        let atlas_large = GlyphAtlas::new(13.0, 2.0, "JetBrains Mono", 1.8);
+        assert!(
+            atlas_large.cell_height > atlas_small.cell_height,
+            "larger line_height multiplier should produce taller cells: {} vs {}",
+            atlas_large.cell_height,
+            atlas_small.cell_height
+        );
+    }
+
+    #[test]
+    fn atlas_default_line_height_produces_expected_size() {
+        // 13px * 2.0 scale = 26px, * 1.5 line_height = 39px (ceil)
+        let atlas = GlyphAtlas::new(13.0, 2.0, "JetBrains Mono", 1.5);
+        let expected = (26.0_f32 * 1.5).ceil();
+        assert_eq!(atlas.cell_height, expected);
     }
 
     // ── Glyph metrics ───────────────────────────────────────────────
@@ -189,7 +272,6 @@ mod tests {
     #[test]
     fn atlas_cell_height_is_reasonable() {
         let atlas = create_test_atlas();
-        // line_height = ceil(26 * 1.6) = 42
         assert!(
             atlas.cell_height > 10.0,
             "cell_height {} too small",

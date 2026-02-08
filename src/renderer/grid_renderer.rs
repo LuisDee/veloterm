@@ -276,7 +276,7 @@ mod tests {
     use crate::renderer::glyph_atlas::GlyphAtlas;
 
     fn test_atlas() -> GlyphAtlas {
-        GlyphAtlas::new(13.0, 1.0)
+        GlyphAtlas::new(13.0, 1.0, "JetBrains Mono", 1.5)
     }
 
     fn test_fg() -> Color {

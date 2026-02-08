@@ -930,12 +930,16 @@ impl ApplicationHandler for App {
                     Theme::claude_dark()
                 });
                 let font_size = self.app_config.font.size as f32;
+                let font_family = self.app_config.font.family.as_str();
+                let line_height = self.app_config.font.line_height as f32;
 
                 // Initialize renderer
                 match pollster::block_on(crate::renderer::Renderer::new(
                     window.clone(),
                     theme,
                     font_size,
+                    font_family,
+                    line_height,
                 )) {
                     Ok(renderer) => {
                         log::info!("Renderer initialized");
