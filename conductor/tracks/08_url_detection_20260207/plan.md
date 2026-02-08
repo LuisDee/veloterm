@@ -34,7 +34,7 @@
 ### Phase 1 Completion
 - [x] Phase completion verification and checkpointing
 
-## Phase 2: Grid Shader Underline & App Integration
+## Phase 2: Grid Shader Underline & App Integration [checkpoint: d449be4]
 
 ### Task 2.1: Grid shader underline rendering <!-- 911e52a -->
 - [x] Write tests for CELL_FLAG_UNDERLINE being passed to shader correctly (existing tests verify flag propagation)
