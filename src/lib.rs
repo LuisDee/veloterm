@@ -6,6 +6,7 @@ pub mod pane;
 pub mod platform;
 pub mod pty;
 pub mod renderer;
+pub mod scroll;
 pub mod search;
 pub mod shell_integration;
 pub mod tab;
