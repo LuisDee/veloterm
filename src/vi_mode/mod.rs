@@ -304,6 +304,271 @@ impl ViState {
             ViMode::VisualBlock => "-- VISUAL BLOCK --",
         }
     }
+
+    /// Apply a motion to the cursor position, clamping to buffer bounds.
+    /// `line_len` is a callback that returns the length (number of columns) for a given row.
+    pub fn apply_motion(&mut self, motion: &Motion, ctx: &BufferContext) {
+        match *motion {
+            Motion::CharLeft(n) => {
+                self.cursor.col = self.cursor.col.saturating_sub(n);
+            }
+            Motion::CharRight(n) => {
+                let max_col = ctx.line_len(self.cursor.row).saturating_sub(1);
+                self.cursor.col = (self.cursor.col + n).min(max_col);
+            }
+            Motion::LineUp(n) => {
+                self.cursor.row = self.cursor.row.saturating_sub(n);
+                self.clamp_col(ctx);
+            }
+            Motion::LineDown(n) => {
+                let max_row = ctx.total_rows.saturating_sub(1);
+                self.cursor.row = (self.cursor.row + n).min(max_row);
+                self.clamp_col(ctx);
+            }
+            Motion::LineStart => {
+                self.cursor.col = 0;
+            }
+            Motion::LineEnd => {
+                let max_col = ctx.line_len(self.cursor.row).saturating_sub(1);
+                self.cursor.col = max_col;
+            }
+            Motion::FirstNonBlank => {
+                let len = ctx.line_len(self.cursor.row);
+                let mut col = 0;
+                while col < len {
+                    if let Some(ch) = ctx.char_at(self.cursor.row, col) {
+                        if ch != ' ' && ch != '\t' {
+                            break;
+                        }
+                    }
+                    col += 1;
+                }
+                self.cursor.col = col.min(len.saturating_sub(1));
+            }
+            Motion::BufferTop => {
+                self.cursor.row = 0;
+                self.clamp_col(ctx);
+            }
+            Motion::BufferBottom => {
+                self.cursor.row = ctx.total_rows.saturating_sub(1);
+                self.clamp_col(ctx);
+            }
+            Motion::ViewportTop => {
+                self.cursor.row = ctx.viewport_top;
+                self.clamp_col(ctx);
+            }
+            Motion::ViewportMiddle => {
+                let mid = ctx.viewport_top + ctx.viewport_rows / 2;
+                self.cursor.row = mid.min(ctx.total_rows.saturating_sub(1));
+                self.clamp_col(ctx);
+            }
+            Motion::ViewportBottom => {
+                let bottom = ctx.viewport_top + ctx.viewport_rows.saturating_sub(1);
+                self.cursor.row = bottom.min(ctx.total_rows.saturating_sub(1));
+                self.clamp_col(ctx);
+            }
+            Motion::HalfPageUp => {
+                let half = ctx.viewport_rows / 2;
+                self.cursor.row = self.cursor.row.saturating_sub(half);
+                self.clamp_col(ctx);
+            }
+            Motion::HalfPageDown => {
+                let half = ctx.viewport_rows / 2;
+                let max_row = ctx.total_rows.saturating_sub(1);
+                self.cursor.row = (self.cursor.row + half).min(max_row);
+                self.clamp_col(ctx);
+            }
+            Motion::WordForward(n) => {
+                for _ in 0..n {
+                    self.move_word_forward(ctx);
+                }
+            }
+            Motion::WordBackward(n) => {
+                for _ in 0..n {
+                    self.move_word_backward(ctx);
+                }
+            }
+            Motion::WordEnd(n) => {
+                for _ in 0..n {
+                    self.move_word_end(ctx);
+                }
+            }
+        }
+    }
+
+    /// Clamp column to the current line's length.
+    fn clamp_col(&mut self, ctx: &BufferContext) {
+        let max_col = ctx.line_len(self.cursor.row).saturating_sub(1);
+        self.cursor.col = self.cursor.col.min(max_col);
+    }
+
+    /// Move forward to the start of the next word.
+    fn move_word_forward(&mut self, ctx: &BufferContext) {
+        let max_row = ctx.total_rows.saturating_sub(1);
+        let mut row = self.cursor.row;
+        let mut col = self.cursor.col;
+        let len = ctx.line_len(row);
+
+        // Skip current word characters
+        while col < len {
+            match ctx.char_at(row, col) {
+                Some(ch) if is_word_char(ch) => col += 1,
+                _ => break,
+            }
+        }
+        // Skip non-word characters (spaces, punctuation)
+        loop {
+            if col < ctx.line_len(row) {
+                match ctx.char_at(row, col) {
+                    Some(ch) if !is_word_char(ch) && ch != '\0' => col += 1,
+                    _ => break,
+                }
+            } else {
+                // Move to next line
+                if row < max_row {
+                    row += 1;
+                    col = 0;
+                    // Skip leading whitespace on new line
+                    let new_len = ctx.line_len(row);
+                    while col < new_len {
+                        match ctx.char_at(row, col) {
+                            Some(' ') | Some('\t') => col += 1,
+                            _ => break,
+                        }
+                    }
+                    break;
+                } else {
+                    col = ctx.line_len(row).saturating_sub(1);
+                    break;
+                }
+            }
+        }
+        self.cursor.row = row;
+        self.cursor.col = col.min(ctx.line_len(row).saturating_sub(1));
+    }
+
+    /// Move backward to the start of the previous word.
+    fn move_word_backward(&mut self, ctx: &BufferContext) {
+        let mut row = self.cursor.row;
+        let mut col = self.cursor.col;
+
+        // If at start of line, go to end of previous line
+        if col == 0 && row > 0 {
+            row -= 1;
+            col = ctx.line_len(row).saturating_sub(1);
+        } else if col > 0 {
+            col -= 1;
+        }
+
+        // Skip non-word characters backward
+        loop {
+            if col == 0 && row == 0 {
+                break;
+            }
+            match ctx.char_at(row, col) {
+                Some(ch) if is_word_char(ch) => break,
+                _ => {
+                    if col > 0 {
+                        col -= 1;
+                    } else if row > 0 {
+                        row -= 1;
+                        col = ctx.line_len(row).saturating_sub(1);
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Move to start of word
+        while col > 0 {
+            match ctx.char_at(row, col - 1) {
+                Some(ch) if is_word_char(ch) => col -= 1,
+                _ => break,
+            }
+        }
+
+        self.cursor.row = row;
+        self.cursor.col = col;
+    }
+
+    /// Move forward to the end of the current/next word.
+    fn move_word_end(&mut self, ctx: &BufferContext) {
+        let max_row = ctx.total_rows.saturating_sub(1);
+        let mut row = self.cursor.row;
+        let mut col = self.cursor.col;
+
+        // Move at least one position forward
+        col += 1;
+        if col >= ctx.line_len(row) {
+            if row < max_row {
+                row += 1;
+                col = 0;
+            } else {
+                self.cursor.col = ctx.line_len(row).saturating_sub(1);
+                return;
+            }
+        }
+
+        // Skip non-word characters
+        loop {
+            if col < ctx.line_len(row) {
+                match ctx.char_at(row, col) {
+                    Some(ch) if is_word_char(ch) => break,
+                    _ => col += 1,
+                }
+            } else if row < max_row {
+                row += 1;
+                col = 0;
+            } else {
+                col = ctx.line_len(row).saturating_sub(1);
+                break;
+            }
+        }
+
+        // Move to end of word
+        while col + 1 < ctx.line_len(row) {
+            match ctx.char_at(row, col + 1) {
+                Some(ch) if is_word_char(ch) => col += 1,
+                _ => break,
+            }
+        }
+
+        self.cursor.row = row;
+        self.cursor.col = col.min(ctx.line_len(row).saturating_sub(1));
+    }
+}
+
+/// Check if a character is a word character (alphanumeric or underscore).
+fn is_word_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_'
+}
+
+/// Context about the buffer needed for motion application.
+pub struct BufferContext<'a> {
+    /// Total number of rows in the scrollback buffer.
+    pub total_rows: usize,
+    /// Number of columns per row.
+    pub cols: usize,
+    /// First visible row in the viewport.
+    pub viewport_top: usize,
+    /// Number of visible rows in the viewport.
+    pub viewport_rows: usize,
+    /// Callback to get a character at a given (row, col).
+    /// Returns None if out of bounds.
+    pub char_at_fn: &'a dyn Fn(usize, usize) -> Option<char>,
+}
+
+impl<'a> BufferContext<'a> {
+    /// Get the length of a line (number of columns).
+    pub fn line_len(&self, _row: usize) -> usize {
+        self.cols
+    }
+
+    /// Get the character at (row, col).
+    pub fn char_at(&self, row: usize, col: usize) -> Option<char> {
+        (self.char_at_fn)(row, col)
+    }
 }
 
 #[cfg(test)]
@@ -788,5 +1053,324 @@ mod tests {
     fn unknown_ctrl_key_produces_none() {
         let mut state = ViState::new(5, 3);
         assert_eq!(state.process_key('x', true), ViAction::None);
+    }
+
+    // ── Motion application tests ────────────────────────────────────
+
+    /// Helper to create a BufferContext from a slice of strings.
+    fn make_ctx<'a>(lines: &'a [&str], _viewport_top: usize, _viewport_rows: usize) -> (Vec<Vec<char>>, usize) {
+        let cols = lines.iter().map(|l| l.len()).max().unwrap_or(10);
+        let grid: Vec<Vec<char>> = lines
+            .iter()
+            .map(|l| {
+                let mut row: Vec<char> = l.chars().collect();
+                row.resize(cols, ' ');
+                row
+            })
+            .collect();
+        (grid, cols)
+    }
+
+    macro_rules! ctx_from {
+        ($grid:expr, $cols:expr, $vt:expr, $vr:expr) => {{
+            let grid_ref = &$grid;
+            BufferContext {
+                total_rows: grid_ref.len(),
+                cols: $cols,
+                viewport_top: $vt,
+                viewport_rows: $vr,
+                char_at_fn: &|row, col| {
+                    grid_ref.get(row).and_then(|r| r.get(col).copied())
+                },
+            }
+        }};
+    }
+
+    #[test]
+    fn apply_char_left_clamps_at_zero() {
+        let lines = &["hello world"];
+        let (grid, cols) = make_ctx(lines, 0, 1);
+        let ctx = ctx_from!(&grid, cols, 0, 1);
+        let mut state = ViState::new(0, 2);
+        state.apply_motion(&Motion::CharLeft(5), &ctx);
+        assert_eq!(state.cursor.col, 0);
+    }
+
+    #[test]
+    fn apply_char_left_moves_by_count() {
+        let lines = &["hello world"];
+        let (grid, cols) = make_ctx(lines, 0, 1);
+        let ctx = ctx_from!(&grid, cols, 0, 1);
+        let mut state = ViState::new(0, 5);
+        state.apply_motion(&Motion::CharLeft(3), &ctx);
+        assert_eq!(state.cursor.col, 2);
+    }
+
+    #[test]
+    fn apply_char_right_clamps_at_line_end() {
+        let lines = &["hello world"];
+        let (grid, cols) = make_ctx(lines, 0, 1);
+        let ctx = ctx_from!(&grid, cols, 0, 1);
+        let mut state = ViState::new(0, 8);
+        state.apply_motion(&Motion::CharRight(100), &ctx);
+        assert_eq!(state.cursor.col, cols - 1);
+    }
+
+    #[test]
+    fn apply_char_right_moves_by_count() {
+        let lines = &["hello world"];
+        let (grid, cols) = make_ctx(lines, 0, 1);
+        let ctx = ctx_from!(&grid, cols, 0, 1);
+        let mut state = ViState::new(0, 0);
+        state.apply_motion(&Motion::CharRight(3), &ctx);
+        assert_eq!(state.cursor.col, 3);
+    }
+
+    #[test]
+    fn apply_line_up_clamps_at_zero() {
+        let lines = &["line0", "line1", "line2"];
+        let (grid, cols) = make_ctx(lines, 0, 3);
+        let ctx = ctx_from!(&grid, cols, 0, 3);
+        let mut state = ViState::new(1, 0);
+        state.apply_motion(&Motion::LineUp(5), &ctx);
+        assert_eq!(state.cursor.row, 0);
+    }
+
+    #[test]
+    fn apply_line_down_clamps_at_last_row() {
+        let lines = &["line0", "line1", "line2"];
+        let (grid, cols) = make_ctx(lines, 0, 3);
+        let ctx = ctx_from!(&grid, cols, 0, 3);
+        let mut state = ViState::new(1, 0);
+        state.apply_motion(&Motion::LineDown(100), &ctx);
+        assert_eq!(state.cursor.row, 2);
+    }
+
+    #[test]
+    fn apply_line_start() {
+        let lines = &["hello world"];
+        let (grid, cols) = make_ctx(lines, 0, 1);
+        let ctx = ctx_from!(&grid, cols, 0, 1);
+        let mut state = ViState::new(0, 5);
+        state.apply_motion(&Motion::LineStart, &ctx);
+        assert_eq!(state.cursor.col, 0);
+    }
+
+    #[test]
+    fn apply_line_end() {
+        let lines = &["hello world"];
+        let (grid, cols) = make_ctx(lines, 0, 1);
+        let ctx = ctx_from!(&grid, cols, 0, 1);
+        let mut state = ViState::new(0, 0);
+        state.apply_motion(&Motion::LineEnd, &ctx);
+        assert_eq!(state.cursor.col, cols - 1);
+    }
+
+    #[test]
+    fn apply_first_non_blank() {
+        let lines = &["   hello"];
+        let (grid, cols) = make_ctx(lines, 0, 1);
+        let ctx = ctx_from!(&grid, cols, 0, 1);
+        let mut state = ViState::new(0, 0);
+        state.apply_motion(&Motion::FirstNonBlank, &ctx);
+        assert_eq!(state.cursor.col, 3);
+    }
+
+    #[test]
+    fn apply_first_non_blank_no_leading_spaces() {
+        let lines = &["hello"];
+        let (grid, cols) = make_ctx(lines, 0, 1);
+        let ctx = ctx_from!(&grid, cols, 0, 1);
+        let mut state = ViState::new(0, 3);
+        state.apply_motion(&Motion::FirstNonBlank, &ctx);
+        assert_eq!(state.cursor.col, 0);
+    }
+
+    #[test]
+    fn apply_buffer_top() {
+        let lines = &["line0", "line1", "line2"];
+        let (grid, cols) = make_ctx(lines, 0, 3);
+        let ctx = ctx_from!(&grid, cols, 0, 3);
+        let mut state = ViState::new(2, 3);
+        state.apply_motion(&Motion::BufferTop, &ctx);
+        assert_eq!(state.cursor.row, 0);
+    }
+
+    #[test]
+    fn apply_buffer_bottom() {
+        let lines = &["line0", "line1", "line2"];
+        let (grid, cols) = make_ctx(lines, 0, 3);
+        let ctx = ctx_from!(&grid, cols, 0, 3);
+        let mut state = ViState::new(0, 0);
+        state.apply_motion(&Motion::BufferBottom, &ctx);
+        assert_eq!(state.cursor.row, 2);
+    }
+
+    #[test]
+    fn apply_viewport_top() {
+        let lines = &["l0", "l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9"];
+        let (grid, cols) = make_ctx(lines, 3, 5);
+        let ctx = ctx_from!(&grid, cols, 3, 5);
+        let mut state = ViState::new(7, 0);
+        state.apply_motion(&Motion::ViewportTop, &ctx);
+        assert_eq!(state.cursor.row, 3);
+    }
+
+    #[test]
+    fn apply_viewport_middle() {
+        let lines = &["l0", "l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9"];
+        let (grid, cols) = make_ctx(lines, 3, 5);
+        let ctx = ctx_from!(&grid, cols, 3, 5);
+        let mut state = ViState::new(0, 0);
+        state.apply_motion(&Motion::ViewportMiddle, &ctx);
+        assert_eq!(state.cursor.row, 5); // 3 + 5/2 = 5
+    }
+
+    #[test]
+    fn apply_viewport_bottom() {
+        let lines = &["l0", "l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9"];
+        let (grid, cols) = make_ctx(lines, 3, 5);
+        let ctx = ctx_from!(&grid, cols, 3, 5);
+        let mut state = ViState::new(0, 0);
+        state.apply_motion(&Motion::ViewportBottom, &ctx);
+        assert_eq!(state.cursor.row, 7); // 3 + 5 - 1 = 7
+    }
+
+    #[test]
+    fn apply_half_page_up() {
+        let lines = &["l0", "l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9"];
+        let (grid, cols) = make_ctx(lines, 0, 10);
+        let ctx = ctx_from!(&grid, cols, 0, 10);
+        let mut state = ViState::new(7, 0);
+        state.apply_motion(&Motion::HalfPageUp, &ctx);
+        assert_eq!(state.cursor.row, 2); // 7 - 10/2 = 2
+    }
+
+    #[test]
+    fn apply_half_page_down() {
+        let lines = &["l0", "l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9"];
+        let (grid, cols) = make_ctx(lines, 0, 10);
+        let ctx = ctx_from!(&grid, cols, 0, 10);
+        let mut state = ViState::new(3, 0);
+        state.apply_motion(&Motion::HalfPageDown, &ctx);
+        assert_eq!(state.cursor.row, 8); // 3 + 10/2 = 8
+    }
+
+    #[test]
+    fn apply_half_page_up_clamps_at_zero() {
+        let lines = &["l0", "l1", "l2"];
+        let (grid, cols) = make_ctx(lines, 0, 10);
+        let ctx = ctx_from!(&grid, cols, 0, 10);
+        let mut state = ViState::new(1, 0);
+        state.apply_motion(&Motion::HalfPageUp, &ctx);
+        assert_eq!(state.cursor.row, 0);
+    }
+
+    #[test]
+    fn apply_half_page_down_clamps_at_bottom() {
+        let lines = &["l0", "l1", "l2"];
+        let (grid, cols) = make_ctx(lines, 0, 10);
+        let ctx = ctx_from!(&grid, cols, 0, 10);
+        let mut state = ViState::new(1, 0);
+        state.apply_motion(&Motion::HalfPageDown, &ctx);
+        assert_eq!(state.cursor.row, 2);
+    }
+
+    #[test]
+    fn apply_word_forward() {
+        let lines = &["hello world foo"];
+        let (grid, cols) = make_ctx(lines, 0, 1);
+        let ctx = ctx_from!(&grid, cols, 0, 1);
+        let mut state = ViState::new(0, 0);
+        state.apply_motion(&Motion::WordForward(1), &ctx);
+        assert_eq!(state.cursor.col, 6); // 'w' of "world"
+    }
+
+    #[test]
+    fn apply_word_forward_twice() {
+        let lines = &["hello world foo"];
+        let (grid, cols) = make_ctx(lines, 0, 1);
+        let ctx = ctx_from!(&grid, cols, 0, 1);
+        let mut state = ViState::new(0, 0);
+        state.apply_motion(&Motion::WordForward(2), &ctx);
+        assert_eq!(state.cursor.col, 12); // 'f' of "foo"
+    }
+
+    #[test]
+    fn apply_word_backward() {
+        let lines = &["hello world foo"];
+        let (grid, cols) = make_ctx(lines, 0, 1);
+        let ctx = ctx_from!(&grid, cols, 0, 1);
+        let mut state = ViState::new(0, 8); // middle of "world"
+        state.apply_motion(&Motion::WordBackward(1), &ctx);
+        assert_eq!(state.cursor.col, 6); // start of "world"
+    }
+
+    #[test]
+    fn apply_word_backward_to_previous_word() {
+        let lines = &["hello world"];
+        let (grid, cols) = make_ctx(lines, 0, 1);
+        let ctx = ctx_from!(&grid, cols, 0, 1);
+        let mut state = ViState::new(0, 6); // 'w' of "world"
+        state.apply_motion(&Motion::WordBackward(1), &ctx);
+        assert_eq!(state.cursor.col, 0); // 'h' of "hello"
+    }
+
+    #[test]
+    fn apply_word_end() {
+        let lines = &["hello world"];
+        let (grid, cols) = make_ctx(lines, 0, 1);
+        let ctx = ctx_from!(&grid, cols, 0, 1);
+        let mut state = ViState::new(0, 0);
+        state.apply_motion(&Motion::WordEnd(1), &ctx);
+        assert_eq!(state.cursor.col, 4); // 'o' of "hello"
+    }
+
+    #[test]
+    fn apply_word_end_from_end_of_word() {
+        let lines = &["hello world"];
+        let (grid, cols) = make_ctx(lines, 0, 1);
+        let ctx = ctx_from!(&grid, cols, 0, 1);
+        let mut state = ViState::new(0, 4); // 'o' of "hello"
+        state.apply_motion(&Motion::WordEnd(1), &ctx);
+        assert_eq!(state.cursor.col, 10); // 'd' of "world"
+    }
+
+    #[test]
+    fn apply_line_down_clamps_col() {
+        // When moving to a shorter line, col should clamp
+        let lines = &["hello world", "hi"];
+        let (grid, cols) = make_ctx(lines, 0, 2);
+        let ctx = ctx_from!(&grid, cols, 0, 2);
+        let mut state = ViState::new(0, 10); // at end of first line
+        state.apply_motion(&Motion::LineDown(1), &ctx);
+        assert_eq!(state.cursor.row, 1);
+        // Col should still be clamped to cols-1 (same width grid)
+        assert_eq!(state.cursor.col, cols - 1);
+    }
+
+    #[test]
+    fn full_integration_count_then_motion() {
+        let lines = &["l0", "l1", "l2", "l3", "l4"];
+        let (grid, cols) = make_ctx(lines, 0, 5);
+        let ctx = ctx_from!(&grid, cols, 0, 5);
+        let mut state = ViState::new(0, 0);
+        // Type "3j" — should move down 3 lines
+        state.process_key('3', false);
+        let action = state.process_key('j', false);
+        assert_eq!(action, ViAction::Motion(Motion::LineDown(3)));
+        state.apply_motion(&Motion::LineDown(3), &ctx);
+        assert_eq!(state.cursor.row, 3);
+    }
+
+    #[test]
+    fn word_backward_clamps_at_buffer_start() {
+        let lines = &["hello"];
+        let (grid, cols) = make_ctx(lines, 0, 1);
+        let ctx = ctx_from!(&grid, cols, 0, 1);
+        let mut state = ViState::new(0, 0);
+        state.apply_motion(&Motion::WordBackward(1), &ctx);
+        assert_eq!(state.cursor.row, 0);
+        assert_eq!(state.cursor.col, 0);
     }
 }
