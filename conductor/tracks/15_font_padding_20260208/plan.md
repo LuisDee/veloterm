@@ -57,7 +57,7 @@
 - [ ] Platform-aware: use `super_key()` on macOS (Cmd), `control_key()` on Linux (Ctrl)
 - [ ] Write tests: all three shortcuts detected correctly, no false positives with other modifiers
 
-### Task 3.2: Font size change pipeline
+### Task 3.2: Font size change pipeline [x] <!-- 4153dcf -->
 - [ ] In `window.rs` event handler, match `AppCommand` and execute font size change
 - [ ] Implement ~10% step: `new_size = (current * 1.1).round()` for increase, `(current / 1.1).round()` for decrease
 - [ ] Clamp to min 8px, max 72px
