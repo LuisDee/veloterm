@@ -33,6 +33,9 @@ portable-pty = "0.9"
 # Threading
 crossbeam-channel = "0.5"
 
+# Link Detection
+linkify = "0.10"
+
 # Configuration
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
