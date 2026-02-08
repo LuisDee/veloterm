@@ -52,9 +52,13 @@ Simple UI Overlay (for split borders, tabs, etc.)
 
 ## Text Rendering
 
-**`cosmic-text`** (primary) or **`ab_glyph`** + **`rustybuzz`** (alternative)
+**`cosmic-text`** + **CoreText** (macOS native rasterizer)
 
-For glyph shaping and rasterization. Glyphs are baked into the GPU texture atlas. The choice between `cosmic-text` (higher-level, more features) and `ab_glyph` + `rustybuzz` (lower-level, more control) will be finalized during the first rendering track.
+For glyph shaping and rasterization. Glyphs are baked into the GPU texture atlas. On macOS, glyphs are rasterized via CoreText for native-quality rendering; on other platforms, cosmic-text's SwashCache handles rasterization.
+
+- **Bundled font:** JetBrains Mono (~300KB, compiled into binary via `include_bytes!()`)
+- **Font fallback chains:** Terminal content (JetBrains Mono → SF Mono → Menlo), UI chrome (Inter → SF Pro), Display (Georgia)
+- **Runtime font size adjustment:** Cmd+Plus/Minus/0 with atlas rebuild
 
 ## Threading Model
 
