@@ -965,4 +965,101 @@ mod tests {
         assert!(state1.cwd_changed);
         assert!(!state2.cwd_changed);
     }
+
+    // ── Shell integration scripts ────────────────────────────────
+
+    #[test]
+    fn bash_script_emits_osc133_sequences() {
+        let script = include_str!("../../shell/bash-integration.sh");
+        assert!(script.contains("133;A"), "missing OSC 133;A (prompt start)");
+        assert!(script.contains("133;B"), "missing OSC 133;B (command start)");
+        assert!(script.contains("133;C"), "missing OSC 133;C (output start)");
+        assert!(script.contains("133;D"), "missing OSC 133;D (command end)");
+    }
+
+    #[test]
+    fn bash_script_emits_osc7() {
+        let script = include_str!("../../shell/bash-integration.sh");
+        assert!(script.contains("\\e]7;file://"), "missing OSC 7 CWD emission");
+    }
+
+    #[test]
+    fn bash_script_preserves_existing_prompt_command() {
+        let script = include_str!("../../shell/bash-integration.sh");
+        assert!(
+            script.contains("original_prompt_command"),
+            "bash script should preserve existing PROMPT_COMMAND"
+        );
+    }
+
+    #[test]
+    fn zsh_script_emits_osc133_sequences() {
+        let script = include_str!("../../shell/zsh-integration.sh");
+        assert!(script.contains("133;A"), "missing OSC 133;A (prompt start)");
+        assert!(script.contains("133;B"), "missing OSC 133;B (command start)");
+        assert!(script.contains("133;C"), "missing OSC 133;C (output start)");
+        assert!(script.contains("133;D"), "missing OSC 133;D (command end)");
+    }
+
+    #[test]
+    fn zsh_script_emits_osc7() {
+        let script = include_str!("../../shell/zsh-integration.sh");
+        assert!(script.contains("\\e]7;file://"), "missing OSC 7 CWD emission");
+    }
+
+    #[test]
+    fn zsh_script_uses_add_zsh_hook() {
+        let script = include_str!("../../shell/zsh-integration.sh");
+        assert!(
+            script.contains("add-zsh-hook"),
+            "zsh script should use add-zsh-hook to not replace existing hooks"
+        );
+    }
+
+    #[test]
+    fn fish_script_emits_osc133_sequences() {
+        let script = include_str!("../../shell/fish-integration.fish");
+        assert!(script.contains("133;A"), "missing OSC 133;A (prompt start)");
+        assert!(script.contains("133;B"), "missing OSC 133;B (command start)");
+        assert!(script.contains("133;C"), "missing OSC 133;C (output start)");
+        assert!(script.contains("133;D"), "missing OSC 133;D (command end)");
+    }
+
+    #[test]
+    fn fish_script_emits_osc7() {
+        let script = include_str!("../../shell/fish-integration.fish");
+        assert!(script.contains("\\e]7;file://"), "missing OSC 7 CWD emission");
+    }
+
+    #[test]
+    fn fish_script_uses_event_handlers() {
+        let script = include_str!("../../shell/fish-integration.fish");
+        assert!(
+            script.contains("--on-event fish_prompt"),
+            "fish script should use fish_prompt event"
+        );
+        assert!(
+            script.contains("--on-event fish_preexec"),
+            "fish script should use fish_preexec event"
+        );
+    }
+
+    #[test]
+    fn all_scripts_guard_against_double_sourcing() {
+        let bash = include_str!("../../shell/bash-integration.sh");
+        let zsh = include_str!("../../shell/zsh-integration.sh");
+        let fish = include_str!("../../shell/fish-integration.fish");
+        assert!(
+            bash.contains("VELOTERM_SHELL_INTEGRATION"),
+            "bash: missing double-source guard"
+        );
+        assert!(
+            zsh.contains("VELOTERM_SHELL_INTEGRATION"),
+            "zsh: missing double-source guard"
+        );
+        assert!(
+            fish.contains("VELOTERM_SHELL_INTEGRATION"),
+            "fish: missing double-source guard"
+        );
+    }
 }
