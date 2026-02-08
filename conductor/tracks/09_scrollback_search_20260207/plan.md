@@ -36,7 +36,7 @@
 
 ---
 
-## Phase 2: Search UI Overlay & Input Mode
+## Phase 2: Search UI Overlay & Input Mode [checkpoint: 00164ec]
 
 ### 2.1 Write tests for search overlay quad generation
 - [x] 2.1.1 Write tests: search bar generates overlay quads at top-right of pane rect <!-- 834cdfe -->
