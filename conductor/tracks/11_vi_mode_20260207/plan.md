@@ -15,7 +15,7 @@
 - Clamp cursor to valid bounds (row: 0..total_lines, col: 0..line_length)
 - **Tests:** Count parsing, each motion with and without count, boundary clamping
 
-### 1.3 [ ] Implement word and buffer motions
+### 1.3 [x] Implement word and buffer motions <!-- 67e9e2c -->
 - Implement word motions: w, b, e using existing `find_word_boundaries` logic
 - Implement buffer motions: gg, G
 - Implement viewport motions: H, M, L
