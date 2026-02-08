@@ -162,6 +162,57 @@ impl App {
     }
 
     /// Handle a pane command (split, close, focus, zoom).
+    /// Process shell state updates after PTY drain: notifications and CWD tab titles.
+    fn process_shell_updates(&mut self) {
+        let focused = self
+            .tab_manager
+            .active_tab()
+            .pane_tree
+            .focused_pane_id();
+        let threshold = self.app_config.shell.notification_threshold_secs;
+        let shell_enabled = self.app_config.shell.integration_enabled;
+
+        // Collect pane IDs to avoid borrow conflict
+        let pane_ids: Vec<_> = self.pane_states.keys().copied().collect();
+
+        for pane_id in pane_ids {
+            let state = self.pane_states.get_mut(&pane_id).unwrap();
+            let shell = state.terminal.shell_state_mut();
+
+            // Check for completed commands — notification for non-focused panes
+            if shell_enabled {
+                if let Some(duration) = shell.pending_completion.take() {
+                    if pane_id != focused && duration.as_secs() >= threshold {
+                        if let Some(tab_idx) = self.tab_manager.tab_index_for_pane(pane_id) {
+                            self.tab_manager.set_notification(tab_idx, true);
+                        }
+                    }
+                }
+            }
+
+            // Update tab title from CWD for focused pane of active tab
+            if pane_id == focused && shell.cwd_changed {
+                shell.cwd_changed = false;
+                if !shell.title_is_explicit {
+                    if let Some(cwd) = shell.cwd.clone() {
+                        let dir_name =
+                            crate::shell_integration::dir_name_from_path(&cwd);
+                        let active_idx = self.tab_manager.active_index();
+                        self.tab_manager.set_title(active_idx, dir_name);
+                    }
+                }
+            }
+
+            // Update tab title from explicit title (OSC 0/2) for focused pane
+            if pane_id == focused && shell.title_is_explicit {
+                if let Some(title) = shell.title.clone() {
+                    let active_idx = self.tab_manager.active_index();
+                    self.tab_manager.set_title(active_idx, &title);
+                }
+            }
+        }
+    }
+
     /// Handle a shell integration command (prompt navigation).
     fn handle_shell_command(&mut self, command: crate::input::ShellCommand) {
         let focused = self
@@ -317,6 +368,9 @@ impl App {
                 }
             }
         }
+
+        // Clear notification badge on the newly active tab
+        self.tab_manager.clear_active_notification();
 
         if let Some(window) = &self.window {
             window.request_redraw();
@@ -959,6 +1013,9 @@ impl ApplicationHandler for App {
                         state.terminal.feed(&bytes);
                     }
                 }
+
+                // Process shell integration: notifications and CWD tab titles
+                self.process_shell_updates();
 
                 // Rescan links for the focused pane after PTY drain
                 self.rescan_links();

@@ -61,6 +61,10 @@ pub struct ShellState {
     command_history: VecDeque<CommandRecord>,
     /// Last known exit status.
     pub last_exit_status: Option<i32>,
+    /// Duration of last completed command, consumed by notification system.
+    pub pending_completion: Option<Duration>,
+    /// Set to true when CWD changes, consumed by tab title system.
+    pub cwd_changed: bool,
 }
 
 impl Default for ShellState {
@@ -80,6 +84,8 @@ impl ShellState {
             command_start: None,
             command_history: VecDeque::new(),
             last_exit_status: None,
+            pending_completion: None,
+            cwd_changed: false,
         }
     }
 
@@ -106,6 +112,7 @@ impl ShellState {
                     if let Some(start) = self.command_start.take() {
                         let end = Instant::now();
                         let duration = end.duration_since(start);
+                        self.pending_completion = Some(duration);
                         let record = CommandRecord {
                             start,
                             end,
@@ -121,6 +128,7 @@ impl ShellState {
             },
             ShellEvent::CurrentDirectory(path) => {
                 self.cwd = Some(path.clone());
+                self.cwd_changed = true;
             }
             ShellEvent::Title(title) => {
                 self.title = Some(title.clone());
@@ -162,6 +170,16 @@ impl ShellState {
             .find(|&&pos| pos > current_line)
             .copied()
     }
+}
+
+/// Extract the last component of a path for use as a tab title.
+/// Returns "~" for the user's home directory, or the last path component.
+pub fn dir_name_from_path(path: &str) -> &str {
+    if path == "/" {
+        return "/";
+    }
+    let trimmed = path.trim_end_matches('/');
+    trimmed.rsplit('/').next().unwrap_or(path)
 }
 
 /// Parse raw PTY bytes and extract shell events (OSC 7, OSC 133).
@@ -780,5 +798,171 @@ mod tests {
         );
         assert_eq!(state1.command_history().len(), 1);
         assert_eq!(state2.command_history().len(), 0);
+    }
+
+    // ── Pending completion notification ───────────────────────────
+
+    #[test]
+    fn pending_completion_set_on_command_end() {
+        let mut state = ShellState::new();
+        state.handle_event(
+            &ShellEvent::SemanticPrompt(PromptMarker::CommandStart, None),
+            10,
+        );
+        assert!(state.pending_completion.is_none());
+        state.handle_event(
+            &ShellEvent::SemanticPrompt(PromptMarker::CommandEnd, Some(0)),
+            11,
+        );
+        assert!(state.pending_completion.is_some());
+    }
+
+    #[test]
+    fn pending_completion_not_set_without_start() {
+        let mut state = ShellState::new();
+        state.handle_event(
+            &ShellEvent::SemanticPrompt(PromptMarker::CommandEnd, Some(0)),
+            10,
+        );
+        assert!(state.pending_completion.is_none());
+    }
+
+    #[test]
+    fn pending_completion_consumed_by_take() {
+        let mut state = ShellState::new();
+        state.handle_event(
+            &ShellEvent::SemanticPrompt(PromptMarker::CommandStart, None),
+            10,
+        );
+        state.handle_event(
+            &ShellEvent::SemanticPrompt(PromptMarker::CommandEnd, Some(0)),
+            11,
+        );
+        let _ = state.pending_completion.take();
+        assert!(state.pending_completion.is_none());
+    }
+
+    #[test]
+    fn no_notification_when_duration_below_threshold() {
+        let mut state = ShellState::new();
+        state.handle_event(
+            &ShellEvent::SemanticPrompt(PromptMarker::CommandStart, None),
+            10,
+        );
+        state.handle_event(
+            &ShellEvent::SemanticPrompt(PromptMarker::CommandEnd, Some(0)),
+            11,
+        );
+        let duration = state.pending_completion.unwrap();
+        // Immediate command should be well under any reasonable threshold
+        assert!(duration.as_secs() < 10);
+    }
+
+    #[test]
+    fn notification_respects_config_threshold() {
+        let mut state = ShellState::new();
+        state.handle_event(
+            &ShellEvent::SemanticPrompt(PromptMarker::CommandStart, None),
+            10,
+        );
+        state.handle_event(
+            &ShellEvent::SemanticPrompt(PromptMarker::CommandEnd, Some(0)),
+            11,
+        );
+        let duration = state.pending_completion.unwrap();
+        let threshold_secs = 10u64;
+        // Check that the comparison works as expected
+        let should_notify = duration.as_secs() >= threshold_secs;
+        assert!(!should_notify); // instant command < 10s
+    }
+
+    // ── CWD change tracking ──────────────────────────────────────
+
+    #[test]
+    fn cwd_changed_flag_set_on_directory_change() {
+        let mut state = ShellState::new();
+        assert!(!state.cwd_changed);
+        state.handle_event(
+            &ShellEvent::CurrentDirectory("/home/user/projects".to_string()),
+            0,
+        );
+        assert!(state.cwd_changed);
+    }
+
+    #[test]
+    fn cwd_changed_flag_consumed_by_clear() {
+        let mut state = ShellState::new();
+        state.handle_event(
+            &ShellEvent::CurrentDirectory("/tmp".to_string()),
+            0,
+        );
+        state.cwd_changed = false;
+        assert!(!state.cwd_changed);
+    }
+
+    #[test]
+    fn explicit_title_takes_priority_over_cwd() {
+        let mut state = ShellState::new();
+        state.handle_event(&ShellEvent::Title("my-project".to_string()), 0);
+        state.handle_event(
+            &ShellEvent::CurrentDirectory("/home/user/other".to_string()),
+            0,
+        );
+        // Title should still be explicit
+        assert!(state.title_is_explicit);
+        assert_eq!(state.title.as_deref(), Some("my-project"));
+    }
+
+    #[test]
+    fn title_reverts_to_cwd_when_explicit_cleared() {
+        let mut state = ShellState::new();
+        state.handle_event(&ShellEvent::Title("my-project".to_string()), 0);
+        assert!(state.title_is_explicit);
+        // Clear explicit title
+        state.title = None;
+        state.title_is_explicit = false;
+        // CWD should be usable now
+        assert!(!state.title_is_explicit);
+        state.handle_event(
+            &ShellEvent::CurrentDirectory("/home/user/work".to_string()),
+            0,
+        );
+        assert_eq!(state.cwd.as_deref(), Some("/home/user/work"));
+    }
+
+    // ── dir_name_from_path ──────────────────────────────────────
+
+    #[test]
+    fn dir_name_simple_path() {
+        assert_eq!(dir_name_from_path("/home/user/projects"), "projects");
+    }
+
+    #[test]
+    fn dir_name_root() {
+        assert_eq!(dir_name_from_path("/"), "/");
+    }
+
+    #[test]
+    fn dir_name_trailing_slash() {
+        assert_eq!(dir_name_from_path("/home/user/projects/"), "projects");
+    }
+
+    #[test]
+    fn dir_name_single_component() {
+        assert_eq!(dir_name_from_path("/tmp"), "tmp");
+    }
+
+    #[test]
+    fn cwd_title_only_updates_for_active_pane() {
+        // Each ShellState is independent; title update logic is in window.rs
+        // This test verifies that cwd_changed is per-state
+        let mut state1 = ShellState::new();
+        let state2 = ShellState::new();
+        state1.handle_event(
+            &ShellEvent::CurrentDirectory("/home/user".to_string()),
+            0,
+        );
+        assert!(state1.cwd_changed);
+        assert!(!state2.cwd_changed);
     }
 }

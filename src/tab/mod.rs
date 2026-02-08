@@ -34,6 +34,8 @@ pub struct Tab {
     pub id: TabId,
     pub title: String,
     pub pane_tree: PaneTree,
+    /// Whether this tab has a notification badge (long-running command completed).
+    pub has_notification: bool,
 }
 
 impl Default for Tab {
@@ -49,6 +51,7 @@ impl Tab {
             id: TabId::new(),
             title: "Shell".to_string(),
             pane_tree,
+            has_notification: false,
         }
     }
 
@@ -181,6 +184,25 @@ impl TabManager {
         if let Some(tab) = self.tabs.get_mut(tab_index) {
             tab.title = title.to_string();
         }
+    }
+
+    /// Find the tab index that contains the given pane.
+    pub fn tab_index_for_pane(&self, pane_id: PaneId) -> Option<usize> {
+        self.tabs
+            .iter()
+            .position(|tab| tab.pane_ids().contains(&pane_id))
+    }
+
+    /// Set notification badge on the tab at the given index.
+    pub fn set_notification(&mut self, tab_index: usize, value: bool) {
+        if let Some(tab) = self.tabs.get_mut(tab_index) {
+            tab.has_notification = value;
+        }
+    }
+
+    /// Clear notification badge on the active tab.
+    pub fn clear_active_notification(&mut self) {
+        self.tabs[self.active_index].has_notification = false;
     }
 }
 
@@ -444,5 +466,65 @@ mod tests {
         let mut mgr = TabManager::new();
         mgr.set_title(5, "nope");
         assert_eq!(mgr.active_tab().title, "Shell");
+    }
+
+    // ── Notification badge ──────────────────────────────────────
+
+    #[test]
+    fn tab_has_notification_default_false() {
+        setup();
+        let tab = Tab::new();
+        assert!(!tab.has_notification);
+    }
+
+    #[test]
+    fn set_notification_on_tab() {
+        setup();
+        let mut mgr = TabManager::new();
+        mgr.new_tab();
+        mgr.set_notification(0, true);
+        assert!(mgr.tabs()[0].has_notification);
+        assert!(!mgr.tabs()[1].has_notification);
+    }
+
+    #[test]
+    fn clear_active_notification() {
+        setup();
+        let mut mgr = TabManager::new();
+        mgr.tabs[0].has_notification = true;
+        mgr.clear_active_notification();
+        assert!(!mgr.tabs()[0].has_notification);
+    }
+
+    #[test]
+    fn notification_badge_clears_on_tab_focus() {
+        setup();
+        let mut mgr = TabManager::new();
+        mgr.new_tab(); // active = 1
+        mgr.set_notification(0, true);
+        mgr.select_tab(0);
+        // After selecting, caller should clear — simulate
+        mgr.clear_active_notification();
+        assert!(!mgr.tabs()[0].has_notification);
+    }
+
+    // ── Tab-pane lookup ─────────────────────────────────────────
+
+    #[test]
+    fn tab_index_for_pane_finds_correct_tab() {
+        setup();
+        let mut mgr = TabManager::new();
+        let pane_in_tab0 = mgr.tabs()[0].pane_ids()[0];
+        mgr.new_tab();
+        let pane_in_tab1 = mgr.tabs()[1].pane_ids()[0];
+        assert_eq!(mgr.tab_index_for_pane(pane_in_tab0), Some(0));
+        assert_eq!(mgr.tab_index_for_pane(pane_in_tab1), Some(1));
+    }
+
+    #[test]
+    fn tab_index_for_nonexistent_pane_returns_none() {
+        setup();
+        let mgr = TabManager::new();
+        assert_eq!(mgr.tab_index_for_pane(PaneId(9999)), None);
     }
 }

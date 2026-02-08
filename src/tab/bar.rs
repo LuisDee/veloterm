@@ -88,6 +88,17 @@ pub fn generate_tab_bar_quads(
         });
     }
 
+    // Notification badges for inactive tabs
+    for i in 0..count {
+        if tab_manager.tabs()[i].has_notification {
+            let x = i as f32 * tw + tw - 10.0;
+            quads.push(OverlayQuad {
+                rect: Rect::new(x, 4.0, 6.0, 6.0),
+                color: [theme.accent.r, theme.accent.g, theme.accent.b, 1.0],
+            });
+        }
+    }
+
     // New-tab "+" button background (always at the right of tabs)
     let plus_x = (count as f32 * tw).min(window_width - NEW_TAB_BUTTON_WIDTH);
     quads.push(OverlayQuad {
