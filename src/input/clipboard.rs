@@ -32,6 +32,21 @@ pub fn is_paste_keybinding(key: &Key, modifiers: ModifiersState) -> bool {
     modifiers.control_key() && modifiers.shift_key()
 }
 
+/// Detect if a key event is a select-all keybinding.
+/// macOS: Cmd+A, Linux: Ctrl+Shift+A.
+pub fn is_select_all_keybinding(key: &Key, modifiers: ModifiersState) -> bool {
+    let is_a = matches!(key, Key::Character(s) if s.as_ref() == "a");
+    if !is_a {
+        return false;
+    }
+    // macOS: Cmd+A (Super)
+    if modifiers.super_key() && !modifiers.control_key() {
+        return true;
+    }
+    // Linux: Ctrl+Shift+A
+    modifiers.control_key() && modifiers.shift_key()
+}
+
 /// Wrap text in bracketed paste mode escape sequences.
 pub fn wrap_bracketed_paste(text: &str) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(text.len() + 12);
@@ -116,6 +131,33 @@ mod tests {
     fn paste_ctrl_v_alone_is_not_paste() {
         assert!(!is_paste_keybinding(
             &Key::Character("v".into()),
+            ModifiersState::CONTROL
+        ));
+    }
+
+    // ── Select-all keybinding detection ────────────────────────────────
+
+    #[test]
+    fn select_all_cmd_a_is_select_all() {
+        assert!(is_select_all_keybinding(
+            &Key::Character("a".into()),
+            ModifiersState::SUPER
+        ));
+    }
+
+    #[test]
+    fn select_all_ctrl_shift_a_is_select_all() {
+        assert!(is_select_all_keybinding(
+            &Key::Character("a".into()),
+            ModifiersState::CONTROL | ModifiersState::SHIFT
+        ));
+    }
+
+    #[test]
+    fn select_all_ctrl_a_alone_is_not_select_all() {
+        // Ctrl+A is terminal beginning-of-line, not select-all
+        assert!(!is_select_all_keybinding(
+            &Key::Character("a".into()),
             ModifiersState::CONTROL
         ));
     }
