@@ -19,7 +19,7 @@
 ### Phase 1 Completion
 - [x] Phase completion verification and checkpointing
 
-## Phase 2: Rendering & Mouse Integration
+## Phase 2: Rendering & Mouse Integration [checkpoint: 2fb91bf]
 
 ### Task 2.1: Divider Quad Generation <!-- 96e4c18 -->
 - [x] Write tests for generating overlay quads for divider bars
@@ -38,7 +38,7 @@
 - [x] Implement click-to-focus: on mouse press in pane area (not divider), call `pane_tree.set_focus(pane_id)` and consume the click
 
 ### Phase 2 Completion
-- [ ] Phase completion verification and checkpointing
+- [x] Phase completion verification and checkpointing
 
 ## Phase 3: Drag-to-Resize & Polish
 
