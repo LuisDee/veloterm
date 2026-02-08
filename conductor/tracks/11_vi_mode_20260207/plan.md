@@ -1,6 +1,6 @@
 # Track 11: Vi-Mode Selection — Implementation Plan
 
-## Phase 1: Vi-Mode State Machine & Basic Motions
+## Phase 1: Vi-Mode State Machine & Basic Motions [checkpoint: ea3bbb5]
 
 ### 1.1 [x] Create vi-mode module with state machine and mode types <!-- 0db2024 -->
 - Create `src/vi_mode/mod.rs` with `ViMode` enum (Normal, Visual, VisualLine, VisualBlock), `ViState` struct (mode, cursor position, anchor, count prefix)
@@ -29,7 +29,7 @@
 - Wire vi-mode toggle in the focused pane's input path
 - **Tests:** Config parsing with vi_mode section, default values, keybinding match
 
-### 1.5 [ ] Phase 1 Completion — Verification and Checkpointing
+### 1.5 [x] Phase 1 Completion — Verification and Checkpointing <!-- ea3bbb5 -->
 
 ---
 
