@@ -6,7 +6,7 @@ use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
-use winit::keyboard::ModifiersState;
+use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 
 use crate::config::theme::Theme;
@@ -82,6 +82,8 @@ pub fn scaled_font_size(base_size: f32, scale_factor: f64) -> f32 {
 pub struct PaneState {
     pub terminal: crate::terminal::Terminal,
     pub pty: crate::pty::PtySession,
+    /// Per-pane vi-mode state. None = vi-mode not active.
+    pub vi_state: Option<crate::vi_mode::ViState>,
 }
 
 /// Main application state implementing the winit event loop handler.
@@ -148,7 +150,7 @@ impl App {
                     rows as usize,
                     scrollback,
                 );
-                self.pane_states.insert(pane_id, PaneState { terminal, pty });
+                self.pane_states.insert(pane_id, PaneState { terminal, pty, vi_state: None });
             }
             Err(e) => {
                 log::error!("Failed to spawn PTY for pane {:?}: {e}", pane_id);
@@ -690,6 +692,167 @@ impl App {
         }
     }
 
+    /// Convert a winit key event to a character for vi-mode processing.
+    fn key_to_vi_char(logical_key: &Key, text: Option<&str>) -> Option<char> {
+        match logical_key {
+            Key::Character(s) => s.chars().next(),
+            Key::Named(named) => match named {
+                NamedKey::Escape => Some('\x1b'),
+                NamedKey::Enter => Some('\r'),
+                NamedKey::Backspace => Some('\x7f'),
+                NamedKey::Space => Some(' '),
+                _ => None,
+            },
+            _ => {
+                // Fall back to text content
+                text.and_then(|t| t.chars().next())
+            }
+        }
+    }
+
+    /// Handle a ViAction produced by the vi-mode state machine.
+    fn handle_vi_action(
+        &mut self,
+        action: crate::vi_mode::ViAction,
+        pane_id: PaneId,
+    ) {
+        use crate::vi_mode::ViAction;
+
+        match action {
+            ViAction::Motion(motion) => {
+                if let Some(state) = self.pane_states.get_mut(&pane_id) {
+                    if let Some(ref mut vi) = state.vi_state {
+                        let cols = state.terminal.cols();
+                        let total_rows = state.terminal.total_rows();
+                        let display_offset = state.terminal.display_offset();
+                        let viewport_rows = state.terminal.rows();
+                        let viewport_top = total_rows.saturating_sub(viewport_rows + display_offset);
+                        let grid: Vec<Vec<char>> = (0..total_rows)
+                            .map(|r| {
+                                (0..cols)
+                                    .map(|c| {
+                                        state.terminal.char_at(r, c).unwrap_or(' ')
+                                    })
+                                    .collect()
+                            })
+                            .collect();
+                        let ctx = crate::vi_mode::BufferContext {
+                            total_rows,
+                            cols,
+                            viewport_top,
+                            viewport_rows,
+                            char_at_fn: &|row, col| {
+                                grid.get(row).and_then(|r| r.get(col).copied())
+                            },
+                        };
+                        vi.apply_motion(&motion, &ctx);
+                    }
+                }
+            }
+            ViAction::ExitViMode => {
+                if let Some(state) = self.pane_states.get_mut(&pane_id) {
+                    state.vi_state = None;
+                    log::info!("Vi-mode exited for pane {:?}", pane_id);
+                }
+            }
+            ViAction::Yank => {
+                if let Some(state) = self.pane_states.get_mut(&pane_id) {
+                    if let Some(ref vi) = state.vi_state {
+                        let cols = state.terminal.cols();
+                        let cells = crate::terminal::grid_bridge::extract_grid_cells(
+                            &state.terminal,
+                        );
+                        if let Some(text) = vi.yank_text(&cells, cols) {
+                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                if let Err(e) = clipboard.set_text(&text) {
+                                    log::warn!("Clipboard write error: {e}");
+                                } else {
+                                    log::info!("Yanked {} bytes to clipboard", text.len());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            ViAction::SearchExecute => {
+                // Execute vi-mode search using SearchEngine
+                if let Some(state) = self.pane_states.get_mut(&pane_id) {
+                    if let Some(ref mut vi) = state.vi_state {
+                        let query = vi.search_query.clone();
+                        if !query.is_empty() {
+                            let lines = crate::terminal::grid_bridge::extract_text_lines(
+                                &state.terminal,
+                            );
+                            let engine = crate::search::SearchEngine::new();
+                            let result = engine.search(&query, &lines);
+                            if let Some(first) = result.matches.first() {
+                                vi.move_to_match(first.row as usize, first.start_col);
+                            }
+                        }
+                    }
+                }
+            }
+            ViAction::NextMatch | ViAction::PrevMatch => {
+                if let Some(state) = self.pane_states.get_mut(&pane_id) {
+                    if let Some(ref mut vi) = state.vi_state {
+                        let query = vi.search_query.clone();
+                        if !query.is_empty() {
+                            let lines = crate::terminal::grid_bridge::extract_text_lines(
+                                &state.terminal,
+                            );
+                            let engine = crate::search::SearchEngine::new();
+                            let result = engine.search(&query, &lines);
+                            if !result.matches.is_empty() {
+                                let cursor_row = vi.cursor.row as i32;
+                                let cursor_col = vi.cursor.col;
+                                let forward = matches!(action, ViAction::NextMatch)
+                                    == (vi.search_direction
+                                        == crate::vi_mode::SearchDirection::Forward);
+                                let next = if forward {
+                                    result
+                                        .matches
+                                        .iter()
+                                        .find(|m| {
+                                            m.row > cursor_row
+                                                || (m.row == cursor_row
+                                                    && m.start_col > cursor_col)
+                                        })
+                                        .or(result.matches.first())
+                                } else {
+                                    result
+                                        .matches
+                                        .iter()
+                                        .rev()
+                                        .find(|m| {
+                                            m.row < cursor_row
+                                                || (m.row == cursor_row
+                                                    && m.start_col < cursor_col)
+                                        })
+                                        .or(result.matches.last())
+                                };
+                                if let Some(m) = next {
+                                    vi.move_to_match(m.row as usize, m.start_col);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            ViAction::EnterVisual(_) | ViAction::ExitVisual => {
+                // Selection state changes are handled by ViState internally.
+                // Redraw will pick up the updated selection via to_selection().
+            }
+            ViAction::SearchForward | ViAction::SearchBackward | ViAction::SearchCancel => {
+                // Search input mode changes handled by ViState internally.
+            }
+            ViAction::None => {}
+        }
+
+        if let Some(renderer) = &mut self.renderer {
+            renderer.pane_damage_mut().force_full_damage_all();
+        }
+    }
+
     /// Re-run search after query changes (incremental search).
     fn run_incremental_search(&mut self) {
         let focused = self.tab_manager.active_tab().pane_tree.focused_pane_id();
@@ -881,6 +1044,55 @@ impl ApplicationHandler for App {
                         return;
                     }
 
+                    // Check for vi-mode toggle (Ctrl+Shift+Space)
+                    let focused_id = self
+                        .tab_manager
+                        .active_tab()
+                        .pane_tree
+                        .focused_pane_id();
+                    if self.app_config.vi_mode.enabled
+                        && crate::input::should_toggle_vi_mode(
+                            &event.logical_key,
+                            self.modifiers,
+                        )
+                    {
+                        if let Some(state) = self.pane_states.get_mut(&focused_id) {
+                            if state.vi_state.is_some() {
+                                // Exit vi-mode
+                                state.vi_state = None;
+                                log::info!("Vi-mode deactivated for pane {:?}", focused_id);
+                            } else {
+                                // Enter vi-mode at terminal cursor position
+                                let (row, col) = state.terminal.cursor_position();
+                                state.vi_state =
+                                    Some(crate::vi_mode::ViState::new(row, col));
+                                log::info!("Vi-mode activated for pane {:?}", focused_id);
+                            }
+                        }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+
+                    // If focused pane has vi-mode active, route keys there
+                    if let Some(state) = self.pane_states.get_mut(&focused_id) {
+                        if let Some(ref mut vi) = state.vi_state {
+                            if let Some(ch) = Self::key_to_vi_char(
+                                &event.logical_key,
+                                event.text.as_ref().map(|s| s.as_ref()),
+                            ) {
+                                let ctrl = self.modifiers.control_key();
+                                let action = vi.process_key(ch, ctrl);
+                                self.handle_vi_action(action, focused_id);
+                            }
+                            if let Some(window) = &self.window {
+                                window.request_redraw();
+                            }
+                            return; // PTY receives no input while vi-mode is active
+                        }
+                    }
+
                     // Route normal keys to focused pane's PTY
                     let bytes = crate::input::translate_key(
                         &event.logical_key,
@@ -888,13 +1100,8 @@ impl ApplicationHandler for App {
                         event.state,
                         self.modifiers,
                     );
-                    let focused = self
-                        .tab_manager
-                        .active_tab()
-                        .pane_tree
-                        .focused_pane_id();
                     if let (Some(bytes), Some(state)) =
-                        (bytes, self.pane_states.get_mut(&focused))
+                        (bytes, self.pane_states.get_mut(&focused_id))
                     {
                         if let Err(e) = state.pty.write(&bytes) {
                             log::warn!("PTY write error: {e}");
@@ -1833,6 +2040,7 @@ blink = false
             PaneState {
                 terminal,
                 pty: crate::pty::PtySession::new(&crate::pty::default_shell(), 80, 24).unwrap(),
+                vi_state: None,
             },
         );
 
@@ -1859,6 +2067,7 @@ blink = false
             PaneState {
                 terminal,
                 pty: crate::pty::PtySession::new(&crate::pty::default_shell(), 80, 24).unwrap(),
+                vi_state: None,
             },
         );
 
@@ -1882,5 +2091,128 @@ blink = false
         config.links.enabled = false;
         let app = App::new(WindowConfig::default(), config);
         assert!(!app.is_link_modifier_held());
+    }
+
+    // ── Vi-mode integration ────────────────────────────────────────
+
+    #[test]
+    fn pane_state_vi_mode_initially_none() {
+        let app = App::new(WindowConfig::default(), Config::default());
+        let pane_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
+        if let Some(state) = app.pane_states.get(&pane_id) {
+            assert!(state.vi_state.is_none());
+        }
+    }
+
+    #[test]
+    fn vi_mode_toggle_activates_when_enabled() {
+        let mut config = Config::default();
+        config.vi_mode.enabled = true;
+        let mut app = App::new(WindowConfig::default(), config);
+        let pane_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
+        app.spawn_pane(pane_id, 80, 24);
+
+        // vi_state should start as None
+        assert!(app.pane_states.get(&pane_id).unwrap().vi_state.is_none());
+
+        // Activate vi-mode
+        app.pane_states.get_mut(&pane_id).unwrap().vi_state =
+            Some(crate::vi_mode::ViState::new(0, 0));
+        assert!(app.pane_states.get(&pane_id).unwrap().vi_state.is_some());
+
+        // Deactivate vi-mode
+        app.pane_states.get_mut(&pane_id).unwrap().vi_state = None;
+        assert!(app.pane_states.get(&pane_id).unwrap().vi_state.is_none());
+    }
+
+    #[test]
+    fn vi_mode_per_pane_independence() {
+        let mut config = Config::default();
+        config.vi_mode.enabled = true;
+        let mut app = App::new(WindowConfig::default(), config);
+        let p1 = app.tab_manager.active_tab().pane_tree.focused_pane_id();
+        app.spawn_pane(p1, 80, 24);
+
+        let p2 = app
+            .tab_manager
+            .active_tab_mut()
+            .pane_tree
+            .split_focused(SplitDirection::Vertical)
+            .unwrap();
+        app.spawn_pane(p2, 80, 24);
+
+        // Activate vi-mode on pane 1 only
+        app.pane_states.get_mut(&p1).unwrap().vi_state =
+            Some(crate::vi_mode::ViState::new(0, 0));
+
+        // p1 has vi-mode, p2 does not
+        assert!(app.pane_states.get(&p1).unwrap().vi_state.is_some());
+        assert!(app.pane_states.get(&p2).unwrap().vi_state.is_none());
+    }
+
+    #[test]
+    fn key_to_vi_char_maps_characters() {
+        let ch = App::key_to_vi_char(&Key::Character("v".into()), None);
+        assert_eq!(ch, Some('v'));
+    }
+
+    #[test]
+    fn key_to_vi_char_maps_escape() {
+        let ch = App::key_to_vi_char(&Key::Named(NamedKey::Escape), None);
+        assert_eq!(ch, Some('\x1b'));
+    }
+
+    #[test]
+    fn key_to_vi_char_maps_enter() {
+        let ch = App::key_to_vi_char(&Key::Named(NamedKey::Enter), None);
+        assert_eq!(ch, Some('\r'));
+    }
+
+    #[test]
+    fn key_to_vi_char_maps_backspace() {
+        let ch = App::key_to_vi_char(&Key::Named(NamedKey::Backspace), None);
+        assert_eq!(ch, Some('\x7f'));
+    }
+
+    #[test]
+    fn handle_vi_action_exit_clears_state() {
+        let mut config = Config::default();
+        config.vi_mode.enabled = true;
+        let mut app = App::new(WindowConfig::default(), config);
+        let pane_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
+        app.spawn_pane(pane_id, 80, 24);
+
+        app.pane_states.get_mut(&pane_id).unwrap().vi_state =
+            Some(crate::vi_mode::ViState::new(0, 0));
+        assert!(app.pane_states.get(&pane_id).unwrap().vi_state.is_some());
+
+        app.handle_vi_action(crate::vi_mode::ViAction::ExitViMode, pane_id);
+        assert!(app.pane_states.get(&pane_id).unwrap().vi_state.is_none());
+    }
+
+    #[test]
+    fn handle_vi_action_motion_updates_cursor() {
+        let mut config = Config::default();
+        config.vi_mode.enabled = true;
+        let mut app = App::new(WindowConfig::default(), config);
+        let pane_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
+        app.spawn_pane(pane_id, 80, 24);
+
+        app.pane_states.get_mut(&pane_id).unwrap().vi_state =
+            Some(crate::vi_mode::ViState::new(0, 5));
+
+        app.handle_vi_action(
+            crate::vi_mode::ViAction::Motion(crate::vi_mode::Motion::CharLeft(3)),
+            pane_id,
+        );
+
+        let vi = app
+            .pane_states
+            .get(&pane_id)
+            .unwrap()
+            .vi_state
+            .as_ref()
+            .unwrap();
+        assert_eq!(vi.cursor.col, 2);
     }
 }

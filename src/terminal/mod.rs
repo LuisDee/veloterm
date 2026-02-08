@@ -128,6 +128,34 @@ impl Terminal {
         self.term.grid().display_offset()
     }
 
+    /// Get the number of columns (alias for columns()).
+    pub fn cols(&self) -> usize {
+        self.columns()
+    }
+
+    /// Get the total number of rows (screen lines + scrollback history).
+    pub fn total_rows(&self) -> usize {
+        self.rows() + self.history_size()
+    }
+
+    /// Get a character at a position in the full buffer (including scrollback).
+    /// Row 0 = top of scrollback, increasing toward bottom of screen.
+    /// Returns None if out of bounds.
+    pub fn char_at(&self, row: usize, col: usize) -> Option<char> {
+        let total = self.total_rows();
+        if row >= total || col >= self.columns() {
+            return None;
+        }
+        // Convert absolute row to alacritty Line index.
+        // Row 0 of our buffer = top of scrollback = negative line in alacritty.
+        // History rows are addressed as negative lines: Line(-(history_size) .. -1)
+        // Screen rows are Line(0 .. screen_lines-1)
+        let history = self.history_size() as i32;
+        let line_idx = row as i32 - history;
+        let point = Point::new(Line(line_idx), Column(col));
+        Some(self.term.grid()[point].c)
+    }
+
     /// Get the number of lines in scrollback history.
     pub fn history_size(&self) -> usize {
         self.term.grid().history_size()
