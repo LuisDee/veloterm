@@ -2,11 +2,15 @@
 
 pub mod grid_bridge;
 
-use alacritty_terminal::event::VoidListener;
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line, Point};
 use alacritty_terminal::term::Config;
 use alacritty_terminal::vte::ansi;
+
+use crate::shell_integration::listener::{
+    self, EventQueue, TerminalEvent, VeloTermListener,
+};
+use crate::shell_integration::{self, ShellEvent, ShellState};
 
 /// Terminal dimensions for alacritty_terminal.
 pub struct TermSize {
@@ -28,8 +32,10 @@ impl Dimensions for TermSize {
 
 /// Wrapper around alacritty_terminal providing VT parsing and grid state.
 pub struct Terminal {
-    term: alacritty_terminal::term::Term<VoidListener>,
+    term: alacritty_terminal::term::Term<VeloTermListener>,
     processor: ansi::Processor,
+    event_queue: EventQueue,
+    shell_state: ShellState,
 }
 
 impl Terminal {
@@ -43,14 +49,50 @@ impl Terminal {
             scrolling_history: scrollback,
             ..Config::default()
         };
-        let term = alacritty_terminal::term::Term::new(config, &size, VoidListener);
+        let (veloterm_listener, event_queue) = listener::create_listener();
+        let term = alacritty_terminal::term::Term::new(config, &size, veloterm_listener);
         let processor = ansi::Processor::new();
-        Self { term, processor }
+        Self {
+            term,
+            processor,
+            event_queue,
+            shell_state: ShellState::new(),
+        }
     }
 
     /// Feed raw bytes from the PTY into the terminal parser.
+    /// Also extracts shell integration events (OSC 7, OSC 133) from the byte stream
+    /// and processes any title events from the event listener.
     pub fn feed(&mut self, bytes: &[u8]) {
+        // Pre-scan for OSC 7 and OSC 133 sequences before alacritty_terminal processes them
+        let shell_events = shell_integration::extract_shell_events(bytes);
+
+        // Feed to alacritty_terminal for normal VT processing
         self.processor.advance(&mut self.term, bytes);
+
+        // Process shell events from byte pre-scan
+        let current_line = self.cursor_position().0 + self.history_size();
+        for event in &shell_events {
+            self.shell_state.handle_event(event, current_line);
+        }
+
+        // Process title events from the event listener
+        let listener_events = listener::drain_events(&self.event_queue);
+        for event in listener_events {
+            match event {
+                TerminalEvent::TitleChanged(title) => {
+                    self.shell_state
+                        .handle_event(&ShellEvent::Title(title), current_line);
+                }
+                TerminalEvent::TitleReset => {
+                    self.shell_state.title = None;
+                    self.shell_state.title_is_explicit = false;
+                }
+                TerminalEvent::Bell => {
+                    // Bell events can be handled later for notifications
+                }
+            }
+        }
     }
 
     /// Get the character at a grid position (row, col). Row 0 is top of screen.
@@ -70,7 +112,7 @@ impl Terminal {
     }
 
     /// Access the inner alacritty_terminal Term for grid iteration.
-    pub fn inner(&self) -> &alacritty_terminal::term::Term<VoidListener> {
+    pub fn inner(&self) -> &alacritty_terminal::term::Term<VeloTermListener> {
         &self.term
     }
 
@@ -132,6 +174,16 @@ impl Terminal {
             screen_lines: rows,
         };
         self.term.resize(size);
+    }
+
+    /// Access the shell state for this terminal.
+    pub fn shell_state(&self) -> &ShellState {
+        &self.shell_state
+    }
+
+    /// Access the shell state mutably.
+    pub fn shell_state_mut(&mut self) -> &mut ShellState {
+        &mut self.shell_state
     }
 }
 
@@ -367,5 +419,40 @@ mod tests {
         d.request(80, 24);
         d.clear();
         assert_eq!(d.pending(), None);
+    }
+
+    // ── Shell integration via Terminal ──────────────────────────────────
+
+    #[test]
+    fn shell_state_starts_empty() {
+        let term = Terminal::new(80, 24, 10_000);
+        assert!(term.shell_state().cwd.is_none());
+        assert!(term.shell_state().title.is_none());
+    }
+
+    #[test]
+    fn feed_osc2_title_updates_shell_state() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        // Feed an OSC 2 title sequence
+        term.feed(b"\x1b]2;my-project\x07");
+        assert_eq!(term.shell_state().title.as_deref(), Some("my-project"));
+        assert!(term.shell_state().title_is_explicit);
+    }
+
+    #[test]
+    fn feed_osc7_updates_cwd() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        term.feed(b"\x1b]7;file://localhost/home/user/projects\x07");
+        assert_eq!(
+            term.shell_state().cwd.as_deref(),
+            Some("/home/user/projects")
+        );
+    }
+
+    #[test]
+    fn feed_osc133a_records_prompt_position() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        term.feed(b"\x1b]133;A\x07");
+        assert_eq!(term.shell_state().prompt_positions().len(), 1);
     }
 }
