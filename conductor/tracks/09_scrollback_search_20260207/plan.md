@@ -1,6 +1,6 @@
 # Track 09: Scrollback Search — Implementation Plan
 
-## Phase 1: Search Engine Core
+## Phase 1: Search Engine Core [checkpoint: e608dc2]
 
 ### 1.1 Write tests for SearchEngine types and regex matching
 - [x] 1.1.1 Create `src/search/mod.rs` module with `SearchMatch` type (row, start_col, end_col) and `SearchEngine` struct
