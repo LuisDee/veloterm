@@ -36,7 +36,7 @@ _Link: [./conductor/tracks/04_pane_layout_20260207/](./conductor/tracks/04_pane_
 ### [x] Track 05: Pane UI & Interaction (M)
 _Link: [./conductor/tracks/05_pane_ui_20260207/](./conductor/tracks/05_pane_ui_20260207/)_
 
-### [ ] Track 06: Tab System (M)
+### [~] Track 06: Tab System (M)
 _Link: [./conductor/tracks/06_tabs_20260207/](./conductor/tracks/06_tabs_20260207/)_
 
 ---
