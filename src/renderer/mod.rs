@@ -58,6 +58,8 @@ pub struct Renderer {
     overlay_uniform_buffer: wgpu::Buffer,
     overlay_instance_buffer: Option<wgpu::Buffer>,
     overlay_instance_count: u32,
+    /// Terminal content padding in physical pixels (top, bottom, left, right).
+    padding: [f32; 4],
 }
 
 impl Renderer {
@@ -238,7 +240,18 @@ impl Renderer {
             overlay_uniform_buffer,
             overlay_instance_buffer: None,
             overlay_instance_count: 0,
+            padding: [0.0; 4],
         })
+    }
+
+    /// Set terminal content padding in physical pixels [top, bottom, left, right].
+    pub fn set_padding(&mut self, top: f32, bottom: f32, left: f32, right: f32) {
+        self.padding = [top, bottom, left, right];
+    }
+
+    /// Get the current padding [top, bottom, left, right] in physical pixels.
+    pub fn padding(&self) -> [f32; 4] {
+        self.padding
     }
 
     /// Render a frame: acquire surface texture, draw instances, present.
@@ -479,9 +492,21 @@ impl Renderer {
 
         let mut draw_data: Vec<PaneDrawData> = Vec::with_capacity(panes.len());
 
+        let [pad_top, pad_bottom, pad_left, pad_right] = self.padding;
+
         for pane in panes.iter_mut() {
-            let pane_grid =
-                GridDimensions::from_pane_rect(&pane.rect, self.cell_width(), self.cell_height());
+            // Compute content area: pane rect inset by padding
+            let content_rect = PaneRect {
+                x: pane.rect.x + pad_left,
+                y: pane.rect.y + pad_top,
+                width: (pane.rect.width - pad_left - pad_right).max(1.0),
+                height: (pane.rect.height - pad_top - pad_bottom).max(1.0),
+            };
+            let pane_grid = GridDimensions::from_pane_rect(
+                &content_rect,
+                self.cell_width(),
+                self.cell_height(),
+            );
             let cols = pane_grid.columns as usize;
 
             // Get or create damage state for this pane
@@ -662,11 +687,13 @@ impl Renderer {
 
                 render_pass.set_bind_group(0, &self.bind_group, &[]);
 
-                // Set scissor rect for this pane
-                let sx = rect.x.max(0.0) as u32;
-                let sy = rect.y.max(0.0) as u32;
-                let sw = (rect.width as u32).min(self.surface_config.width.saturating_sub(sx));
-                let sh = (rect.height as u32).min(self.surface_config.height.saturating_sub(sy));
+                // Set scissor rect for this pane's content area (inset by padding)
+                let sx = (rect.x + pad_left).max(0.0) as u32;
+                let sy = (rect.y + pad_top).max(0.0) as u32;
+                let content_w = (rect.width - pad_left - pad_right).max(0.0);
+                let content_h = (rect.height - pad_top - pad_bottom).max(0.0);
+                let sw = (content_w as u32).min(self.surface_config.width.saturating_sub(sx));
+                let sh = (content_h as u32).min(self.surface_config.height.saturating_sub(sy));
                 if sw > 0 && sh > 0 {
                     render_pass.set_scissor_rect(sx, sy, sw, sh);
                     render_pass.draw(0..6, *start..*start + *count);
@@ -728,13 +755,16 @@ impl Renderer {
         Ok(())
     }
 
-    /// Compute scissor rect parameters for a pane rect within the surface.
-    /// Returns (x, y, width, height) clamped to surface bounds.
+    /// Compute scissor rect parameters for a pane rect's content area within the surface.
+    /// Returns (x, y, width, height) clamped to surface bounds, inset by padding.
     pub fn scissor_rect_for_pane(&self, rect: &PaneRect) -> (u32, u32, u32, u32) {
-        let sx = rect.x.max(0.0) as u32;
-        let sy = rect.y.max(0.0) as u32;
-        let sw = (rect.width as u32).min(self.surface_config.width.saturating_sub(sx));
-        let sh = (rect.height as u32).min(self.surface_config.height.saturating_sub(sy));
+        let [pad_top, _pad_bottom, pad_left, pad_right] = self.padding;
+        let sx = (rect.x + pad_left).max(0.0) as u32;
+        let sy = (rect.y + pad_top).max(0.0) as u32;
+        let content_w = (rect.width - pad_left - pad_right).max(0.0);
+        let content_h = (rect.height - self.padding[0] - self.padding[1]).max(0.0);
+        let sw = (content_w as u32).min(self.surface_config.width.saturating_sub(sx));
+        let sh = (content_h as u32).min(self.surface_config.height.saturating_sub(sy));
         (sx, sy, sw, sh)
     }
 }
@@ -1024,6 +1054,61 @@ mod tests {
         let grid = GridDimensions::from_pane_rect(&rect, atlas.cell_width, atlas.cell_height);
         let expected_cols = (300.0 / atlas.cell_width).floor() as u32;
         assert_eq!(grid.columns, expected_cols);
+        assert_eq!(grid.rows, 1);
+    }
+
+    // ── Padding tests ───────────────────────────────────────────────
+
+    #[test]
+    fn padding_reduces_grid_columns_and_rows() {
+        let atlas = GlyphAtlas::new(13.0, 1.0, "JetBrains Mono", 1.5);
+        let rect_no_pad = PaneRect::new(0.0, 0.0, 800.0, 600.0);
+        let grid_no_pad =
+            GridDimensions::from_pane_rect(&rect_no_pad, atlas.cell_width, atlas.cell_height);
+
+        // Simulate padding by shrinking the content rect
+        let pad = 24.0; // 12px each side
+        let rect_padded = PaneRect::new(12.0, 12.0, 800.0 - pad, 600.0 - pad);
+        let grid_padded =
+            GridDimensions::from_pane_rect(&rect_padded, atlas.cell_width, atlas.cell_height);
+
+        assert!(
+            grid_padded.columns < grid_no_pad.columns,
+            "padding should reduce columns: {} vs {}",
+            grid_padded.columns,
+            grid_no_pad.columns,
+        );
+        assert!(
+            grid_padded.rows < grid_no_pad.rows,
+            "padding should reduce rows: {} vs {}",
+            grid_padded.rows,
+            grid_no_pad.rows,
+        );
+    }
+
+    #[test]
+    fn zero_padding_does_not_change_grid() {
+        let atlas = GlyphAtlas::new(13.0, 1.0, "JetBrains Mono", 1.5);
+        let rect = PaneRect::new(0.0, 0.0, 800.0, 600.0);
+        let grid = GridDimensions::from_pane_rect(&rect, atlas.cell_width, atlas.cell_height);
+
+        // With zero padding, content rect equals pane rect
+        let content_rect = PaneRect::new(0.0, 0.0, 800.0, 600.0);
+        let content_grid =
+            GridDimensions::from_pane_rect(&content_rect, atlas.cell_width, atlas.cell_height);
+
+        assert_eq!(grid.columns, content_grid.columns);
+        assert_eq!(grid.rows, content_grid.rows);
+    }
+
+    #[test]
+    fn large_padding_clamps_to_minimum_one_cell() {
+        let atlas = GlyphAtlas::new(13.0, 1.0, "JetBrains Mono", 1.5);
+        // Padding larger than pane: content area is 1x1
+        let content_rect = PaneRect::new(0.0, 0.0, 1.0, 1.0);
+        let grid =
+            GridDimensions::from_pane_rect(&content_rect, atlas.cell_width, atlas.cell_height);
+        assert_eq!(grid.columns, 1);
         assert_eq!(grid.rows, 1);
     }
 }

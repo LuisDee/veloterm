@@ -404,13 +404,16 @@ impl App {
         }
     }
 
-    /// Compute grid columns and rows for a pane rect.
+    /// Compute grid columns and rows for a pane rect, accounting for padding.
     fn grid_dims_for_rect(&self, rect: &Rect) -> (u16, u16) {
         if let Some(renderer) = &self.renderer {
             let cw = renderer.cell_width();
             let ch = renderer.cell_height();
-            let cols = (rect.width / cw).floor().max(1.0) as u16;
-            let rows = (rect.height / ch).floor().max(1.0) as u16;
+            let pad = &self.app_config.padding;
+            let usable_w = (rect.width - pad.left as f32 - pad.right as f32).max(0.0);
+            let usable_h = (rect.height - pad.top as f32 - pad.bottom as f32).max(0.0);
+            let cols = (usable_w / cw).floor().max(1.0) as u16;
+            let rows = (usable_h / ch).floor().max(1.0) as u16;
             (cols, rows)
         } else {
             (80, 24)
@@ -609,10 +612,16 @@ impl App {
 
         let cell_width = renderer.cell_width();
         let cell_height = renderer.cell_height();
+        let [pad_top, _pad_bottom, pad_left, _pad_right] = renderer.padding();
 
-        // Convert pixel position (in content space, already offset) to grid coords
-        let col = (pixel_x / cell_width).floor() as usize;
-        let row = (pixel_y / cell_height).floor() as usize;
+        // Convert pixel position (in content space) to grid coords, accounting for padding
+        let adj_x = pixel_x - pad_left;
+        let adj_y = pixel_y - pad_top;
+        if adj_x < 0.0 || adj_y < 0.0 {
+            return false;
+        }
+        let col = (adj_x / cell_width).floor() as usize;
+        let row = (adj_y / cell_height).floor() as usize;
 
         if let Some(_link) = self.link_detector.link_at(row, col) {
             self.link_hover_active = true;
@@ -638,9 +647,15 @@ impl App {
 
         let cell_width = renderer.cell_width();
         let cell_height = renderer.cell_height();
+        let [pad_top, _pad_bottom, pad_left, _pad_right] = renderer.padding();
 
-        let col = (pixel_x / cell_width).floor() as usize;
-        let row = (pixel_y / cell_height).floor() as usize;
+        let adj_x = pixel_x - pad_left;
+        let adj_y = pixel_y - pad_top;
+        if adj_x < 0.0 || adj_y < 0.0 {
+            return false;
+        }
+        let col = (adj_x / cell_width).floor() as usize;
+        let row = (adj_y / cell_height).floor() as usize;
 
         if let Some(link) = self.link_detector.link_at(row, col) {
             open_link(link);
@@ -941,8 +956,18 @@ impl ApplicationHandler for App {
                     font_family,
                     line_height,
                 )) {
-                    Ok(renderer) => {
+                    Ok(mut renderer) => {
                         log::info!("Renderer initialized");
+
+                        // Apply terminal padding from config (scaled to physical pixels)
+                        let scale = window.scale_factor() as f32;
+                        let pad = &self.app_config.padding;
+                        renderer.set_padding(
+                            pad.top as f32 * scale,
+                            pad.bottom as f32 * scale,
+                            pad.left as f32 * scale,
+                            pad.right as f32 * scale,
+                        );
 
                         self.renderer = Some(renderer);
 
