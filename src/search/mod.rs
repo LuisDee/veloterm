@@ -1,3 +1,5 @@
+pub mod overlay;
+
 /// A single match in the scrollback buffer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchMatch {

@@ -9,6 +9,91 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 use crate::pane::FocusDirection;
 
+/// The current input mode for the application.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InputMode {
+    /// Normal terminal input — keys go to PTY.
+    #[default]
+    Normal,
+    /// Search mode — keys go to the search bar.
+    Search,
+}
+
+/// A search-mode command resulting from a key event.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SearchCommand {
+    /// Insert a character into the search query.
+    InsertChar(char),
+    /// Delete the last character from the query.
+    DeleteChar,
+    /// Navigate to the next match.
+    NextMatch,
+    /// Navigate to the previous match.
+    PrevMatch,
+    /// Close the search overlay.
+    Close,
+    /// Open search (Ctrl+Shift+F from Normal mode).
+    Open,
+}
+
+/// Check if a key event should open the search overlay (from Normal mode).
+/// Returns true if Ctrl+Shift+F is pressed.
+pub fn should_open_search(
+    logical_key: &Key,
+    modifiers: ModifiersState,
+) -> bool {
+    let ctrl_shift = modifiers.control_key() && modifiers.shift_key();
+    if !ctrl_shift {
+        return false;
+    }
+    matches!(logical_key, Key::Character(s) if s.to_lowercase() == "f")
+}
+
+/// Process a key event while in Search mode.
+/// Returns a SearchCommand describing what action to take.
+pub fn match_search_command(
+    logical_key: &Key,
+    text: Option<&str>,
+    modifiers: ModifiersState,
+) -> Option<SearchCommand> {
+    // Ctrl+Shift+F toggles search off
+    if modifiers.control_key() && modifiers.shift_key() {
+        if let Key::Character(s) = logical_key {
+            if s.to_lowercase() == "f" {
+                return Some(SearchCommand::Close);
+            }
+        }
+    }
+
+    match logical_key {
+        Key::Named(named) => match named {
+            NamedKey::Escape => Some(SearchCommand::Close),
+            NamedKey::Backspace => Some(SearchCommand::DeleteChar),
+            NamedKey::Enter => {
+                if modifiers.shift_key() {
+                    Some(SearchCommand::PrevMatch)
+                } else {
+                    Some(SearchCommand::NextMatch)
+                }
+            }
+            NamedKey::ArrowDown => Some(SearchCommand::NextMatch),
+            NamedKey::ArrowUp => Some(SearchCommand::PrevMatch),
+            _ => None,
+        },
+        Key::Character(s) => {
+            // Use text field if available, otherwise logical key
+            let t = text.unwrap_or(s.as_ref());
+            if let Some(ch) = t.chars().next() {
+                if !ch.is_control() {
+                    return Some(SearchCommand::InsertChar(ch));
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 /// A pane management command triggered by a keybinding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaneCommand {
@@ -668,5 +753,161 @@ mod tests {
     fn tab_cmd_no_match_unbound_key() {
         let result = match_tab_command(&Key::Character("x".into()), ctrl_shift());
         assert_eq!(result, None);
+    }
+
+    // ── Search command matching (2.3) ───────────────────────────────
+
+    #[test]
+    fn search_ctrl_shift_f_opens_search() {
+        assert!(should_open_search(&Key::Character("F".into()), ctrl_shift()));
+    }
+
+    #[test]
+    fn search_ctrl_shift_f_lowercase_opens_search() {
+        assert!(should_open_search(&Key::Character("f".into()), ctrl_shift()));
+    }
+
+    #[test]
+    fn search_normal_f_does_not_open_search() {
+        assert!(!should_open_search(&Key::Character("f".into()), no_mods()));
+    }
+
+    #[test]
+    fn search_ctrl_only_f_does_not_open_search() {
+        assert!(!should_open_search(
+            &Key::Character("f".into()),
+            ModifiersState::CONTROL
+        ));
+    }
+
+    // ── 2.3.1 Printable chars → InsertChar ─────────────────────────
+
+    #[test]
+    fn search_mode_printable_char() {
+        let result = match_search_command(
+            &Key::Character("a".into()),
+            Some("a"),
+            no_mods(),
+        );
+        assert_eq!(result, Some(SearchCommand::InsertChar('a')));
+    }
+
+    #[test]
+    fn search_mode_uppercase_char() {
+        let result = match_search_command(
+            &Key::Character("A".into()),
+            Some("A"),
+            ModifiersState::SHIFT,
+        );
+        assert_eq!(result, Some(SearchCommand::InsertChar('A')));
+    }
+
+    #[test]
+    fn search_mode_digit_char() {
+        let result = match_search_command(
+            &Key::Character("5".into()),
+            Some("5"),
+            no_mods(),
+        );
+        assert_eq!(result, Some(SearchCommand::InsertChar('5')));
+    }
+
+    #[test]
+    fn search_mode_special_char() {
+        let result = match_search_command(
+            &Key::Character(".".into()),
+            Some("."),
+            no_mods(),
+        );
+        assert_eq!(result, Some(SearchCommand::InsertChar('.')));
+    }
+
+    // ── 2.3.2 Backspace → DeleteChar ───────────────────────────────
+
+    #[test]
+    fn search_mode_backspace() {
+        let result = match_search_command(
+            &Key::Named(NamedKey::Backspace),
+            None,
+            no_mods(),
+        );
+        assert_eq!(result, Some(SearchCommand::DeleteChar));
+    }
+
+    // ── 2.3.3 Escape → Close ──────────────────────────────────────
+
+    #[test]
+    fn search_mode_escape_closes() {
+        let result = match_search_command(
+            &Key::Named(NamedKey::Escape),
+            None,
+            no_mods(),
+        );
+        assert_eq!(result, Some(SearchCommand::Close));
+    }
+
+    // ── 2.3.4 Enter → NextMatch ───────────────────────────────────
+
+    #[test]
+    fn search_mode_enter_next_match() {
+        let result = match_search_command(
+            &Key::Named(NamedKey::Enter),
+            None,
+            no_mods(),
+        );
+        assert_eq!(result, Some(SearchCommand::NextMatch));
+    }
+
+    // ── 2.3.5 Shift+Enter → PrevMatch ─────────────────────────────
+
+    #[test]
+    fn search_mode_shift_enter_prev_match() {
+        let result = match_search_command(
+            &Key::Named(NamedKey::Enter),
+            None,
+            ModifiersState::SHIFT,
+        );
+        assert_eq!(result, Some(SearchCommand::PrevMatch));
+    }
+
+    // ── 2.3.6 Ctrl+Shift+F in search mode → Close (toggle) ───────
+
+    #[test]
+    fn search_mode_ctrl_shift_f_closes() {
+        let result = match_search_command(
+            &Key::Character("F".into()),
+            None,
+            ctrl_shift(),
+        );
+        assert_eq!(result, Some(SearchCommand::Close));
+    }
+
+    // ── 2.3.7 Arrow up/down → prev/next match ─────────────────────
+
+    #[test]
+    fn search_mode_arrow_down_next_match() {
+        let result = match_search_command(
+            &Key::Named(NamedKey::ArrowDown),
+            None,
+            no_mods(),
+        );
+        assert_eq!(result, Some(SearchCommand::NextMatch));
+    }
+
+    #[test]
+    fn search_mode_arrow_up_prev_match() {
+        let result = match_search_command(
+            &Key::Named(NamedKey::ArrowUp),
+            None,
+            no_mods(),
+        );
+        assert_eq!(result, Some(SearchCommand::PrevMatch));
+    }
+
+    // ── InputMode default ──────────────────────────────────────────
+
+    #[test]
+    fn input_mode_defaults_to_normal() {
+        assert_eq!(InputMode::default(), InputMode::Normal);
     }
 }
