@@ -15,6 +15,7 @@ pub struct Config {
     pub scrollback: ScrollbackConfig,
     pub performance: PerformanceConfig,
     pub links: LinksConfig,
+    pub shell: ShellConfig,
 }
 
 /// Font configuration.
@@ -67,6 +68,24 @@ impl Default for LinksConfig {
     }
 }
 
+/// Shell integration configuration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShellConfig {
+    /// Master toggle for shell integration features.
+    pub integration_enabled: bool,
+    /// Minimum command duration (seconds) to trigger long-running notification.
+    pub notification_threshold_secs: u64,
+}
+
+impl Default for ShellConfig {
+    fn default() -> Self {
+        Self {
+            integration_enabled: true,
+            notification_threshold_secs: 10,
+        }
+    }
+}
+
 /// Errors that can occur during config loading and validation.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -90,6 +109,7 @@ struct RawConfig {
     scrollback: RawScrollbackConfig,
     performance: RawPerformanceConfig,
     links: RawLinksConfig,
+    shell: RawShellConfig,
 }
 
 #[derive(Deserialize)]
@@ -181,6 +201,22 @@ impl Default for RawLinksConfig {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(default)]
+struct RawShellConfig {
+    integration_enabled: bool,
+    notification_threshold_secs: u64,
+}
+
+impl Default for RawShellConfig {
+    fn default() -> Self {
+        Self {
+            integration_enabled: true,
+            notification_threshold_secs: 10,
+        }
+    }
+}
+
 // ── Default impls ───────────────────────────────────────────────────────
 
 impl Default for FontConfig {
@@ -265,6 +301,10 @@ impl Config {
             links: LinksConfig {
                 enabled: raw.links.enabled,
             },
+            shell: ShellConfig {
+                integration_enabled: raw.shell.integration_enabled,
+                notification_threshold_secs: raw.shell.notification_threshold_secs,
+            },
         };
 
         config.validate()?;
@@ -316,6 +356,7 @@ impl Config {
             scrollback_changed: self.scrollback != other.scrollback,
             performance_changed: self.performance != other.performance,
             links_changed: self.links != other.links,
+            shell_changed: self.shell != other.shell,
         }
     }
 
@@ -348,6 +389,12 @@ lines = 10000
 # Maximum frames per second
 fps_limit = 60
 
+[shell]
+# Enable shell integration features (prompt detection, CWD tracking, command timing)
+integration_enabled = true
+# Minimum command duration (seconds) to trigger long-running notification
+notification_threshold_secs = 10
+
 # [keys]
 # Keybindings as "key_combo" = "action" pairs
 # Example:
@@ -368,6 +415,7 @@ pub struct ConfigDelta {
     pub scrollback_changed: bool,
     pub performance_changed: bool,
     pub links_changed: bool,
+    pub shell_changed: bool,
 }
 
 impl ConfigDelta {
@@ -380,6 +428,7 @@ impl ConfigDelta {
             && !self.scrollback_changed
             && !self.performance_changed
             && !self.links_changed
+            && !self.shell_changed
     }
 }
 
@@ -520,6 +569,48 @@ enabled = false
     fn parse_links_default_enabled() {
         let config = Config::from_toml("").unwrap();
         assert!(config.links.enabled);
+    }
+
+    // ── Shell config tests ────────────────────────────────────────
+
+    #[test]
+    fn default_shell_integration_enabled() {
+        let config = Config::default();
+        assert!(config.shell.integration_enabled);
+    }
+
+    #[test]
+    fn default_shell_notification_threshold() {
+        let config = Config::default();
+        assert_eq!(config.shell.notification_threshold_secs, 10);
+    }
+
+    #[test]
+    fn parse_shell_config() {
+        let toml = r#"
+[shell]
+integration_enabled = false
+notification_threshold_secs = 30
+"#;
+        let config = Config::from_toml(toml).unwrap();
+        assert!(!config.shell.integration_enabled);
+        assert_eq!(config.shell.notification_threshold_secs, 30);
+    }
+
+    #[test]
+    fn parse_shell_config_defaults() {
+        let config = Config::from_toml("").unwrap();
+        assert!(config.shell.integration_enabled);
+        assert_eq!(config.shell.notification_threshold_secs, 10);
+    }
+
+    #[test]
+    fn diff_detects_shell_change() {
+        let a = Config::default();
+        let mut b = Config::default();
+        b.shell.notification_threshold_secs = 30;
+        let delta = a.diff(&b);
+        assert!(delta.shell_changed);
     }
 
     #[test]
