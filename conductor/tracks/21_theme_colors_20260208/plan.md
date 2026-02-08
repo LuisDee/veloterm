@@ -26,7 +26,7 @@ Restructure the Theme struct and update claude_dark to reference values.
 - [x] TDD: verify compilation and all tests pass <!-- 3a1042a -->
 
 ### Phase 1 Completion
-- [ ] Phase completion verification and checkpointing protocol
+- [x] Phase completion verification and checkpointing protocol
 
 ---
 
@@ -55,7 +55,7 @@ Apply theme tokens to tab bar, terminal area, pane borders, and cursor.
 - [x] TDD: tests for cursor color values <!-- f204b22 -->
 
 ### Phase 2 Completion
-- [ ] Phase completion verification and checkpointing protocol
+- [x] Phase completion verification and checkpointing protocol
 
 ---
 
@@ -64,24 +64,24 @@ Apply theme tokens to tab bar, terminal area, pane borders, and cursor.
 Platform integration and final verification.
 
 ### Task 3.1: macOS title bar color integration
-- [ ] Set `NSWindow.backgroundColor` to match theme `surface` color on window creation
-- [ ] Apply via platform-specific code in window setup (winit window attributes or raw NSWindow access)
-- [ ] Verify title bar blends with tab bar chrome
-- [ ] TDD: test that platform code compiles (integration verified visually)
+- [x] Set `NSWindow.backgroundColor` to match theme `surface` color on window creation <!-- 86e70e9 -->
+- [x] Apply via platform-specific code in window setup (winit window attributes or raw NSWindow access) <!-- 86e70e9 -->
+- [x] Verify title bar blends with tab bar chrome <!-- 86e70e9 -->
+- [x] TDD: test that platform code compiles (integration verified visually) <!-- 86e70e9 -->
 
 ### Task 3.2: ANSI color rendering verification
-- [ ] Verify 16 named ANSI colors render with standard values
-- [ ] Verify 256-color cube calculation is correct
-- [ ] Verify TrueColor pass-through works
-- [ ] TDD: tests for ANSI color conversion correctness (spot-check key values)
+- [x] Verify 16 named ANSI colors render with standard values <!-- 86e70e9 -->
+- [x] Verify 256-color cube calculation is correct <!-- 86e70e9 -->
+- [x] Verify TrueColor pass-through works <!-- 86e70e9 -->
+- [x] TDD: tests for ANSI color conversion correctness (spot-check key values) <!-- 86e70e9 -->
 
 ### Task 3.3: Visual validation and integration test
-- [ ] Build and launch via `./take-screenshot.sh`
-- [ ] Verify claude_dark theme matches reference tokens visually
-- [ ] Verify tab bar uses surface/accent colors
-- [ ] Verify terminal content area uses terminal_bg
-- [ ] Verify cursor renders in accent color
-- [ ] Verify colored terminal output (prompt, etc.) renders correctly
+- [x] Build and launch via `./take-screenshot.sh` <!-- 86e70e9 -->
+- [x] Verify claude_dark theme matches reference tokens visually <!-- 86e70e9 -->
+- [x] Verify tab bar uses surface/accent colors <!-- 86e70e9 -->
+- [x] Verify terminal content area uses terminal_bg <!-- 86e70e9 -->
+- [x] Verify cursor renders in accent color <!-- 86e70e9 -->
+- [x] Verify colored terminal output (prompt, etc.) renders correctly <!-- 86e70e9 -->
 
 ### Phase 3 Completion
-- [ ] Phase completion verification and checkpointing protocol
+- [x] Phase completion verification and checkpointing protocol
