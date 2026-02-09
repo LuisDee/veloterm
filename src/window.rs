@@ -25,10 +25,10 @@ use crate::pane::header::{generate_pane_header_quads, generate_pane_header_text,
 use crate::search::overlay::{generate_search_bar_quads, generate_search_bar_text_cells, SearchBarParams};
 use crate::pane::interaction::{CursorType, InteractionEffect, PaneInteraction};
 use crate::pane::{PaneId, Rect, SplitDirection};
-use crate::renderer::iced_layer::{TabInfo, UiState};
+use crate::renderer::iced_layer::{TabInfo, UiMessage, UiState};
 use crate::renderer::PaneRenderDescriptor;
 use crate::status_bar::STATUS_BAR_HEIGHT;
-use crate::tab::bar::{generate_tab_bar_quads, generate_tab_label_text_cells, hit_test_tab_bar, TabBarAction, TAB_BAR_HEIGHT};
+use crate::tab::bar::TAB_BAR_HEIGHT;
 use crate::tab::TabManager;
 
 /// Default window width in logical pixels.
@@ -788,17 +788,8 @@ impl App {
         };
 
         // Header bar: rendered by iced layer (Phase 1 migration)
+        // Tab bar: rendered by iced layer (Phase 2 migration)
         let mut quads = Vec::new();
-
-        // Tab bar quads (offset by header bar height)
-        let tab_quads = generate_tab_bar_quads(&self.tab_manager, width, theme);
-        for q in tab_quads {
-            quads.push(OverlayQuad {
-                rect: Rect::new(q.rect.x, q.rect.y + HEADER_BAR_HEIGHT, q.rect.width, q.rect.height),
-                color: q.color,
-                border_radius: q.border_radius,
-            });
-        }
 
         // Generate pane header quads for all visible panes (using padded bounds)
         let pane_tree = &self.tab_manager.active_tab().pane_tree;
@@ -1788,59 +1779,8 @@ impl ApplicationHandler<UserEvent> for App {
                 }
 
                 if raw_y >= HEADER_BAR_HEIGHT && raw_y < chrome_top {
-                    // Click in tab bar — pass y relative to tab bar origin
-                    let tab_bar_y = raw_y - HEADER_BAR_HEIGHT;
-                    if btn_state == ElementState::Pressed {
-                        let (width, _) = self.window_size();
-                        if let Some(action) = hit_test_tab_bar(
-                            cursor_pos.0,
-                            tab_bar_y,
-                            width as f32,
-                            self.tab_manager.tab_count(),
-                            self.tab_manager.active_index(),
-                            self.hovered_tab,
-                        ) {
-                            match action {
-                                TabBarAction::SelectTab(idx) => {
-                                    self.handle_tab_command(
-                                        TabCommand::SelectTab(idx),
-                                        event_loop,
-                                    );
-                                    // Begin drag tracking
-                                    self.tab_drag_index = Some(idx);
-                                    self.tab_drag_start_x = cursor_pos.0;
-                                    self.tab_drag_active = false;
-                                }
-                                TabBarAction::CloseTab(idx) => {
-                                    // Close specific tab by index
-                                    let pane_ids = self.tab_manager.close_tab(idx);
-                                    if let Some(ids) = pane_ids {
-                                        for id in &ids {
-                                            self.pane_states.remove(id);
-                                            if let Some(renderer) = &mut self.renderer {
-                                                renderer.remove_pane_damage(*id);
-                                            }
-                                        }
-                                        let (w, h) = self.window_size();
-                                        self.update_interaction_layout(w, h);
-                                        if let Some(renderer) = &mut self.renderer {
-                                            renderer.pane_damage_mut().force_full_damage_all();
-                                        }
-                                    } else {
-                                        // Last tab — exit
-                                        log::info!("Last tab closed via close button, exiting");
-                                        event_loop.exit();
-                                    }
-                                }
-                                TabBarAction::NewTab => {
-                                    self.handle_tab_command(
-                                        TabCommand::NewTab,
-                                        event_loop,
-                                    );
-                                }
-                            }
-                        }
-                    }
+                    // Tab bar clicks handled by iced UI layer (Phase 2 migration)
+                    // Drag-reorder tracking starts from iced TabSelected message
                 } else {
                     // Check for modifier+click link activation first
                     if btn_state == ElementState::Pressed {
@@ -2155,20 +2095,7 @@ impl ApplicationHandler<UserEvent> for App {
                     let cw = renderer.cell_width();
                     let ch = renderer.cell_height();
                     // Header bar text: rendered by iced layer (Phase 1 migration)
-
-                    // Tab labels (offset by header bar height)
-                    let labels = generate_tab_label_text_cells(
-                        &self.tab_manager,
-                        width as f32,
-                        cw,
-                        ch,
-                        theme,
-                        self.hovered_tab,
-                    );
-                    for (rect, cells) in labels {
-                        let offset_rect = Rect::new(rect.x, rect.y + HEADER_BAR_HEIGHT, rect.width, rect.height);
-                        text_overlays.push((offset_rect, cells));
-                    }
+                    // Tab bar text: rendered by iced layer (Phase 2 migration)
 
                     // Pane header text
                     {
@@ -2274,24 +2201,22 @@ impl ApplicationHandler<UserEvent> for App {
                         scale_factor: ui_scale,
                     };
 
+                    let mut iced_msgs = Vec::new();
                     match renderer.render_panes(&mut pane_descs, &text_overlays, &ui_state) {
-                        Ok(surface_texture) => {
+                        Ok((surface_texture, messages)) => {
+                            iced_msgs = messages;
                             // Take screenshot if requested
                             if self.screenshot_requested {
                                 self.screenshot_requested = false;
-                                // Use fixed filename so only latest screenshot is kept.
-                                // Resolve relative to VELOTERM_PROJECT_DIR if set (needed when
-                                // launched via `open` where cwd is /).
                                 let path = match std::env::var("VELOTERM_PROJECT_DIR") {
                                     Ok(dir) => std::path::PathBuf::from(dir).join("veloterm-latest.png"),
                                     Err(_) => std::path::PathBuf::from("veloterm-latest.png"),
                                 };
                                 match renderer.capture_screenshot(&surface_texture.texture, &path) {
-                                    Ok(_) => {}, // Log message already in capture_screenshot
+                                    Ok(_) => {},
                                     Err(e) => log::error!("✗ Screenshot failed: {}", e),
                                 }
                             }
-                            // Present the frame
                             surface_texture.present();
                         }
                         Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
@@ -2303,6 +2228,50 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         Err(e) => {
                             log::warn!("Surface error: {e}");
+                        }
+                    }
+
+                    // Process iced UI messages (tab interactions)
+                    for msg in iced_msgs {
+                        match msg {
+                            UiMessage::TabSelected(idx) => {
+                                self.handle_tab_command(TabCommand::SelectTab(idx), event_loop);
+                                // Begin drag tracking
+                                self.tab_drag_index = Some(idx);
+                                self.tab_drag_start_x = self.interaction.cursor_pos().0;
+                                self.tab_drag_active = false;
+                            }
+                            UiMessage::TabClosed(idx) => {
+                                let pane_ids = self.tab_manager.close_tab(idx);
+                                if let Some(ids) = pane_ids {
+                                    for id in &ids {
+                                        self.pane_states.remove(id);
+                                        if let Some(r) = &mut self.renderer {
+                                            r.remove_pane_damage(*id);
+                                        }
+                                    }
+                                    let (w, h) = self.window_size();
+                                    self.update_interaction_layout(w, h);
+                                    if let Some(r) = &mut self.renderer {
+                                        r.pane_damage_mut().force_full_damage_all();
+                                    }
+                                } else {
+                                    log::info!("Last tab closed via iced close button, exiting");
+                                    event_loop.exit();
+                                }
+                            }
+                            UiMessage::NewTab => {
+                                self.handle_tab_command(TabCommand::NewTab, event_loop);
+                            }
+                            UiMessage::TabHovered(idx) => {
+                                if idx != self.hovered_tab {
+                                    self.hovered_tab = idx;
+                                    if let Some(window) = &self.window {
+                                        window.request_redraw();
+                                    }
+                                }
+                            }
+                            UiMessage::Noop => {}
                         }
                     }
                 }

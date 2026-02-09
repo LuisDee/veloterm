@@ -5,7 +5,7 @@ use crate::config::theme::Theme;
 use iced_graphics::Viewport;
 use iced_runtime::user_interface::{Cache, UserInterface};
 use iced_wgpu::Engine;
-use iced_widget::{column, container, row, text, Row};
+use iced_widget::{button, column, container, row, text, MouseArea, Row};
 
 /// Messages produced by iced UI widgets, returned to the application for processing.
 #[derive(Debug, Clone)]
@@ -13,6 +13,7 @@ pub enum UiMessage {
     TabSelected(usize),
     TabClosed(usize),
     NewTab,
+    TabHovered(Option<usize>),
     Noop,
 }
 
@@ -247,16 +248,182 @@ impl IcedLayer {
             .into()
     }
 
-    /// Tab bar widget: transparent placeholder until Phase 2 migrates tabs.
-    /// The legacy overlay pipeline renders the actual tab bar underneath.
-    fn tab_bar<'a>(_state: &UiState, scale: f32) -> IcedElement<'a> {
-        let height = TAB_BAR_HEIGHT / scale;
+    /// Tab bar widget: row of tab buttons with close buttons, new-tab button.
+    fn tab_bar<'a>(state: &UiState, scale: f32) -> IcedElement<'a> {
+        let theme = state.theme;
+        let surface = to_iced_color(&theme.surface);
+        let surface_raised = to_iced_color(&theme.surface_raised);
+        let accent = to_iced_color(&theme.accent);
+        let text_color = to_iced_color(&theme.text);
+        let text_secondary = to_iced_color(&theme.text_secondary);
+        let border_color = to_iced_color(&theme.border);
 
-        container(text(""))
+        let height = TAB_BAR_HEIGHT / scale;
+        let font_size = 12.0 / scale;
+        let max_tab_w = 200.0 / scale;
+        let min_tab_w = 60.0 / scale;
+        let new_tab_w = 28.0 / scale;
+
+        let tab_count = state.tabs.len();
+        let available = (state.window_width / scale - new_tab_w).max(0.0);
+        let raw_w = if tab_count > 0 { available / tab_count as f32 } else { 0.0 };
+        let tw = raw_w.clamp(min_tab_w, max_tab_w);
+
+        let mut tab_row = Row::new()
+            .height(height)
+            .align_y(iced_core::Alignment::Center);
+
+        for (i, tab) in state.tabs.iter().enumerate() {
+            let is_active = i == state.active_tab_index;
+            let is_hovered = state.hovered_tab == Some(i);
+
+            let fg = if is_active { text_color } else { text_secondary };
+            let bg = if is_active { surface_raised } else { surface };
+
+            // Tab title (truncated)
+            let max_chars = ((tw / (font_size * 0.6)) as usize).max(3);
+            let title_chars: Vec<char> = tab.title.chars().collect();
+            let show_close = is_active || is_hovered;
+            let usable_chars = if show_close { max_chars.saturating_sub(2) } else { max_chars };
+            let display_title = if title_chars.len() > usable_chars && usable_chars > 1 {
+                let mut t: String = title_chars[..usable_chars - 1].iter().collect();
+                t.push('\u{2026}');
+                t
+            } else {
+                title_chars[..title_chars.len().min(usable_chars)].iter().collect()
+            };
+
+            let mut tab_content: Row<'a, UiMessage, iced_core::Theme, iced_wgpu::Renderer> = Row::new()
+                .align_y(iced_core::Alignment::Center)
+                .width(tw)
+                .height(height);
+
+            // Title text (centered via spacers)
+            tab_content = tab_content.push(
+                container(text(display_title).size(font_size).color(fg))
+                    .width(iced_core::Length::Fill)
+                    .center_x(iced_core::Length::Fill)
+                    .center_y(iced_core::Length::Fill)
+            );
+
+            // Close button
+            if show_close {
+                let close_fg = iced_core::Color { a: 0.7, ..fg };
+                let close_btn = button(
+                    text("\u{00D7}").size(font_size).color(close_fg)
+                )
+                .on_press(UiMessage::TabClosed(i))
+                .padding(0)
+                .style(move |_: &iced_core::Theme, _status| button::Style {
+                    background: None,
+                    text_color: close_fg,
+                    border: iced_core::Border::default(),
+                    shadow: iced_core::Shadow::default(),
+                    snap: false,
+                });
+                tab_content = tab_content.push(close_btn);
+            }
+
+            // Wrap in a styled container with bottom accent stripe for active tab
+            let tab_bg = bg;
+            let is_active_tab = is_active;
+            let accent_color = accent;
+            let tab_container = container(tab_content)
+                .width(tw)
+                .height(height)
+                .style(move |_: &iced_core::Theme| container::Style {
+                    background: Some(iced_core::Background::Color(tab_bg)),
+                    border: if is_active_tab {
+                        iced_core::Border {
+                            color: accent_color,
+                            width: 0.0,
+                            radius: 0.0.into(),
+                        }
+                    } else {
+                        iced_core::Border::default()
+                    },
+                    ..Default::default()
+                });
+
+            // Wrap in MouseArea for hover tracking and click
+            let tab_widget = MouseArea::new(tab_container)
+                .on_press(UiMessage::TabSelected(i))
+                .on_enter(UiMessage::TabHovered(Some(i)))
+                .on_exit(UiMessage::TabHovered(None));
+
+            tab_row = tab_row.push(tab_widget);
+
+            // Add separator after non-last tabs (except active and its neighbors)
+            if i < tab_count - 1 {
+                let sep_color = iced_core::Color { a: 0.5, ..to_iced_color(&theme.border) };
+                let separator = container(text(""))
+                    .width(1.0 / scale)
+                    .height(height - 4.0 / scale)
+                    .style(move |_: &iced_core::Theme| container::Style {
+                        background: Some(iced_core::Background::Color(sep_color)),
+                        ..Default::default()
+                    });
+                tab_row = tab_row.push(separator);
+            }
+        }
+
+        // Active tab accent stripe — rendered as a bottom border container
+        // (iced doesn't have per-side borders, so we use a column with the tab row + a stripe)
+        let mut accent_row: Row<'a, UiMessage, iced_core::Theme, iced_wgpu::Renderer> = Row::new()
+            .width(iced_core::Length::Fill)
+            .height(2.0 / scale);
+        for (i, _) in state.tabs.iter().enumerate() {
+            let stripe_color = if i == state.active_tab_index { accent } else { surface };
+            accent_row = accent_row.push(
+                container(text(""))
+                    .width(tw)
+                    .height(2.0 / scale)
+                    .style(move |_: &iced_core::Theme| container::Style {
+                        background: Some(iced_core::Background::Color(stripe_color)),
+                        ..Default::default()
+                    })
+            );
+        }
+
+        // New tab "+" button
+        let plus_btn = button(
+            container(text("+").size(font_size).color(text_secondary))
+                .center_x(new_tab_w)
+                .center_y(height)
+        )
+        .on_press(UiMessage::NewTab)
+        .width(new_tab_w)
+        .height(height)
+        .padding(0)
+        .style(move |_: &iced_core::Theme, status| {
+            let bg_color = match status {
+                button::Status::Hovered => surface_raised,
+                _ => surface,
+            };
+            button::Style {
+                background: Some(iced_core::Background::Color(bg_color)),
+                text_color: text_secondary,
+                border: iced_core::Border::default(),
+                shadow: iced_core::Shadow::default(),
+                snap: false,
+            }
+        });
+
+        tab_row = tab_row.push(plus_btn);
+
+        // Stack: tab row on top, accent stripe at bottom
+        let tab_bar_column = column![tab_row, accent_row];
+
+        container(tab_bar_column)
             .width(iced_core::Length::Fill)
             .height(height)
-            .style(|_: &iced_core::Theme| container::Style {
-                background: None,
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(surface)),
+                border: iced_core::Border {
+                    color: border_color,
+                    width: 0.0,
+                    radius: 0.0.into(),
+                },
                 ..Default::default()
             })
             .into()
@@ -528,5 +695,66 @@ mod tests {
         assert_eq!(HEADER_BAR_HEIGHT, crate::header_bar::HEADER_BAR_HEIGHT);
         assert_eq!(TAB_BAR_HEIGHT, crate::tab::bar::TAB_BAR_HEIGHT);
         assert_eq!(STATUS_BAR_HEIGHT, crate::status_bar::STATUS_BAR_HEIGHT);
+    }
+
+    #[test]
+    fn tab_bar_renders_with_multiple_tabs() {
+        let (adapter, device, queue) = match try_create_headless_gpu() {
+            Some(ctx) => ctx,
+            None => return,
+        };
+        let mut layer = IcedLayer::new(
+            &adapter,
+            device.clone(),
+            queue.clone(),
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+            1280,
+            720,
+            1.0,
+        );
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Test Target"),
+            size: wgpu::Extent3d { width: 1280, height: 720, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Bgra8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let theme = Theme::claude_dark();
+        let state = UiState {
+            tabs: vec![
+                TabInfo { title: "Tab 1".to_string(), is_active: true, has_notification: false },
+                TabInfo { title: "Tab 2".to_string(), is_active: false, has_notification: false },
+                TabInfo { title: "Tab 3".to_string(), is_active: false, has_notification: true },
+            ],
+            active_tab_index: 0,
+            hovered_tab: Some(1),
+            active_pane_index: 0,
+            theme: &theme,
+            window_width: 1280.0,
+            window_height: 720.0,
+            scale_factor: 1.0,
+        };
+        let messages = layer.render(&view, &state);
+        assert!(messages.is_empty(), "No interactions, no messages expected");
+    }
+
+    #[test]
+    fn ui_message_tab_hovered_variant() {
+        let hover = UiMessage::TabHovered(Some(2));
+        match hover {
+            UiMessage::TabHovered(Some(idx)) => assert_eq!(idx, 2),
+            _ => panic!("Expected TabHovered(Some(2))"),
+        }
+        let unhover = UiMessage::TabHovered(None);
+        match unhover {
+            UiMessage::TabHovered(None) => {}
+            _ => panic!("Expected TabHovered(None)"),
+        }
     }
 }

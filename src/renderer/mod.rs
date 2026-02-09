@@ -585,7 +585,7 @@ impl Renderer {
         panes: &mut [PaneRenderDescriptor],
         text_overlays: &[(PaneRect, Vec<GridCell>)],
         ui_state: &iced_layer::UiState,
-    ) -> Result<wgpu::SurfaceTexture, wgpu::SurfaceError> {
+    ) -> Result<(wgpu::SurfaceTexture, Vec<iced_layer::UiMessage>), wgpu::SurfaceError> {
         // Process damage and prepare per-pane instance data
         struct PaneDrawData {
             rect: PaneRect,
@@ -651,10 +651,12 @@ impl Renderer {
         // Get surface texture (even if nothing to render, we need it for present)
         let output = self.surface.get_current_texture()?;
 
-        // Skip rendering entirely when nothing changed and no overlays need drawing
+        // Skip custom pipeline rendering when nothing changed and no overlays need drawing,
+        // but always run iced for UI chrome.
         if total_pane_instances == 0 && text_overlays.is_empty() && self.overlay_instance_count == 0 {
-            // Nothing to render, just return the blank surface
-            return Ok(output);
+            let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let iced_messages = self.iced.render(&view, ui_state);
+            return Ok((output, iced_messages));
         }
 
         // Pre-compute text overlay instances
@@ -876,10 +878,10 @@ impl Renderer {
 
         // Phase 4: iced UI layer — composites widget output on top of the custom pipeline.
         // iced's present() creates its own render pass and submits internally.
-        let _iced_messages = self.iced.render(&view, ui_state);
+        let iced_messages = self.iced.render(&view, ui_state);
 
         // Don't present yet - let caller capture screenshot if needed, then present
-        Ok(output)
+        Ok((output, iced_messages))
     }
 
     /// Capture a screenshot of the surface texture to PNG.
