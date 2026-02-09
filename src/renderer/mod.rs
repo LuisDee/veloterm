@@ -584,6 +584,7 @@ impl Renderer {
         &mut self,
         panes: &mut [PaneRenderDescriptor],
         text_overlays: &[(PaneRect, Vec<GridCell>)],
+        ui_state: &iced_layer::UiState,
     ) -> Result<wgpu::SurfaceTexture, wgpu::SurfaceError> {
         // Process damage and prepare per-pane instance data
         struct PaneDrawData {
@@ -875,7 +876,7 @@ impl Renderer {
 
         // Phase 4: iced UI layer — composites widget output on top of the custom pipeline.
         // iced's present() creates its own render pass and submits internally.
-        self.iced.render(&view);
+        let _iced_messages = self.iced.render(&view, ui_state);
 
         // Don't present yet - let caller capture screenshot if needed, then present
         Ok(output)

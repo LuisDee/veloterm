@@ -12,7 +12,7 @@ use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 use crate::config::theme::Theme;
 use crate::config::types::{Config, ConfigDelta};
 use crate::config::watcher::UserEvent;
-use crate::header_bar::{generate_header_bar_quads, generate_header_bar_text_cells, HEADER_BAR_HEIGHT};
+use crate::header_bar::HEADER_BAR_HEIGHT;
 use crate::input::{
     match_app_command, match_pane_command, match_tab_command, match_search_command,
     should_open_search, AppCommand, InputMode, PaneCommand, SearchCommand, TabCommand,
@@ -25,8 +25,9 @@ use crate::pane::header::{generate_pane_header_quads, generate_pane_header_text,
 use crate::search::overlay::{generate_search_bar_quads, generate_search_bar_text_cells, SearchBarParams};
 use crate::pane::interaction::{CursorType, InteractionEffect, PaneInteraction};
 use crate::pane::{PaneId, Rect, SplitDirection};
+use crate::renderer::iced_layer::{TabInfo, UiState};
 use crate::renderer::PaneRenderDescriptor;
-use crate::status_bar::{generate_status_bar_quads, generate_status_bar_text_cells, STATUS_BAR_HEIGHT};
+use crate::status_bar::STATUS_BAR_HEIGHT;
 use crate::tab::bar::{generate_tab_bar_quads, generate_tab_label_text_cells, hit_test_tab_bar, TabBarAction, TAB_BAR_HEIGHT};
 use crate::tab::TabManager;
 
@@ -786,8 +787,8 @@ impl App {
             return Vec::new();
         };
 
-        // Header bar quads
-        let mut quads = generate_header_bar_quads(width, theme);
+        // Header bar: rendered by iced layer (Phase 1 migration)
+        let mut quads = Vec::new();
 
         // Tab bar quads (offset by header bar height)
         let tab_quads = generate_tab_bar_quads(&self.tab_manager, width, theme);
@@ -904,8 +905,7 @@ impl App {
             }
         }
 
-        // Status bar quads
-        quads.extend(generate_status_bar_quads(width, height, theme));
+        // Status bar: rendered by iced layer (Phase 1 migration)
 
         quads
     }
@@ -2154,12 +2154,7 @@ impl ApplicationHandler<UserEvent> for App {
                     let theme = renderer.theme();
                     let cw = renderer.cell_width();
                     let ch = renderer.cell_height();
-                    // Header bar text
-                    if let Some((rect, cells)) = generate_header_bar_text_cells(
-                        width as f32, cw, ch, theme,
-                    ) {
-                        text_overlays.push((rect, cells));
-                    }
+                    // Header bar text: rendered by iced layer (Phase 1 migration)
 
                     // Tab labels (offset by header bar height)
                     let labels = generate_tab_label_text_cells(
@@ -2203,18 +2198,7 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                     }
 
-                    // Status bar text
-                    {
-                        let pane_tree = &self.tab_manager.active_tab().pane_tree;
-                        let pane_ids: Vec<_> = pane_tree.visible_panes();
-                        let focused = pane_tree.focused_pane_id();
-                        let active_pane_index = pane_ids.iter().position(|id| *id == focused).unwrap_or(0);
-                        if let Some((rect, cells)) = generate_status_bar_text_cells(
-                            width as f32, height as f32, cw, ch, active_pane_index, theme,
-                        ) {
-                            text_overlays.push((rect, cells));
-                        }
-                    }
+                    // Status bar text: rendered by iced layer (Phase 1 migration)
 
                     // Search bar text
                     if self.search_state.is_active {
@@ -2259,9 +2243,38 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 }
 
+                // Build iced UI state from current application state (before mutable borrow)
+                let ui_tabs: Vec<TabInfo> = self.tab_manager.tabs().iter().enumerate().map(|(i, tab)| TabInfo {
+                    title: tab.title.clone(),
+                    is_active: i == self.tab_manager.active_index(),
+                    has_notification: tab.has_notification,
+                }).collect();
+                let ui_active_tab = self.tab_manager.active_index();
+                let ui_hovered_tab = self.hovered_tab;
+                let ui_scale = self.window.as_ref().map(|w| w.scale_factor() as f32).unwrap_or(1.0);
+                let ui_active_pane = {
+                    let pane_tree = &self.tab_manager.active_tab().pane_tree;
+                    let pane_ids: Vec<_> = pane_tree.visible_panes();
+                    let focused = pane_tree.focused_pane_id();
+                    pane_ids.iter().position(|id| *id == focused).unwrap_or(0)
+                };
+
                 if let Some(renderer) = &mut self.renderer {
                     renderer.update_overlays(&overlay_quads);
-                    match renderer.render_panes(&mut pane_descs, &text_overlays) {
+
+                    let theme_clone = renderer.theme().clone();
+                    let ui_state = UiState {
+                        tabs: ui_tabs,
+                        active_tab_index: ui_active_tab,
+                        hovered_tab: ui_hovered_tab,
+                        active_pane_index: ui_active_pane,
+                        theme: &theme_clone,
+                        window_width: width as f32,
+                        window_height: height as f32,
+                        scale_factor: ui_scale,
+                    };
+
+                    match renderer.render_panes(&mut pane_descs, &text_overlays, &ui_state) {
                         Ok(surface_texture) => {
                             // Take screenshot if requested
                             if self.screenshot_requested {
