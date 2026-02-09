@@ -440,6 +440,21 @@ impl App {
             ContextMenuAction::ClosePane => {
                 self.handle_pane_command(PaneCommand::ClosePane, event_loop);
             }
+            ContextMenuAction::ClearScrollback => {
+                self.handle_app_command(AppCommand::ClearScrollback);
+            }
+            ContextMenuAction::NewTab => {
+                self.handle_tab_command(TabCommand::NewTab, event_loop);
+            }
+            ContextMenuAction::NewWindow => {
+                self.spawn_new_window();
+            }
+            ContextMenuAction::CloseTab => {
+                self.handle_tab_command(TabCommand::CloseTab, event_loop);
+            }
+            ContextMenuAction::CloseOtherTabs => {
+                self.close_other_tabs(event_loop);
+            }
         }
         if let Some(window) = &self.window {
             window.request_redraw();
@@ -705,6 +720,37 @@ impl App {
                 log::info!("Last tab closed, exiting");
                 event_loop.exit();
             }
+        }
+    }
+
+    /// Close all tabs except the currently active one.
+    fn close_other_tabs(&mut self, _event_loop: &ActiveEventLoop) {
+        let active = self.tab_manager.active_index();
+        let count = self.tab_manager.tab_count();
+        if count <= 1 {
+            return;
+        }
+        // Close tabs from the end to avoid shifting indices
+        for i in (0..count).rev() {
+            if i == active {
+                continue;
+            }
+            if let Some(pane_ids) = self.tab_manager.close_tab(i) {
+                for pane_id in &pane_ids {
+                    self.pane_states.remove(pane_id);
+                    if let Some(renderer) = &mut self.renderer {
+                        renderer.remove_pane_damage(*pane_id);
+                    }
+                }
+            }
+        }
+        let (w, h) = self.window_size();
+        self.update_interaction_layout(w, h);
+        if let Some(renderer) = &mut self.renderer {
+            renderer.pane_damage_mut().force_full_damage_all();
+        }
+        if let Some(window) = &self.window {
+            window.request_redraw();
         }
     }
 
@@ -1789,8 +1835,18 @@ impl ApplicationHandler<UserEvent> for App {
                 let cursor_pos = self.interaction.cursor_pos();
                 let chrome_top = Self::chrome_top_height();
                 let raw_y = cursor_pos.1 + chrome_top;
-                if raw_y >= chrome_top {
-                    // Right-click in content area — show context menu
+
+                if raw_y < chrome_top && raw_y >= HEADER_BAR_HEIGHT {
+                    // Right-click on tab bar — show tab context menu
+                    if let Some(window) = &self.window {
+                        if let Some(action) =
+                            crate::context_menu::show_tab_context_menu(window)
+                        {
+                            self.handle_context_menu_action(action, event_loop);
+                        }
+                    }
+                } else if raw_y >= chrome_top {
+                    // Right-click in content area — show terminal context menu
                     let focused_pane = self.tab_manager.active_tab().pane_tree.focused_pane_id();
                     let has_selection = self
                         .pane_states
