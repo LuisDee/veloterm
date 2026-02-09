@@ -119,7 +119,7 @@ _Link: [./conductor/tracks/24_iced_ui_chrome_20260209/](./conductor/tracks/24_ic
 ### [x] Track 14: Quick Terminal (S)
 _Link: [./conductor/tracks/14_quick_terminal_20260207/](./conductor/tracks/14_quick_terminal_20260207/)_
 
-### [ ] Track 12: Session Persistence (M)
+### [x] Track 12: Session Persistence (M)
 _Link: [./conductor/tracks/12_session_persistence_20260207/](./conductor/tracks/12_session_persistence_20260207/)_
 
 ### [ ] Track 13: Command Palette (M)
