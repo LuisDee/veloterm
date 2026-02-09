@@ -99,7 +99,7 @@ _Link: [./conductor/tracks/22_shell_hardening_20260208/](./conductor/tracks/22_s
 
 ## Wave 10 — iced Renderer Migration (Foundation)
 
-### [ ] Track 23: iced_wgpu Integration Foundation (L)
+### [x] Track 23: iced_wgpu Integration Foundation (L)
 _Link: [./conductor/tracks/23_iced_foundation_20260209/](./conductor/tracks/23_iced_foundation_20260209/)_
 
 ### [x] Track 25: Glyphon Glyph Rasterizer Swap (M)
