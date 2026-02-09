@@ -1,3 +1,4 @@
+pub mod command_palette;
 pub mod config;
 pub mod context_menu;
 pub mod header_bar;

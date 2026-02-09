@@ -18,6 +18,8 @@ pub enum InputMode {
     Normal,
     /// Search mode — keys go to the search bar.
     Search,
+    /// Command palette mode — keys go to the palette.
+    CommandPalette,
 }
 
 /// A search-mode command resulting from a key event.

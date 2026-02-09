@@ -88,6 +88,11 @@ pub struct UiState<'a> {
     pub dividers: Vec<DividerDisplay>,
     /// Whether a visual bell flash is active.
     pub bell_flash: bool,
+    /// Command palette state.
+    pub palette_active: bool,
+    pub palette_query: String,
+    pub palette_items: Vec<(String, String, String)>, // (name, description, keybinding)
+    pub palette_selected: usize,
 }
 
 /// Holds iced rendering state: renderer, viewport, event queue, and UI cache.
@@ -269,7 +274,7 @@ impl IcedLayer {
             .height(iced_core::Length::Fill)
             .into();
 
-        if state.bell_flash {
+        let with_flash: IcedElement<'a> = if state.bell_flash {
             let flash_overlay = container(column![])
                 .width(iced_core::Length::Fill)
                 .height(iced_core::Length::Fill)
@@ -286,6 +291,27 @@ impl IcedLayer {
                 .into()
         } else {
             main_ui
+        };
+
+        // Command palette overlay (modal, centered at top)
+        if state.palette_active {
+            let palette_overlay = Self::command_palette(state, scale);
+            let scrim = container(column![])
+                .width(iced_core::Length::Fill)
+                .height(iced_core::Length::Fill)
+                .style(|_: &iced_core::Theme| container::Style {
+                    background: Some(iced_core::Background::Color(
+                        iced_core::Color::from_rgba(0.0, 0.0, 0.0, 0.4),
+                    )),
+                    ..Default::default()
+                });
+
+            stack![with_flash, scrim, palette_overlay]
+                .width(iced_core::Length::Fill)
+                .height(iced_core::Length::Fill)
+                .into()
+        } else {
+            with_flash
         }
     }
 
@@ -792,6 +818,147 @@ impl IcedLayer {
         pin(bar).x(bar_x).y(bar_y).into()
     }
 
+    /// Command palette: floating modal centered near top of window.
+    fn command_palette<'a>(state: &'a UiState, scale: f32) -> IcedElement<'a> {
+        let theme = state.theme;
+        let surface = to_iced_color(&theme.surface);
+        let surface_raised = to_iced_color(&theme.surface_raised);
+        let text_color = to_iced_color(&theme.text);
+        let text_dim = to_iced_color(&theme.text_dim);
+        let text_secondary = to_iced_color(&theme.text_secondary);
+        let accent = to_iced_color(&theme.accent);
+        let border_color = to_iced_color(&theme.border);
+
+        let font_size = 13.0 / scale;
+        let small_size = 11.0 / scale;
+        let pad_h = 14.0 / scale;
+        let pad_v = 8.0 / scale;
+        let palette_width = 440.0 / scale;
+        let input_height = 36.0 / scale;
+        let item_height = 32.0 / scale;
+        let radius = 8.0 / scale;
+        let spacing = 2.0 / scale;
+        let max_visible = 10;
+
+        // Input field display
+        let query_display = if state.palette_query.is_empty() {
+            "Type a command...".to_string()
+        } else {
+            state.palette_query.clone()
+        };
+        let query_color = if state.palette_query.is_empty() {
+            text_dim
+        } else {
+            text_color
+        };
+
+        let input_bar = container(
+            row![
+                text("\u{1F50D}").size(font_size).color(text_dim),
+                text(query_display).size(font_size).color(query_color),
+            ]
+            .spacing(8.0 / scale)
+            .align_y(iced_core::Alignment::Center)
+            .padding(iced_core::Padding::from([pad_v, pad_h])),
+        )
+        .width(palette_width)
+        .height(input_height)
+        .style(move |_: &iced_core::Theme| container::Style {
+            background: Some(iced_core::Background::Color(surface)),
+            border: iced_core::Border {
+                color: border_color,
+                width: 0.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        });
+
+        // Result list
+        let visible_count = state.palette_items.len().min(max_visible);
+        let mut result_col = iced_widget::Column::new().spacing(spacing);
+
+        for (i, (name, _desc, keybinding)) in state.palette_items.iter().enumerate().take(visible_count) {
+            let is_selected = i == state.palette_selected;
+            let item_bg = if is_selected { surface_raised } else { surface };
+            let item_fg = if is_selected { text_color } else { text_secondary };
+            let kb_color = text_dim;
+
+            let item_content = row![
+                text(name.as_str()).size(font_size).color(item_fg),
+                hspace(),
+                text(keybinding.as_str()).size(small_size).color(kb_color),
+            ]
+            .align_y(iced_core::Alignment::Center)
+            .padding(iced_core::Padding::from([pad_v, pad_h]));
+
+            let item_accent = accent;
+            let item = container(item_content)
+                .width(palette_width)
+                .height(item_height)
+                .style(move |_: &iced_core::Theme| container::Style {
+                    background: Some(iced_core::Background::Color(item_bg)),
+                    border: if is_selected {
+                        iced_core::Border {
+                            color: item_accent,
+                            width: 0.0,
+                            radius: 0.0.into(),
+                        }
+                    } else {
+                        iced_core::Border::default()
+                    },
+                    ..Default::default()
+                });
+
+            result_col = result_col.push(item);
+        }
+
+        // Item count footer
+        let count_text = format!("{} commands", state.palette_items.len());
+        let footer = container(
+            text(count_text).size(small_size).color(text_dim),
+        )
+        .width(palette_width)
+        .padding(iced_core::Padding::from([4.0 / scale, pad_h]))
+        .style(move |_: &iced_core::Theme| container::Style {
+            background: Some(iced_core::Background::Color(surface)),
+            ..Default::default()
+        });
+
+        // Separator
+        let sep = container(column![])
+            .width(palette_width)
+            .height(1.0 / scale)
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(border_color)),
+                ..Default::default()
+            });
+
+        let palette_box = container(
+            column![input_bar, sep, result_col, footer],
+        )
+        .width(palette_width)
+        .style(move |_: &iced_core::Theme| container::Style {
+            background: Some(iced_core::Background::Color(surface)),
+            border: iced_core::Border {
+                color: border_color,
+                width: 1.0,
+                radius: radius.into(),
+            },
+            shadow: iced_core::Shadow {
+                color: iced_core::Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+                offset: iced_core::Vector::new(0.0, 4.0 / scale),
+                blur_radius: 16.0 / scale,
+            },
+            ..Default::default()
+        });
+
+        // Center horizontally, position near top
+        let palette_x = ((state.window_width / scale) - palette_width) / 2.0;
+        let palette_y = 80.0 / scale;
+
+        pin(palette_box).x(palette_x).y(palette_y).into()
+    }
+
     /// Status bar: ✻ Claude Terminal | ● Pane N | user · UTF-8 · bash
     fn status_bar<'a>(state: &UiState, scale: f32) -> IcedElement<'a> {
         let theme = state.theme;
@@ -919,6 +1086,10 @@ mod tests {
             search_error: false,
             dividers: Vec::new(),
             bell_flash: false,
+            palette_active: false,
+            palette_query: String::new(),
+            palette_items: Vec::new(),
+            palette_selected: 0,
         }
     }
 
@@ -1163,6 +1334,10 @@ mod tests {
             search_error: false,
             dividers: Vec::new(),
             bell_flash: false,
+            palette_active: false,
+            palette_query: String::new(),
+            palette_items: Vec::new(),
+            palette_selected: 0,
         };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
@@ -1249,6 +1424,10 @@ mod tests {
             search_error: false,
             dividers: Vec::new(),
             bell_flash: false,
+            palette_active: false,
+            palette_query: String::new(),
+            palette_items: Vec::new(),
+            palette_selected: 0,
         };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");

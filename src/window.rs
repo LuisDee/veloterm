@@ -9,6 +9,7 @@ use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 
+use crate::command_palette::{self, PaletteAction, PaletteState};
 use crate::config::theme::Theme;
 use crate::config::types::{Config, ConfigDelta};
 use crate::config::watcher::UserEvent;
@@ -125,6 +126,8 @@ pub struct App {
     bell_flash_until: Option<std::time::Instant>,
     /// Whether the window is hidden via quick terminal toggle.
     quick_terminal_hidden: bool,
+    /// Command palette state (Some when palette is open).
+    palette_state: Option<PaletteState>,
 }
 
 impl App {
@@ -155,6 +158,7 @@ impl App {
             last_process_name: None,
             bell_flash_until: None,
             quick_terminal_hidden: false,
+            palette_state: None,
         }
     }
 
@@ -1120,6 +1124,177 @@ impl App {
         }
     }
 
+    /// Handle a key event while the command palette is open.
+    fn handle_palette_key(
+        &mut self,
+        logical_key: &Key,
+        text: Option<&str>,
+        event_loop: &ActiveEventLoop,
+    ) {
+        let palette = match &mut self.palette_state {
+            Some(p) => p,
+            None => return,
+        };
+
+        match logical_key {
+            Key::Named(NamedKey::Escape) => {
+                self.input_mode = InputMode::Normal;
+                self.palette_state = None;
+            }
+            Key::Named(NamedKey::ArrowUp) => {
+                palette.select_prev();
+            }
+            Key::Named(NamedKey::ArrowDown) => {
+                palette.select_next();
+            }
+            Key::Named(NamedKey::Enter) => {
+                if let Some(action) = palette.selected_action() {
+                    self.input_mode = InputMode::Normal;
+                    self.palette_state = None;
+                    self.dispatch_palette_action(action, event_loop);
+                }
+            }
+            Key::Named(NamedKey::Backspace) => {
+                palette.backspace();
+            }
+            Key::Character(s) => {
+                let t = text.unwrap_or(s.as_ref());
+                if let Some(ch) = t.chars().next() {
+                    if !ch.is_control() {
+                        palette.type_char(ch);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Dispatch a command palette action to the appropriate handler.
+    fn dispatch_palette_action(
+        &mut self,
+        action: PaletteAction,
+        event_loop: &ActiveEventLoop,
+    ) {
+        match action {
+            PaletteAction::SplitVertical => {
+                self.handle_pane_command(PaneCommand::SplitVertical, event_loop);
+            }
+            PaletteAction::SplitHorizontal => {
+                self.handle_pane_command(PaneCommand::SplitHorizontal, event_loop);
+            }
+            PaletteAction::ClosePane => {
+                self.handle_pane_command(PaneCommand::ClosePane, event_loop);
+            }
+            PaletteAction::FocusNextPane => {
+                let (width, height) = self.window_size();
+                let pgrid = self.pane_grid_bounds(width as f32, height as f32);
+                self.tab_manager.active_tab_mut().pane_tree.focus_direction(
+                    crate::pane::FocusDirection::Right,
+                    pgrid.width,
+                    pgrid.height,
+                );
+            }
+            PaletteAction::FocusPrevPane => {
+                let (width, height) = self.window_size();
+                let pgrid = self.pane_grid_bounds(width as f32, height as f32);
+                self.tab_manager.active_tab_mut().pane_tree.focus_direction(
+                    crate::pane::FocusDirection::Left,
+                    pgrid.width,
+                    pgrid.height,
+                );
+            }
+            PaletteAction::NewTab => {
+                self.handle_tab_command(TabCommand::NewTab, event_loop);
+            }
+            PaletteAction::CloseTab => {
+                self.handle_tab_command(TabCommand::CloseTab, event_loop);
+            }
+            PaletteAction::NextTab => {
+                self.handle_tab_command(TabCommand::NextTab, event_loop);
+            }
+            PaletteAction::PrevTab => {
+                self.handle_tab_command(TabCommand::PrevTab, event_loop);
+            }
+            PaletteAction::IncreaseFontSize => {
+                self.handle_app_command(AppCommand::IncreaseFontSize);
+            }
+            PaletteAction::DecreaseFontSize => {
+                self.handle_app_command(AppCommand::DecreaseFontSize);
+            }
+            PaletteAction::ResetFontSize => {
+                self.handle_app_command(AppCommand::ResetFontSize);
+            }
+            PaletteAction::Copy => {
+                let focused_id = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                if let Some(state) = self.pane_states.get_mut(&focused_id) {
+                    if let Some(ref sel) = state.mouse_selection.active_selection {
+                        let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal);
+                        let cols = state.terminal.columns();
+                        let text_str = crate::input::selection::selected_text(&cells, sel, cols);
+                        if !text_str.is_empty() {
+                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                let _ = clipboard.set_text(&text_str);
+                            }
+                        }
+                    }
+                }
+            }
+            PaletteAction::Paste => {
+                let focused_id = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    if let Ok(text_str) = clipboard.get_text() {
+                        if let Some(state) = self.pane_states.get_mut(&focused_id) {
+                            let bytes = crate::input::clipboard::paste_bytes(&text_str, true);
+                            if let Err(e) = state.pty.write(&bytes) {
+                                log::warn!("PTY paste write error: {e}");
+                            }
+                        }
+                    }
+                }
+            }
+            PaletteAction::SelectAll => {
+                let focused_id = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                if let Some(state) = self.pane_states.get_mut(&focused_id) {
+                    let rows = state.terminal.rows();
+                    let cols = state.terminal.columns();
+                    state.mouse_selection.active_selection = Some(
+                        crate::input::selection::Selection {
+                            start: (0, 0),
+                            end: (rows.saturating_sub(1), cols.saturating_sub(1)),
+                            selection_type: crate::input::selection::SelectionType::Range,
+                        },
+                    );
+                }
+            }
+            PaletteAction::ClearScrollback => {
+                self.handle_app_command(AppCommand::ClearScrollback);
+            }
+            PaletteAction::OpenSearch => {
+                self.input_mode = InputMode::Search;
+                self.search_state.is_active = true;
+            }
+            PaletteAction::ToggleViMode => {
+                let focused_id = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                if self.app_config.vi_mode.enabled {
+                    if let Some(state) = self.pane_states.get_mut(&focused_id) {
+                        if state.vi_state.is_some() {
+                            state.vi_state = None;
+                        } else {
+                            let (row, col) = state.terminal.cursor_position();
+                            state.vi_state = Some(crate::vi_mode::ViState::new(row, col));
+                        }
+                    }
+                }
+            }
+            PaletteAction::NewWindow => {
+                self.handle_app_command(AppCommand::NewWindow);
+            }
+        }
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
+
     /// Convert a winit key event to a character for vi-mode processing.
     fn key_to_vi_char(logical_key: &Key, text: Option<&str>) -> Option<char> {
         match logical_key {
@@ -1541,6 +1716,28 @@ impl ApplicationHandler<UserEvent> for App {
                         return;
                     }
 
+                    // Check for command palette toggle (Cmd+Shift+P on macOS)
+                    if command_palette::should_open_palette(&event.logical_key, self.modifiers) {
+                        if self.input_mode == InputMode::CommandPalette {
+                            // Close palette
+                            self.input_mode = InputMode::Normal;
+                            self.palette_state = None;
+                        } else {
+                            // Open palette (close search if active)
+                            if self.input_mode == InputMode::Search {
+                                self.search_state.is_active = false;
+                                self.search_state.query.clear();
+                                self.search_state.matches.clear();
+                            }
+                            self.input_mode = InputMode::CommandPalette;
+                            self.palette_state = Some(PaletteState::new());
+                        }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+
                     // Check for search toggle (Ctrl+Shift+F) — works in any mode
                     if should_open_search(&event.logical_key, self.modifiers) {
                         if self.input_mode == InputMode::Search {
@@ -1553,10 +1750,22 @@ impl ApplicationHandler<UserEvent> for App {
                                 renderer.pane_damage_mut().force_full_damage_all();
                             }
                         } else {
-                            // Open search
+                            // Open search (close palette if open)
+                            if self.input_mode == InputMode::CommandPalette {
+                                self.palette_state = None;
+                            }
                             self.input_mode = InputMode::Search;
                             self.search_state.is_active = true;
                         }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+
+                    // In command palette mode, intercept keys for palette interaction
+                    if self.input_mode == InputMode::CommandPalette {
+                        self.handle_palette_key(&event.logical_key, event.text.as_ref().map(|s| s.as_ref()), event_loop);
                         if let Some(window) = &self.window {
                             window.request_redraw();
                         }
@@ -2317,6 +2526,16 @@ impl ApplicationHandler<UserEvent> for App {
                         search_error: self.search_state.error.is_some(),
                         dividers: ui_dividers,
                         bell_flash: self.bell_flash_until.is_some_and(|t| std::time::Instant::now() < t),
+                        palette_active: self.palette_state.is_some(),
+                        palette_query: self.palette_state.as_ref().map(|p| p.query.clone()).unwrap_or_default(),
+                        palette_items: self.palette_state.as_ref().map(|p| {
+                            let registry = command_palette::command_registry();
+                            p.filtered.iter().map(|&(idx, _)| {
+                                let entry = &registry[idx];
+                                (entry.name.to_string(), entry.description.to_string(), entry.keybinding.to_string())
+                            }).collect()
+                        }).unwrap_or_default(),
+                        palette_selected: self.palette_state.as_ref().map(|p| p.selected).unwrap_or(0),
                     };
 
                     let mut iced_msgs = Vec::new();
