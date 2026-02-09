@@ -518,7 +518,7 @@ impl IcedLayer {
             let title_color = if is_active { text_color } else { text_secondary };
             let header_bg = if is_active { surface_raised } else { surface };
             let stripe_color = if is_active { accent } else { border_subtle };
-            let stripe_h = if is_active { 2.0 / scale } else { 1.0 / scale };
+            let stripe_h = if is_active { 4.0 / scale } else { 1.0 / scale };
             let pane_border = if is_active { accent } else { border_color };
 
             let badge = pane_badge(pane.index);

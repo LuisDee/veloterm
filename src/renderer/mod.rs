@@ -623,10 +623,11 @@ impl Renderer {
             let dirty = damage_state.process_frame(&pane.cells);
             let any_dirty = dirty.iter().any(|&d| d);
 
-            // When text overlays exist, always regenerate pane instances since the
-            // render pass clears the screen — we can't rely on the previous frame.
-            // Without text overlays, damage tracking still skips unchanged panes.
-            let force_redraw = !text_overlays.is_empty() || pane.cursor_instance.is_some();
+            // Always regenerate instances: the render pass clears the surface every
+            // frame, so we can never rely on the previous frame's content surviving.
+            // Damage tracking would cause flashing (clear wipes grid, iced body is
+            // transparent → terminal content disappears on "clean" frames).
+            let force_redraw = true;
             let mut instances = if any_dirty || force_redraw {
                 generate_instances(&pane_grid, &pane.cells, &self.atlas)
             } else {
