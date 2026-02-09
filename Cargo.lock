@@ -1245,6 +1245,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "151665d9be52f9bb40fc7966565d39666f2d1e69233571b71b87791c7e0528b3"
 
 [[package]]
+name = "global-hotkey"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41fbb3a4e56c901ee66c190fdb3fa08344e6d09593cc6c61f8eb9add7144b271"
+dependencies = [
+ "crossbeam-channel",
+ "keyboard-types",
+ "objc2 0.6.3",
+ "objc2-app-kit 0.3.2",
+ "once_cell",
+ "thiserror 2.0.18",
+ "windows-sys 0.59.0",
+ "x11-dl",
+]
+
+[[package]]
 name = "glow"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1698,6 +1714,17 @@ checksum = "8c942ebf8e95485ca0d52d97da7c5a2c387d0e7f0ba4c35e93bfcaee045955b3"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "keyboard-types"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b750dcadc39a09dbadd74e118f6dd6598df77fa01df0cfcdc52c28dece74528a"
+dependencies = [
+ "bitflags 2.10.0",
+ "serde",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -3742,6 +3769,7 @@ dependencies = [
  "cosmic-text 0.12.1",
  "crossbeam-channel",
  "env_logger",
+ "global-hotkey",
  "iced_core",
  "iced_graphics",
  "iced_runtime",

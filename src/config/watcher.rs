@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex};
 pub enum UserEvent {
     /// A valid config reload was detected.
     ConfigReloaded(Config, ConfigDelta),
+    /// Quick terminal global hotkey was pressed.
+    QuickTerminalToggle,
 }
 
 /// Watches a config file for changes and invokes a callback on valid reloads.
@@ -202,6 +204,9 @@ mod tests {
             UserEvent::ConfigReloaded(c, d) => {
                 assert_eq!(c, config);
                 assert!(d.is_empty());
+            }
+            UserEvent::QuickTerminalToggle => {
+                panic!("Expected ConfigReloaded, got QuickTerminalToggle");
             }
         }
     }

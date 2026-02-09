@@ -18,6 +18,7 @@ pub struct Config {
     pub links: LinksConfig,
     pub shell: ShellConfig,
     pub vi_mode: ViModeConfig,
+    pub quick_terminal: QuickTerminalConfig,
 }
 
 /// Font configuration.
@@ -126,6 +127,24 @@ impl Default for ViModeConfig {
     }
 }
 
+/// Quick terminal (global hotkey toggle) configuration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QuickTerminalConfig {
+    /// Enable the quick terminal global hotkey.
+    pub enabled: bool,
+    /// Global hotkey string (e.g., "Control+`").
+    pub hotkey: String,
+}
+
+impl Default for QuickTerminalConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            hotkey: "Control+`".to_string(),
+        }
+    }
+}
+
 /// Errors that can occur during config loading and validation.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -152,6 +171,7 @@ struct RawConfig {
     links: RawLinksConfig,
     shell: RawShellConfig,
     vi_mode: RawViModeConfig,
+    quick_terminal: RawQuickTerminalConfig,
 }
 
 #[derive(Deserialize)]
@@ -305,6 +325,22 @@ impl Default for RawViModeConfig {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(default)]
+struct RawQuickTerminalConfig {
+    enabled: bool,
+    hotkey: String,
+}
+
+impl Default for RawQuickTerminalConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            hotkey: "Control+`".to_string(),
+        }
+    }
+}
+
 // ── Default impls ───────────────────────────────────────────────────────
 
 impl Default for FontConfig {
@@ -423,6 +459,10 @@ impl Config {
                 enabled: raw.vi_mode.enabled,
                 entry_key: raw.vi_mode.entry_key,
             },
+            quick_terminal: QuickTerminalConfig {
+                enabled: raw.quick_terminal.enabled,
+                hotkey: raw.quick_terminal.hotkey,
+            },
         };
 
         config.validate()?;
@@ -503,6 +543,7 @@ impl Config {
             links_changed: self.links != other.links,
             shell_changed: self.shell != other.shell,
             vi_mode_changed: self.vi_mode != other.vi_mode,
+            quick_terminal_changed: self.quick_terminal != other.quick_terminal,
         }
     }
 
@@ -564,6 +605,12 @@ enabled = true
 # Keybinding to toggle vi-mode
 entry_key = "ctrl+shift+space"
 
+[quick_terminal]
+# Enable global hotkey to toggle window visibility
+enabled = false
+# Global hotkey (e.g., "Control+`", "Alt+Space")
+hotkey = "Control+`"
+
 # [keys]
 # Keybindings as "key_combo" = "action" pairs
 # Example:
@@ -587,6 +634,7 @@ pub struct ConfigDelta {
     pub links_changed: bool,
     pub shell_changed: bool,
     pub vi_mode_changed: bool,
+    pub quick_terminal_changed: bool,
 }
 
 impl ConfigDelta {
@@ -602,6 +650,7 @@ impl ConfigDelta {
             && !self.links_changed
             && !self.shell_changed
             && !self.vi_mode_changed
+            && !self.quick_terminal_changed
     }
 }
 
@@ -1289,5 +1338,47 @@ blink_rate = 2000
         assert_eq!(parsed.cursor, default.cursor);
         assert_eq!(parsed.scrollback, default.scrollback);
         assert_eq!(parsed.performance, default.performance);
+    }
+
+    // ── Quick terminal config tests ──────────────────────────────
+
+    #[test]
+    fn default_quick_terminal_disabled() {
+        let config = Config::default();
+        assert!(!config.quick_terminal.enabled);
+    }
+
+    #[test]
+    fn default_quick_terminal_hotkey() {
+        let config = Config::default();
+        assert_eq!(config.quick_terminal.hotkey, "Control+`");
+    }
+
+    #[test]
+    fn parse_quick_terminal_config() {
+        let toml = r#"
+[quick_terminal]
+enabled = true
+hotkey = "Alt+Space"
+"#;
+        let config = Config::from_toml(toml).unwrap();
+        assert!(config.quick_terminal.enabled);
+        assert_eq!(config.quick_terminal.hotkey, "Alt+Space");
+    }
+
+    #[test]
+    fn parse_quick_terminal_defaults() {
+        let config = Config::from_toml("").unwrap();
+        assert!(!config.quick_terminal.enabled);
+        assert_eq!(config.quick_terminal.hotkey, "Control+`");
+    }
+
+    #[test]
+    fn diff_detects_quick_terminal_change() {
+        let a = Config::default();
+        let mut b = Config::default();
+        b.quick_terminal.enabled = true;
+        let delta = a.diff(&b);
+        assert!(delta.quick_terminal_changed);
     }
 }

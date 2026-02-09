@@ -123,6 +123,8 @@ pub struct App {
     last_process_name: Option<String>,
     /// Visual bell flash end time.
     bell_flash_until: Option<std::time::Instant>,
+    /// Whether the window is hidden via quick terminal toggle.
+    quick_terminal_hidden: bool,
 }
 
 impl App {
@@ -152,6 +154,7 @@ impl App {
             last_process_check: std::time::Instant::now(),
             last_process_name: None,
             bell_flash_until: None,
+            quick_terminal_hidden: false,
         }
     }
 
@@ -754,6 +757,22 @@ impl App {
         }
     }
 
+    /// Toggle window visibility for quick terminal mode.
+    fn toggle_quick_terminal(&mut self) {
+        if let Some(window) = &self.window {
+            if self.quick_terminal_hidden {
+                window.set_visible(true);
+                window.focus_window();
+                self.quick_terminal_hidden = false;
+                log::info!("Quick terminal: window shown");
+            } else {
+                window.set_visible(false);
+                self.quick_terminal_hidden = true;
+                log::info!("Quick terminal: window hidden");
+            }
+        }
+    }
+
     /// Compute grid columns and rows for a pane rect, accounting for padding.
     fn grid_dims_for_rect(&self, rect: &Rect) -> (u16, u16) {
         if let Some(renderer) = &self.renderer {
@@ -1190,7 +1209,29 @@ impl App {
         self.event_proxy = Some(proxy.clone());
 
         // Start config file watcher (best-effort — non-fatal if it fails)
-        let _config_watcher = Self::start_config_watcher(&self.app_config, proxy);
+        let _config_watcher = Self::start_config_watcher(&self.app_config, proxy.clone());
+
+        // Start quick terminal global hotkey (if enabled)
+        let _hotkey_manager = if self.app_config.quick_terminal.enabled {
+            match crate::hotkey::HotkeyManager::new(
+                &self.app_config.quick_terminal.hotkey,
+                proxy,
+            ) {
+                Ok(mgr) => {
+                    log::info!(
+                        "Quick terminal hotkey registered: {}",
+                        self.app_config.quick_terminal.hotkey
+                    );
+                    Some(mgr)
+                }
+                Err(e) => {
+                    log::warn!("Failed to register quick terminal hotkey: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         event_loop.run_app(&mut self)?;
         Ok(())
@@ -1238,6 +1279,9 @@ impl ApplicationHandler<UserEvent> for App {
         match event {
             UserEvent::ConfigReloaded(new_config, delta) => {
                 self.handle_config_reload(new_config, delta);
+            }
+            UserEvent::QuickTerminalToggle => {
+                self.toggle_quick_terminal();
             }
         }
     }

@@ -1,6 +1,7 @@
 pub mod config;
 pub mod context_menu;
 pub mod header_bar;
+pub mod hotkey;
 pub mod input;
 pub mod link;
 pub mod pane;
