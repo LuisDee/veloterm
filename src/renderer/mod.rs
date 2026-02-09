@@ -652,9 +652,31 @@ impl Renderer {
         let output = self.surface.get_current_texture()?;
 
         // Skip custom pipeline rendering when nothing changed and no overlays need drawing,
-        // but always run iced for UI chrome.
+        // but always clear the surface and run iced for UI chrome.
         if total_pane_instances == 0 && text_overlays.is_empty() && self.overlay_instance_count == 0 {
             let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+            // Clear the surface so we don't flash undefined swapchain content
+            let mut encoder = self.device.create_command_encoder(
+                &wgpu::CommandEncoderDescriptor { label: Some("Clear Encoder") },
+            );
+            {
+                let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Clear Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(clear_color()),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+            }
+            self.queue.submit(Some(encoder.finish()));
             let iced_messages = self.iced.render(&view, ui_state);
             return Ok((output, iced_messages));
         }
