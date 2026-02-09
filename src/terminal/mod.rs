@@ -36,6 +36,8 @@ pub struct Terminal {
     processor: ansi::Processor,
     event_queue: EventQueue,
     shell_state: ShellState,
+    /// Set to true when a BEL character is received; cleared after reading.
+    bell_pending: bool,
 }
 
 impl Terminal {
@@ -57,6 +59,7 @@ impl Terminal {
             processor,
             event_queue,
             shell_state: ShellState::new(),
+            bell_pending: false,
         }
     }
 
@@ -89,7 +92,7 @@ impl Terminal {
                     self.shell_state.title_is_explicit = false;
                 }
                 TerminalEvent::Bell => {
-                    // Bell events can be handled later for notifications
+                    self.bell_pending = true;
                 }
             }
         }
@@ -202,6 +205,19 @@ impl Terminal {
             screen_lines: rows,
         };
         self.term.resize(size);
+    }
+
+    /// Returns true if a bell event is pending, and clears it.
+    pub fn take_bell(&mut self) -> bool {
+        let pending = self.bell_pending;
+        self.bell_pending = false;
+        pending
+    }
+
+    /// Clear all scrollback history and reset the viewport to the bottom.
+    pub fn clear_scrollback(&mut self) {
+        self.term.grid_mut().clear_history();
+        self.term.scroll_display(Scroll::Bottom);
     }
 
     /// Access the shell state for this terminal.
@@ -574,5 +590,49 @@ mod tests {
         let first_char = term.cell_char(0, 0);
         assert!(first_char == 'A' || first_char == 'K',
             "Expected 'A' or 'K' at (0,0), got '{first_char}'");
+    }
+
+    // ── Clear scrollback ─────────────────────────────────────────
+
+    #[test]
+    fn clear_scrollback_removes_history() {
+        let mut term = Terminal::new(80, 5, 10_000);
+        feed_overflow_lines(&mut term, 20);
+        assert!(term.history_size() > 0);
+        term.clear_scrollback();
+        assert_eq!(term.history_size(), 0);
+    }
+
+    #[test]
+    fn clear_scrollback_resets_display_offset() {
+        let mut term = Terminal::new(80, 5, 10_000);
+        feed_overflow_lines(&mut term, 20);
+        term.scroll_up(5);
+        assert!(term.display_offset() > 0);
+        term.clear_scrollback();
+        assert_eq!(term.display_offset(), 0);
+    }
+
+    // ── Bell detection ──────────────────────────────────────────
+
+    #[test]
+    fn bell_not_pending_initially() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        assert!(!term.take_bell());
+    }
+
+    #[test]
+    fn bell_pending_after_bel_char() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        term.feed(b"\x07");
+        assert!(term.take_bell());
+    }
+
+    #[test]
+    fn take_bell_clears_pending() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        term.feed(b"\x07");
+        assert!(term.take_bell());
+        assert!(!term.take_bell());
     }
 }

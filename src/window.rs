@@ -121,6 +121,8 @@ pub struct App {
     /// Throttle foreground process name detection (FFI syscall).
     last_process_check: std::time::Instant,
     last_process_name: Option<String>,
+    /// Visual bell flash end time.
+    bell_flash_until: Option<std::time::Instant>,
 }
 
 impl App {
@@ -149,6 +151,7 @@ impl App {
             tab_drag_active: false,
             last_process_check: std::time::Instant::now(),
             last_process_name: None,
+            bell_flash_until: None,
         }
     }
 
@@ -310,7 +313,7 @@ impl App {
             AppCommand::IncreaseFontSize => (current * 1.1).round(),
             AppCommand::DecreaseFontSize => (current / 1.1).round(),
             AppCommand::ResetFontSize => default,
-            AppCommand::NewWindow => return current, // handled before compute
+            AppCommand::NewWindow | AppCommand::ClearScrollback => return current, // handled before compute
         };
         raw.clamp(MIN_FONT, MAX_FONT)
     }
@@ -318,6 +321,18 @@ impl App {
     fn handle_app_command(&mut self, command: AppCommand) {
         if command == AppCommand::NewWindow {
             self.spawn_new_window();
+            return;
+        }
+
+        if command == AppCommand::ClearScrollback {
+            let focused_id = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+            if let Some(state) = self.pane_states.get_mut(&focused_id) {
+                state.terminal.clear_scrollback();
+                log::info!("Cleared scrollback for pane {focused_id:?}");
+            }
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
             return;
         }
 
@@ -1853,6 +1868,12 @@ impl ApplicationHandler<UserEvent> for App {
                     while let Ok(bytes) = state.pty.reader_rx.try_recv() {
                         state.terminal.feed(&bytes);
                     }
+                    // Check for bell events
+                    if state.terminal.take_bell() && self.app_config.shell.bell_enabled {
+                        self.bell_flash_until = Some(
+                            std::time::Instant::now() + std::time::Duration::from_millis(150),
+                        );
+                    }
                     // Sync cursor position from terminal state
                     let (row, col) = state.terminal.cursor_position();
                     state.cursor.update_position(row, col);
@@ -2068,6 +2089,7 @@ impl ApplicationHandler<UserEvent> for App {
                         search_total: self.search_state.total_count(),
                         search_error: self.search_state.error.is_some(),
                         dividers: ui_dividers,
+                        bell_flash: self.bell_flash_until.is_some_and(|t| std::time::Instant::now() < t),
                     };
 
                     let mut iced_msgs = Vec::new();

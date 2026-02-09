@@ -86,6 +86,8 @@ pub struct UiState<'a> {
     pub search_error: bool,
     /// Dividers between panes.
     pub dividers: Vec<DividerDisplay>,
+    /// Whether a visual bell flash is active.
+    pub bell_flash: bool,
 }
 
 /// Holds iced rendering state: renderer, viewport, event queue, and UI cache.
@@ -262,10 +264,29 @@ impl IcedLayer {
         let status_divider = Self::divider(theme, scale);
         let status_bar = Self::status_bar(state, scale);
 
-        column![title_bar, title_divider, tab_bar, content, status_divider, status_bar]
+        let main_ui: IcedElement<'a> = column![title_bar, title_divider, tab_bar, content, status_divider, status_bar]
             .width(iced_core::Length::Fill)
             .height(iced_core::Length::Fill)
-            .into()
+            .into();
+
+        if state.bell_flash {
+            let flash_overlay = container(column![])
+                .width(iced_core::Length::Fill)
+                .height(iced_core::Length::Fill)
+                .style(|_: &iced_core::Theme| container::Style {
+                    background: Some(iced_core::Background::Color(
+                        iced_core::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                    )),
+                    ..Default::default()
+                });
+
+            stack![main_ui, flash_overlay]
+                .width(iced_core::Length::Fill)
+                .height(iced_core::Length::Fill)
+                .into()
+        } else {
+            main_ui
+        }
     }
 
     /// Title bar: ✻ Claude Terminal ... v0.1.0
@@ -897,6 +918,7 @@ mod tests {
             search_total: 0,
             search_error: false,
             dividers: Vec::new(),
+            bell_flash: false,
         }
     }
 
@@ -1140,6 +1162,7 @@ mod tests {
             search_total: 0,
             search_error: false,
             dividers: Vec::new(),
+            bell_flash: false,
         };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
@@ -1225,6 +1248,7 @@ mod tests {
             search_total: 0,
             search_error: false,
             dividers: Vec::new(),
+            bell_flash: false,
         };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");

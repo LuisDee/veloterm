@@ -94,6 +94,8 @@ pub struct ShellConfig {
     pub integration_enabled: bool,
     /// Minimum command duration (seconds) to trigger long-running notification.
     pub notification_threshold_secs: u64,
+    /// Enable visual bell (brief flash on BEL character).
+    pub bell_enabled: bool,
 }
 
 impl Default for ShellConfig {
@@ -101,6 +103,7 @@ impl Default for ShellConfig {
         Self {
             integration_enabled: true,
             notification_threshold_secs: 10,
+            bell_enabled: true,
         }
     }
 }
@@ -273,6 +276,7 @@ impl Default for RawLinksConfig {
 struct RawShellConfig {
     integration_enabled: bool,
     notification_threshold_secs: u64,
+    bell_enabled: bool,
 }
 
 impl Default for RawShellConfig {
@@ -280,6 +284,7 @@ impl Default for RawShellConfig {
         Self {
             integration_enabled: true,
             notification_threshold_secs: 10,
+            bell_enabled: true,
         }
     }
 }
@@ -412,6 +417,7 @@ impl Config {
             shell: ShellConfig {
                 integration_enabled: raw.shell.integration_enabled,
                 notification_threshold_secs: raw.shell.notification_threshold_secs,
+                bell_enabled: raw.shell.bell_enabled,
             },
             vi_mode: ViModeConfig {
                 enabled: raw.vi_mode.enabled,
@@ -549,6 +555,8 @@ fps_limit = 60
 integration_enabled = true
 # Minimum command duration (seconds) to trigger long-running notification
 notification_threshold_secs = 10
+# Enable visual bell (brief flash on BEL character)
+bell_enabled = true
 
 [vi_mode]
 # Enable vi-mode for keyboard-driven scrollback navigation
@@ -798,6 +806,22 @@ notification_threshold_secs = 30
         let config = Config::from_toml("").unwrap();
         assert!(config.shell.integration_enabled);
         assert_eq!(config.shell.notification_threshold_secs, 10);
+    }
+
+    #[test]
+    fn default_bell_enabled() {
+        let config = Config::default();
+        assert!(config.shell.bell_enabled);
+    }
+
+    #[test]
+    fn parse_bell_disabled() {
+        let toml = r#"
+[shell]
+bell_enabled = false
+"#;
+        let config = Config::from_toml(toml).unwrap();
+        assert!(!config.shell.bell_enabled);
     }
 
     #[test]

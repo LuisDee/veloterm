@@ -281,6 +281,7 @@ pub enum AppCommand {
     DecreaseFontSize,
     ResetFontSize,
     NewWindow,
+    ClearScrollback,
 }
 
 /// Return the platform-appropriate "primary" modifier.
@@ -314,6 +315,7 @@ pub fn match_app_command(
                 "-" => Some(AppCommand::DecreaseFontSize),
                 "0" => Some(AppCommand::ResetFontSize),
                 "n" | "N" => Some(AppCommand::NewWindow),
+                "k" | "K" => Some(AppCommand::ClearScrollback),
                 _ => None,
             }
         }
@@ -1307,6 +1309,26 @@ mod tests {
     #[test]
     fn app_cmd_new_window_no_match_without_modifier() {
         let result = match_app_command(&Key::Character("n".into()), no_mods());
+        assert_eq!(result, None);
+    }
+
+    // ── Clear scrollback command ─────────────────────────────────
+
+    #[test]
+    fn app_cmd_clear_scrollback() {
+        let result = match_app_command(&Key::Character("k".into()), primary_mod());
+        assert_eq!(result, Some(AppCommand::ClearScrollback));
+    }
+
+    #[test]
+    fn app_cmd_clear_scrollback_uppercase() {
+        let result = match_app_command(&Key::Character("K".into()), primary_mod());
+        assert_eq!(result, Some(AppCommand::ClearScrollback));
+    }
+
+    #[test]
+    fn app_cmd_clear_scrollback_no_match_without_modifier() {
+        let result = match_app_command(&Key::Character("k".into()), no_mods());
         assert_eq!(result, None);
     }
 }

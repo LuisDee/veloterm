@@ -145,7 +145,9 @@ impl PtySession {
             })
             .map_err(|e| PtyError::OpenPtyFailed(e.to_string()))?;
 
-        let cmd = CommandBuilder::new(shell);
+        let mut cmd = CommandBuilder::new(shell);
+        // Set TERM for proper color and capability support
+        cmd.env("TERM", "xterm-256color");
         let child = pair
             .slave
             .spawn_command(cmd)
@@ -348,6 +350,34 @@ mod tests {
     fn child_pid_returns_some() {
         let session = PtySession::new("/bin/sh", 80, 24).expect("spawn failed");
         assert!(session.child_pid().is_some());
+    }
+
+    #[test]
+    fn pty_session_sets_term_env() {
+        let mut session = PtySession::new("/bin/sh", 80, 24).expect("spawn failed");
+        // The TERM variable should be xterm-256color
+        session.write(b"echo $TERM\n").expect("write failed");
+        let mut all_output = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while std::time::Instant::now() < deadline {
+            match session
+                .reader_rx
+                .recv_timeout(std::time::Duration::from_millis(200))
+            {
+                Ok(chunk) => all_output.extend_from_slice(&chunk),
+                Err(_) => {
+                    if !all_output.is_empty() {
+                        break;
+                    }
+                }
+            }
+        }
+        let output_str = String::from_utf8_lossy(&all_output);
+        assert!(
+            output_str.contains("xterm-256color"),
+            "PTY should set TERM=xterm-256color, got: '{}'",
+            output_str
+        );
     }
 
     #[test]
