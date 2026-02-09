@@ -19,6 +19,7 @@ pub struct Config {
     pub shell: ShellConfig,
     pub vi_mode: ViModeConfig,
     pub quick_terminal: QuickTerminalConfig,
+    pub session: SessionConfig,
 }
 
 /// Font configuration.
@@ -145,6 +146,21 @@ impl Default for QuickTerminalConfig {
     }
 }
 
+/// Session persistence configuration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionConfig {
+    /// Automatically restore the previous session on startup.
+    pub auto_restore: bool,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            auto_restore: false,
+        }
+    }
+}
+
 /// Errors that can occur during config loading and validation.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -172,6 +188,7 @@ struct RawConfig {
     shell: RawShellConfig,
     vi_mode: RawViModeConfig,
     quick_terminal: RawQuickTerminalConfig,
+    session: RawSessionConfig,
 }
 
 #[derive(Deserialize)]
@@ -341,6 +358,20 @@ impl Default for RawQuickTerminalConfig {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(default)]
+struct RawSessionConfig {
+    auto_restore: bool,
+}
+
+impl Default for RawSessionConfig {
+    fn default() -> Self {
+        Self {
+            auto_restore: false,
+        }
+    }
+}
+
 // ── Default impls ───────────────────────────────────────────────────────
 
 impl Default for FontConfig {
@@ -463,6 +494,9 @@ impl Config {
                 enabled: raw.quick_terminal.enabled,
                 hotkey: raw.quick_terminal.hotkey,
             },
+            session: SessionConfig {
+                auto_restore: raw.session.auto_restore,
+            },
         };
 
         config.validate()?;
@@ -544,6 +578,7 @@ impl Config {
             shell_changed: self.shell != other.shell,
             vi_mode_changed: self.vi_mode != other.vi_mode,
             quick_terminal_changed: self.quick_terminal != other.quick_terminal,
+            session_changed: self.session != other.session,
         }
     }
 
@@ -611,6 +646,10 @@ enabled = false
 # Global hotkey (e.g., "Control+`", "Alt+Space")
 hotkey = "Control+`"
 
+[session]
+# Automatically restore the previous session on startup
+auto_restore = false
+
 # [keys]
 # Keybindings as "key_combo" = "action" pairs
 # Example:
@@ -635,6 +674,7 @@ pub struct ConfigDelta {
     pub shell_changed: bool,
     pub vi_mode_changed: bool,
     pub quick_terminal_changed: bool,
+    pub session_changed: bool,
 }
 
 impl ConfigDelta {
@@ -651,6 +691,7 @@ impl ConfigDelta {
             && !self.shell_changed
             && !self.vi_mode_changed
             && !self.quick_terminal_changed
+            && !self.session_changed
     }
 }
 
@@ -1380,5 +1421,32 @@ hotkey = "Alt+Space"
         b.quick_terminal.enabled = true;
         let delta = a.diff(&b);
         assert!(delta.quick_terminal_changed);
+    }
+
+    // ── Session config tests ──────────────────────────────────────
+
+    #[test]
+    fn default_session_auto_restore_disabled() {
+        let config = Config::default();
+        assert!(!config.session.auto_restore);
+    }
+
+    #[test]
+    fn parse_session_auto_restore() {
+        let toml = r#"
+[session]
+auto_restore = true
+"#;
+        let config = Config::from_toml(toml).unwrap();
+        assert!(config.session.auto_restore);
+    }
+
+    #[test]
+    fn diff_detects_session_change() {
+        let a = Config::default();
+        let mut b = Config::default();
+        b.session.auto_restore = true;
+        let delta = a.diff(&b);
+        assert!(delta.session_changed);
     }
 }

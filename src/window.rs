@@ -207,6 +207,41 @@ impl App {
         }
     }
 
+    /// Spawn a PTY + Terminal for a new pane with an optional working directory.
+    fn spawn_pane_with_cwd(&mut self, pane_id: PaneId, cols: u16, rows: u16, cwd: Option<&str>) {
+        let scrollback = self.app_config.scrollback.lines as usize;
+        let shell = crate::pty::default_shell();
+        match crate::pty::PtySession::new_with_cwd(&shell, cols, rows, cwd) {
+            Ok(pty) => {
+                log::info!(
+                    "PTY spawned for pane {:?}: {shell} ({cols}x{rows}) cwd={:?}",
+                    pane_id,
+                    cwd
+                );
+                let terminal = crate::terminal::Terminal::new(
+                    cols as usize,
+                    rows as usize,
+                    scrollback,
+                );
+                let mut cursor = crate::renderer::cursor::CursorState::with_blink_rate(
+                    self.app_config.cursor.blink_rate,
+                );
+                if let Some(style) = crate::renderer::cursor::CursorStyle::from_config_str(
+                    &self.app_config.cursor.style,
+                ) {
+                    cursor.set_style(style);
+                }
+                if !self.app_config.cursor.blink {
+                    cursor.set_blink_rate(0);
+                }
+                self.pane_states.insert(pane_id, PaneState { terminal, pty, vi_state: None, cursor, mouse_selection: crate::input::mouse::MouseSelectionState::new(), scroll_state: crate::scroll::ScrollState::new() });
+            }
+            Err(e) => {
+                log::error!("Failed to spawn PTY for pane {:?}: {e}", pane_id);
+            }
+        }
+    }
+
     /// Total chrome height above the content area (header bar + tab bar).
     fn chrome_top_height() -> f32 {
         HEADER_BAR_HEIGHT + TAB_BAR_HEIGHT
@@ -754,6 +789,90 @@ impl App {
         }
         if let Some(window) = &self.window {
             window.request_redraw();
+        }
+    }
+
+    /// Try to restore a previous session. Returns true if restored.
+    fn try_restore_session(&mut self, width: f32, height: f32) -> bool {
+        if !self.app_config.session.auto_restore {
+            return false;
+        }
+
+        let path = crate::session::SessionState::default_path();
+        let session = match crate::session::SessionState::load(&path) {
+            Ok(s) => s,
+            Err(e) => {
+                log::info!("No session to restore: {e}");
+                return false;
+            }
+        };
+
+        log::info!(
+            "Restoring session: {} tabs, {} panes",
+            session.tabs.len(),
+            session.total_panes()
+        );
+
+        // Build a new TabManager from the session
+        let mut new_tabs = Vec::new();
+        let pgrid = self.pane_grid_bounds(width, height);
+        let rect = crate::pane::Rect::new(0.0, 0.0, pgrid.width, pgrid.height);
+        let (cols, rows) = self.grid_dims_for_rect(&rect);
+
+        for session_tab in &session.tabs {
+            let (root_node, pane_spawns) =
+                crate::session::restore_pane_tree(&session_tab.pane_tree);
+
+            // Build Tab with the restored pane tree
+            let first_pane = pane_spawns.first().map(|(id, _)| *id);
+            let tab = crate::tab::Tab::from_pane_tree(
+                session_tab.title.clone(),
+                crate::pane::PaneTree::from_node(root_node, first_pane),
+            );
+            new_tabs.push(tab);
+
+            // Spawn all panes with their saved CWDs
+            for (pane_id, cwd) in &pane_spawns {
+                self.spawn_pane_with_cwd(*pane_id, cols, rows, cwd.as_deref());
+            }
+        }
+
+        if new_tabs.is_empty() {
+            return false;
+        }
+
+        let active = session.active_tab.min(new_tabs.len() - 1);
+        self.tab_manager = TabManager::from_tabs(new_tabs, active);
+
+        // Remove the session file after successful restore
+        if let Err(e) = std::fs::remove_file(&path) {
+            log::warn!("Failed to remove session file: {e}");
+        }
+
+        true
+    }
+
+    /// Save the current session state to the session file.
+    fn save_session(&self) {
+        let mut pane_cwds = std::collections::HashMap::new();
+        for (&pane_id, state) in &self.pane_states {
+            pane_cwds.insert(
+                pane_id,
+                crate::session::PaneCwdInfo {
+                    cwd: state.terminal.shell_state().cwd.clone(),
+                },
+            );
+        }
+        let session = crate::session::SessionState::capture(&self.tab_manager, &pane_cwds);
+        let path = crate::session::SessionState::default_path();
+        match session.save(&path) {
+            Ok(()) => log::info!(
+                "Session saved ({} tabs, {} panes) to {}",
+                session.tabs.len(),
+                session.total_panes(),
+                path.display()
+            ),
+            Err(e) => log::warn!("Failed to save session: {e}"),
         }
     }
 
@@ -1349,14 +1468,21 @@ impl ApplicationHandler<UserEvent> for App {
 
                         self.renderer = Some(renderer);
 
-                        // Spawn PTY and terminal for the initial tab's pane
-                        // Use grid_dims_for_rect to account for padding
-                        let initial_pane_id =
-                            self.tab_manager.active_tab().pane_tree.focused_pane_id();
-                        let pgrid = self.pane_grid_bounds(size.width as f32, size.height as f32);
-                        let rect = Rect::new(0.0, 0.0, pgrid.width, pgrid.height);
-                        let (cols, rows) = self.grid_dims_for_rect(&rect);
-                        self.spawn_pane(initial_pane_id, cols, rows);
+                        // Try to restore a previous session first
+                        let restored = self.try_restore_session(
+                            size.width as f32,
+                            size.height as f32,
+                        );
+
+                        if !restored {
+                            // No session restored — spawn default initial pane
+                            let initial_pane_id =
+                                self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                            let pgrid = self.pane_grid_bounds(size.width as f32, size.height as f32);
+                            let rect = Rect::new(0.0, 0.0, pgrid.width, pgrid.height);
+                            let (cols, rows) = self.grid_dims_for_rect(&rect);
+                            self.spawn_pane(initial_pane_id, cols, rows);
+                        }
                     }
                     Err(e) => {
                         log::error!("Failed to initialize renderer: {e}");
@@ -1393,6 +1519,7 @@ impl ApplicationHandler<UserEvent> for App {
         match event {
             WindowEvent::CloseRequested => {
                 log::info!("Window close requested");
+                self.save_session();
                 event_loop.exit();
             }
             WindowEvent::ModifiersChanged(new_modifiers) => {

@@ -10,6 +10,7 @@ pub mod pty;
 pub mod renderer;
 pub mod scroll;
 pub mod search;
+pub mod session;
 pub mod shell_integration;
 pub mod status_bar;
 pub mod tab;

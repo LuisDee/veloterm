@@ -55,6 +55,16 @@ impl Tab {
         }
     }
 
+    /// Create a tab with a pre-built pane tree (for session restore).
+    pub fn from_pane_tree(title: String, pane_tree: PaneTree) -> Self {
+        Self {
+            id: TabId::new(),
+            title,
+            pane_tree,
+            has_notification: false,
+        }
+    }
+
     /// Returns all PaneIds owned by this tab's pane tree.
     pub fn pane_ids(&self) -> Vec<PaneId> {
         self.pane_tree.pane_ids()
@@ -79,6 +89,15 @@ impl TabManager {
         Self {
             tabs: vec![Tab::new()],
             active_index: 0,
+        }
+    }
+
+    /// Creates a TabManager from pre-built tabs (for session restore).
+    pub fn from_tabs(tabs: Vec<Tab>, active_index: usize) -> Self {
+        let active = active_index.min(tabs.len().saturating_sub(1));
+        Self {
+            tabs,
+            active_index: active,
         }
     }
 

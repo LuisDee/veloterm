@@ -295,6 +295,19 @@ impl PaneTree {
         }
     }
 
+    /// Create a PaneTree from a pre-built node (for session restore).
+    /// If `focused` is None, the first leaf pane is focused.
+    pub fn from_node(root: PaneNode, focused: Option<PaneId>) -> Self {
+        let focus = focused.unwrap_or_else(|| {
+            root.leaf_ids().first().copied().unwrap_or(PaneId(0))
+        });
+        Self {
+            root,
+            focused: focus,
+            zoomed: None,
+        }
+    }
+
     /// Get the currently focused pane ID.
     pub fn focused_pane_id(&self) -> PaneId {
         self.focused

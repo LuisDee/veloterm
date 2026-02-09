@@ -134,6 +134,16 @@ impl PtySession {
 
     /// Spawn a new PTY session with the given shell and size.
     pub fn new(shell: &str, cols: u16, rows: u16) -> Result<Self, PtyError> {
+        Self::new_with_cwd(shell, cols, rows, None)
+    }
+
+    /// Spawn a new PTY session with the given shell, size, and optional CWD.
+    pub fn new_with_cwd(
+        shell: &str,
+        cols: u16,
+        rows: u16,
+        cwd: Option<&str>,
+    ) -> Result<Self, PtyError> {
         let pty_system = portable_pty::native_pty_system();
 
         let pair = pty_system
@@ -148,6 +158,9 @@ impl PtySession {
         let mut cmd = CommandBuilder::new(shell);
         // Set TERM for proper color and capability support
         cmd.env("TERM", "xterm-256color");
+        if let Some(dir) = cwd {
+            cmd.cwd(dir);
+        }
         let child = pair
             .slave
             .spawn_command(cmd)
