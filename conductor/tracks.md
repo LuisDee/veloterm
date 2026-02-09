@@ -122,5 +122,5 @@ _Link: [./conductor/tracks/14_quick_terminal_20260207/](./conductor/tracks/14_qu
 ### [x] Track 12: Session Persistence (M)
 _Link: [./conductor/tracks/12_session_persistence_20260207/](./conductor/tracks/12_session_persistence_20260207/)_
 
-### [ ] Track 13: Command Palette (M)
+### [x] Track 13: Command Palette (M)
 _Link: [./conductor/tracks/13_command_palette_20260207/](./conductor/tracks/13_command_palette_20260207/)_
