@@ -92,7 +92,7 @@ _Link: [./conductor/tracks/21_theme_colors_20260208/](./conductor/tracks/21_them
 
 ## Wave 9 — Shell Integration Hardening
 
-### [ ] Track 22: Shell Integration & Usability Hardening (M)
+### [x] Track 22: Shell Integration & Usability Hardening (M)
 _Link: [./conductor/tracks/22_shell_hardening_20260208/](./conductor/tracks/22_shell_hardening_20260208/)_
 
 ---
@@ -107,9 +107,9 @@ _Link: [./conductor/tracks/25_glyphon_text_20260209/](./conductor/tracks/25_glyp
 
 ---
 
-## Wave 11 — iced Renderer Migration (UI Chrome)
+## Wave 11 — iced Renderer Migration (UI Chrome) (COMPLETE)
 
-### [ ] Track 24: UI Chrome Migration to iced Widgets (L)
+### [x] Track 24: UI Chrome Migration to iced Widgets (L)
 _Link: [./conductor/tracks/24_iced_ui_chrome_20260209/](./conductor/tracks/24_iced_ui_chrome_20260209/)_
 
 ---
