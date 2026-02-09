@@ -36,7 +36,7 @@ pub struct TabInfo {
 }
 
 /// Pane descriptor for the iced widget tree.
-/// Positions are relative to the content area origin (after header + tab bar).
+/// Positions are in physical pixels relative to the content area origin (after header + tab bar).
 #[derive(Debug, Clone)]
 pub struct PaneInfo {
     pub x: f32,
@@ -47,6 +47,22 @@ pub struct PaneInfo {
     pub index: usize,
     pub title: String,
     pub shell_name: String,
+    /// Scrollbar thumb rect in physical pixels relative to content area origin.
+    /// (x, y, width, height). None if no scrollbar visible.
+    pub scrollbar_thumb: Option<(f32, f32, f32, f32)>,
+    /// Scrollbar opacity (0.0 = hidden, 1.0 = fully visible).
+    pub scrollbar_alpha: f32,
+}
+
+/// Divider between panes, for visual rendering.
+#[derive(Debug, Clone)]
+pub struct DividerDisplay {
+    /// Physical pixel rect relative to content area origin.
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub is_hovered: bool,
 }
 
 /// State snapshot passed to the iced widget tree each frame.
@@ -62,6 +78,14 @@ pub struct UiState<'a> {
     pub window_width: f32,
     pub window_height: f32,
     pub scale_factor: f32,
+    /// Search bar state.
+    pub search_active: bool,
+    pub search_query: String,
+    pub search_current: usize,
+    pub search_total: usize,
+    pub search_error: bool,
+    /// Dividers between panes.
+    pub dividers: Vec<DividerDisplay>,
 }
 
 /// Holds iced rendering state: renderer, viewport, event queue, and UI cache.
@@ -481,7 +505,8 @@ impl IcedLayer {
             .into()
     }
 
-    /// Pane chrome: rounded containers with headers, accent stripes, borders, and shadows.
+    /// Pane chrome: rounded containers with headers, accent stripes, borders, shadows,
+    /// plus dividers, scrollbar thumbs, and search bar overlay.
     fn pane_chrome<'a>(state: &'a UiState, scale: f32) -> IcedElement<'a> {
         let theme = state.theme;
         let surface = to_iced_color(&theme.surface);
@@ -606,9 +631,144 @@ impl IcedLayer {
                 });
 
             chrome_stack = chrome_stack.push(pin(pane_container).x(px).y(py));
+
+            // Scrollbar thumb (overlay on right edge of pane)
+            if let Some((sx, sy, sw, sh)) = pane.scrollbar_thumb {
+                if pane.scrollbar_alpha > 0.0 {
+                    let alpha = pane.scrollbar_alpha;
+                    let scrollbar = container(column![])
+                        .width(sw / scale)
+                        .height(sh / scale)
+                        .style(move |_: &iced_core::Theme| container::Style {
+                            background: Some(iced_core::Background::Color(
+                                iced_core::Color::from_rgba(1.0, 1.0, 1.0, alpha * 0.5),
+                            )),
+                            border: iced_core::Border {
+                                color: iced_core::Color::TRANSPARENT,
+                                width: 0.0,
+                                radius: (2.0 / scale).into(),
+                            },
+                            ..Default::default()
+                        });
+                    chrome_stack =
+                        chrome_stack.push(pin(scrollbar).x(sx / scale).y(sy / scale));
+                }
+            }
+        }
+
+        // Dividers between panes
+        for div in &state.dividers {
+            let div_color = if div.is_hovered { accent } else { border_color };
+            let divider_widget = container(column![])
+                .width(div.width / scale)
+                .height(div.height / scale)
+                .style(move |_: &iced_core::Theme| container::Style {
+                    background: Some(iced_core::Background::Color(div_color)),
+                    ..Default::default()
+                });
+            chrome_stack =
+                chrome_stack.push(pin(divider_widget).x(div.x / scale).y(div.y / scale));
+        }
+
+        // Search bar overlay (positioned at top-right of focused pane)
+        if state.search_active {
+            if let Some(focused_pane) = state.panes.iter().find(|p| p.is_focused) {
+                let search_bar =
+                    Self::search_bar(state, focused_pane, scale);
+                chrome_stack = chrome_stack.push(search_bar);
+            }
         }
 
         chrome_stack.into()
+    }
+
+    /// Search bar: floating overlay at top-right of the focused pane.
+    fn search_bar<'a>(
+        state: &'a UiState,
+        pane: &PaneInfo,
+        scale: f32,
+    ) -> IcedElement<'a> {
+        let theme = state.theme;
+        let surface = to_iced_color(&theme.surface);
+        let text_color = to_iced_color(&theme.text);
+        let text_dim = to_iced_color(&theme.text_dim);
+        let accent = to_iced_color(&theme.accent);
+        let error_color = to_iced_color(&theme.error);
+        let border_color = to_iced_color(&theme.border);
+
+        let font_size = 12.0 / scale;
+        let pad_v = 6.0 / scale;
+        let pad_h = 12.0 / scale;
+        let bar_width = 260.0 / scale;
+        let bar_height = 30.0 / scale;
+        let spacing = 8.0 / scale;
+        let radius = 6.0 / scale;
+
+        // Query text (truncated if needed)
+        let query_display = if state.search_query.is_empty() {
+            "Find...".to_string()
+        } else {
+            let max_chars = 20;
+            if state.search_query.len() > max_chars {
+                format!("{}...", &state.search_query[..max_chars])
+            } else {
+                state.search_query.clone()
+            }
+        };
+
+        let query_color = if state.search_error {
+            error_color
+        } else if state.search_query.is_empty() {
+            text_dim
+        } else {
+            text_color
+        };
+
+        // Match count
+        let match_text = if state.search_total > 0 {
+            format!("{}/{}", state.search_current, state.search_total)
+        } else if !state.search_query.is_empty() {
+            "0/0".to_string()
+        } else {
+            String::new()
+        };
+
+        let bar_content = row![
+            text(query_display).size(font_size).color(query_color),
+            hspace(),
+            text(match_text).size(font_size).color(text_dim),
+        ]
+        .spacing(spacing)
+        .align_y(iced_core::Alignment::Center)
+        .padding(iced_core::Padding::from([pad_v, pad_h]));
+
+        let bar_bg = surface;
+        let bar_border = if state.search_error { error_color } else { border_color };
+        let bar_accent = accent;
+        let has_query = !state.search_query.is_empty();
+        let bar = container(bar_content)
+            .width(bar_width)
+            .height(bar_height)
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(bar_bg)),
+                border: iced_core::Border {
+                    color: if has_query { bar_accent } else { bar_border },
+                    width: 1.0,
+                    radius: radius.into(),
+                },
+                shadow: iced_core::Shadow {
+                    color: iced_core::Color::from_rgba(0.0, 0.0, 0.0, 0.3),
+                    offset: iced_core::Vector::new(0.0, 2.0 / scale),
+                    blur_radius: 8.0 / scale,
+                },
+                ..Default::default()
+            });
+
+        // Position at top-right of focused pane (inside the pane, offset from header)
+        let bar_x = (pane.x + pane.width - 260.0 - 8.0) / scale;
+        let bar_y = (pane.y + PANE_HEADER_HEIGHT + 4.0) / scale;
+
+        pin(bar).x(bar_x).y(bar_y).into()
     }
 
     /// Status bar: ✻ Claude Terminal | ● Pane N | user · UTF-8 · bash
@@ -722,6 +882,8 @@ mod tests {
                 index: 0,
                 title: "Shell".to_string(),
                 shell_name: "bash".to_string(),
+                scrollbar_thumb: None,
+                scrollbar_alpha: 0.0,
             }],
             pane_count: 1,
             is_zoomed: false,
@@ -729,6 +891,12 @@ mod tests {
             window_width: 1280.0,
             window_height: 720.0,
             scale_factor: 2.0,
+            search_active: false,
+            search_query: String::new(),
+            search_current: 0,
+            search_total: 0,
+            search_error: false,
+            dividers: Vec::new(),
         }
     }
 
@@ -957,6 +1125,8 @@ mod tests {
                 index: 0,
                 title: "Shell".to_string(),
                 shell_name: "bash".to_string(),
+                scrollbar_thumb: None,
+                scrollbar_alpha: 0.0,
             }],
             pane_count: 1,
             is_zoomed: false,
@@ -964,6 +1134,12 @@ mod tests {
             window_width: 1280.0,
             window_height: 720.0,
             scale_factor: 1.0,
+            search_active: false,
+            search_query: String::new(),
+            search_current: 0,
+            search_total: 0,
+            search_error: false,
+            dividers: Vec::new(),
         };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
@@ -1021,6 +1197,8 @@ mod tests {
                     index: 0,
                     title: "src".to_string(),
                     shell_name: "bash".to_string(),
+                    scrollbar_thumb: None,
+                    scrollbar_alpha: 0.0,
                 },
                 PaneInfo {
                     x: 636.0,
@@ -1031,6 +1209,8 @@ mod tests {
                     index: 1,
                     title: "tests".to_string(),
                     shell_name: "bash".to_string(),
+                    scrollbar_thumb: None,
+                    scrollbar_alpha: 0.0,
                 },
             ],
             pane_count: 2,
@@ -1039,6 +1219,12 @@ mod tests {
             window_width: 1280.0,
             window_height: 720.0,
             scale_factor: 1.0,
+            search_active: false,
+            search_query: String::new(),
+            search_current: 0,
+            search_total: 0,
+            search_error: false,
+            dividers: Vec::new(),
         };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
@@ -1055,6 +1241,8 @@ mod tests {
             index: 0,
             title: "home".to_string(),
             shell_name: "zsh".to_string(),
+            scrollbar_thumb: None,
+            scrollbar_alpha: 0.0,
         };
         assert!(pane.is_focused);
         assert_eq!(pane.title, "home");

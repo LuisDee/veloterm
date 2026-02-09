@@ -20,12 +20,10 @@ use crate::input::{
 use crate::link::opener::open_link;
 use crate::link::LinkDetector;
 use crate::search::SearchState;
-use crate::pane::divider::{generate_divider_quads, OverlayQuad};
 use crate::pane::header::PANE_HEADER_HEIGHT;
-use crate::search::overlay::{generate_search_bar_quads, generate_search_bar_text_cells, SearchBarParams};
 use crate::pane::interaction::{CursorType, InteractionEffect, PaneInteraction};
 use crate::pane::{PaneId, Rect, SplitDirection};
-use crate::renderer::iced_layer::{PaneInfo, TabInfo, UiMessage, UiState};
+use crate::renderer::iced_layer::{DividerDisplay, PaneInfo, TabInfo, UiMessage, UiState};
 use crate::renderer::PaneRenderDescriptor;
 use crate::status_bar::STATUS_BAR_HEIGHT;
 use crate::tab::bar::TAB_BAR_HEIGHT;
@@ -777,105 +775,6 @@ impl App {
         let pane_tree = &self.tab_manager.active_tab().pane_tree;
         self.interaction
             .update_layout(pane_tree.root(), content, 20.0);
-    }
-
-    /// Generate all overlay quads (header bar + tab bar + dividers + unfocused pane dimming + status bar).
-    fn generate_overlay_quads(&self, width: f32, height: f32) -> Vec<OverlayQuad> {
-        let theme = if let Some(renderer) = &self.renderer {
-            renderer.theme()
-        } else {
-            return Vec::new();
-        };
-
-        // Header bar: rendered by iced layer (Phase 1 migration)
-        // Tab bar: rendered by iced layer (Phase 2 migration)
-        // Pane headers + focus dimming: rendered by iced layer (Phase 3 migration)
-        let mut quads = Vec::new();
-
-        let pane_tree = &self.tab_manager.active_tab().pane_tree;
-        let pgrid = self.pane_grid_bounds(width, height);
-
-        // Divider quads remain in legacy overlay pipeline (interactive drag resize)
-        if pane_tree.pane_count() > 1 && !pane_tree.is_zoomed() {
-            let hovered_index = match self.interaction.state() {
-                crate::pane::interaction::InteractionState::Hovering { divider_index } => {
-                    Some(*divider_index)
-                }
-                _ => None,
-            };
-
-            quads.extend(generate_divider_quads(
-                self.interaction.dividers(),
-                &theme.border,
-                &theme.accent,
-                hovered_index,
-            ));
-        }
-
-        // Generate search bar overlay when search is active
-        if self.search_state.is_active {
-            let renderer = self.renderer.as_ref().unwrap();
-            let focused = pane_tree.focused_pane_id();
-            let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
-            if let Some((_, rect)) = layout.iter().find(|(id, _)| *id == focused) {
-                let screen_rect = Rect::new(
-                    rect.x + pgrid.x,
-                    rect.y + pgrid.y,
-                    rect.width,
-                    rect.height,
-                );
-                let params = SearchBarParams {
-                    pane_rect: screen_rect,
-                    cell_width: renderer.cell_width(),
-                    cell_height: renderer.cell_height(),
-                    query: &self.search_state.query,
-                    current_match: self.search_state.current_index + 1,
-                    total_matches: self.search_state.total_count(),
-                    has_error: self.search_state.error.is_some(),
-                    bar_color: [theme.border.r, theme.border.g, theme.border.b, 0.95],
-                    text_color: [theme.text.r, theme.text.g, theme.text.b, 1.0],
-                };
-                quads.extend(generate_search_bar_quads(&params));
-            }
-        }
-
-        // Generate scrollbar overlay quads for each visible pane with scrollback
-        {
-            let now = std::time::Instant::now();
-            let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
-            let padding = self.renderer.as_ref().map(|r| r.padding()).unwrap_or([0.0; 4]);
-            for (pane_id, rect) in &layout {
-                if let Some(state) = self.pane_states.get(pane_id) {
-                    let alpha = state.scroll_state.scrollbar_alpha(now);
-                    if alpha > 0.0 {
-                        let history_size = state.terminal.history_size();
-                        let visible_rows = state.terminal.rows();
-                        let display_offset = state.scroll_state.current_line_offset();
-                        let screen_rect = Rect::new(
-                            rect.x + pgrid.x,
-                            rect.y + pgrid.y,
-                            rect.width,
-                            rect.height,
-                        );
-                        if let Some(thumb) = crate::scroll::scrollbar_thumb_rect(
-                            screen_rect.x, screen_rect.y,
-                            screen_rect.width, screen_rect.height,
-                            padding, visible_rows, history_size, display_offset,
-                        ) {
-                            quads.push(OverlayQuad {
-                                rect: Rect::new(thumb.x, thumb.y, thumb.width, thumb.height),
-                                color: [1.0, 1.0, 1.0, alpha],
-                                border_radius: 0.0,
-                                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        // Status bar: rendered by iced layer (Phase 1 migration)
-
-        quads
     }
 
     /// Get window physical size, with fallback.
@@ -2057,68 +1956,6 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 }
 
-                // Generate and upload overlay quads (tab bar + dividers + unfocused dimming)
-                let overlay_quads =
-                    self.generate_overlay_quads(width as f32, height as f32);
-
-                // Build text overlay descriptors (tab labels + search bar text)
-                let mut text_overlays: Vec<(
-                    crate::pane::Rect,
-                    Vec<crate::renderer::grid_renderer::GridCell>,
-                )> = Vec::new();
-
-                if let Some(renderer) = &self.renderer {
-                    let theme = renderer.theme();
-                    let cw = renderer.cell_width();
-                    let ch = renderer.cell_height();
-                    // Header bar text: rendered by iced layer (Phase 1 migration)
-                    // Tab bar text: rendered by iced layer (Phase 2 migration)
-                    // Pane header text: rendered by iced layer (Phase 3 migration)
-                    // Status bar text: rendered by iced layer (Phase 1 migration)
-
-                    // Search bar text
-                    if self.search_state.is_active {
-                        let pane_tree = &self.tab_manager.active_tab().pane_tree;
-                        let focused = pane_tree.focused_pane_id();
-                        let pgrid = self.pane_grid_bounds(width as f32, height as f32);
-                        let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
-                        if let Some((_, rect)) = layout.iter().find(|(id, _)| *id == focused) {
-                            let screen_rect = Rect::new(
-                                rect.x + pgrid.x,
-                                rect.y + pgrid.y,
-                                rect.width,
-                                rect.height,
-                            );
-                            let params = SearchBarParams {
-                                pane_rect: screen_rect,
-                                cell_width: cw,
-                                cell_height: ch,
-                                query: &self.search_state.query,
-                                current_match: self.search_state.current_index + 1,
-                                total_matches: self.search_state.total_count(),
-                                has_error: self.search_state.error.is_some(),
-                                bar_color: [
-                                    theme.border.r,
-                                    theme.border.g,
-                                    theme.border.b,
-                                    0.95,
-                                ],
-                                text_color: [
-                                    theme.text.r,
-                                    theme.text.g,
-                                    theme.text.b,
-                                    1.0,
-                                ],
-                            };
-                            if let Some((text_rect, cells)) =
-                                generate_search_bar_text_cells(&params)
-                            {
-                                text_overlays.push((text_rect, cells));
-                            }
-                        }
-                    }
-                }
-
                 // Build iced UI state from current application state (before mutable borrow)
                 let ui_tabs: Vec<TabInfo> = self.tab_manager.tabs().iter().enumerate().map(|(i, tab)| TabInfo {
                     title: tab.title.clone(),
@@ -2131,18 +1968,47 @@ impl ApplicationHandler<UserEvent> for App {
                 let pane_tree = &self.tab_manager.active_tab().pane_tree;
                 let ui_pane_count = pane_tree.pane_count();
                 let ui_is_zoomed = pane_tree.is_zoomed();
-                let (ui_active_pane, ui_panes) = {
+                let now = std::time::Instant::now();
+                let (ui_active_pane, ui_panes, ui_dividers) = {
                     let pane_ids: Vec<_> = pane_tree.visible_panes();
                     let focused = pane_tree.focused_pane_id();
                     let active_idx = pane_ids.iter().position(|id| *id == focused).unwrap_or(0);
                     let pgrid = self.pane_grid_bounds(width as f32, height as f32);
                     let chrome_top = Self::chrome_top_height();
                     let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
+                    let padding = self.renderer.as_ref().map(|r| r.padding()).unwrap_or([0.0; 4]);
                     let panes: Vec<PaneInfo> = layout.iter().enumerate().map(|(idx, (pane_id, rect))| {
                         let title = self.pane_states.get(pane_id)
                             .and_then(|s| s.terminal.shell_state().cwd.clone())
                             .map(|cwd| crate::shell_integration::dir_name_from_path(&cwd).to_string())
                             .unwrap_or_else(|| "Shell".to_string());
+
+                        // Compute scrollbar thumb for this pane
+                        let (scrollbar_thumb, scrollbar_alpha) = if let Some(state) = self.pane_states.get(pane_id) {
+                            let alpha = state.scroll_state.scrollbar_alpha(now);
+                            if alpha > 0.0 {
+                                let history_size = state.terminal.history_size();
+                                let visible_rows = state.terminal.rows();
+                                let display_offset = state.scroll_state.current_line_offset();
+                                let screen_rect = Rect::new(
+                                    rect.x + pgrid.x,
+                                    rect.y + pgrid.y,
+                                    rect.width,
+                                    rect.height,
+                                );
+                                let thumb = crate::scroll::scrollbar_thumb_rect(
+                                    screen_rect.x, screen_rect.y,
+                                    screen_rect.width, screen_rect.height,
+                                    padding, visible_rows, history_size, display_offset,
+                                ).map(|t| (t.x, t.y - chrome_top, t.width, t.height));
+                                (thumb, alpha)
+                            } else {
+                                (None, 0.0)
+                            }
+                        } else {
+                            (None, 0.0)
+                        };
+
                         PaneInfo {
                             // Positions relative to content area (subtract chrome_top from screen y)
                             x: rect.x + pgrid.x,
@@ -2153,14 +2019,36 @@ impl ApplicationHandler<UserEvent> for App {
                             index: idx,
                             title,
                             shell_name: "bash".to_string(),
+                            scrollbar_thumb,
+                            scrollbar_alpha,
                         }
                     }).collect();
-                    (active_idx, panes)
+
+                    // Build divider display info
+                    let dividers: Vec<DividerDisplay> = if pane_tree.pane_count() > 1 && !pane_tree.is_zoomed() {
+                        let hovered_index = match self.interaction.state() {
+                            crate::pane::interaction::InteractionState::Hovering { divider_index } => {
+                                Some(*divider_index)
+                            }
+                            _ => None,
+                        };
+                        self.interaction.dividers().iter().enumerate().map(|(i, d)| {
+                            DividerDisplay {
+                                x: d.rect.x,
+                                y: d.rect.y - chrome_top,
+                                width: d.rect.width,
+                                height: d.rect.height,
+                                is_hovered: Some(i) == hovered_index,
+                            }
+                        }).collect()
+                    } else {
+                        Vec::new()
+                    };
+
+                    (active_idx, panes, dividers)
                 };
 
                 if let Some(renderer) = &mut self.renderer {
-                    renderer.update_overlays(&overlay_quads);
-
                     let theme_clone = renderer.theme().clone();
                     let ui_state = UiState {
                         tabs: ui_tabs,
@@ -2174,10 +2062,16 @@ impl ApplicationHandler<UserEvent> for App {
                         window_width: width as f32,
                         window_height: height as f32,
                         scale_factor: ui_scale,
+                        search_active: self.search_state.is_active,
+                        search_query: self.search_state.query.clone(),
+                        search_current: self.search_state.current_index + 1,
+                        search_total: self.search_state.total_count(),
+                        search_error: self.search_state.error.is_some(),
+                        dividers: ui_dividers,
                     };
 
                     let mut iced_msgs = Vec::new();
-                    match renderer.render_panes(&mut pane_descs, &text_overlays, &ui_state) {
+                    match renderer.render_panes(&mut pane_descs, &ui_state) {
                         Ok((surface_texture, messages)) => {
                             iced_msgs = messages;
                             // Take screenshot if requested
@@ -2669,15 +2563,6 @@ blink = false
     }
 
     #[test]
-    fn app_overlay_quads_include_tab_bar_for_single_pane() {
-        // Even single pane should have tab bar quads (when renderer exists)
-        // Without renderer, returns empty
-        let app = App::new(WindowConfig::default(), Config::default());
-        let quads = app.generate_overlay_quads(1280.0, 720.0);
-        assert!(quads.is_empty()); // no renderer
-    }
-
-    #[test]
     fn app_cursor_moved_updates_interaction_state() {
         let mut app = App::new(WindowConfig::default(), Config::default());
         app.tab_manager
@@ -2762,21 +2647,6 @@ blink = false
             first_width < 400.0,
             "first pane should be narrower after drag left, got {first_width}"
         );
-    }
-
-    // ── Overlay quads with zoom mode ────────────────────────────────
-
-    #[test]
-    fn app_overlay_quads_empty_when_zoomed() {
-        let mut app = App::new(WindowConfig::default(), Config::default());
-        app.tab_manager
-            .active_tab_mut()
-            .pane_tree
-            .split_focused(SplitDirection::Vertical);
-        app.tab_manager.active_tab_mut().pane_tree.zoom_toggle();
-        // Without renderer, overlay quads are always empty
-        let quads = app.generate_overlay_quads(1280.0, 720.0);
-        assert!(quads.is_empty());
     }
 
     // ── Tab integration tests ─────────────────────────────────────

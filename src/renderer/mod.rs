@@ -11,9 +11,7 @@ use damage::{DamageState, PaneDamageMap};
 use glyph_atlas::GlyphAtlas;
 use gpu::{
     clear_color, create_atlas_sampler, create_atlas_texture, create_bind_group_layout,
-    create_grid_bind_group, create_overlay_bind_group_layout, create_overlay_pipeline,
-    create_render_pipeline, GpuError, GridUniforms, OverlayInstance, OverlayUniforms,
-    SurfaceConfig,
+    create_grid_bind_group, create_render_pipeline, GpuError, GridUniforms, SurfaceConfig,
 };
 use grid_renderer::{
     generate_instances, generate_row_instances, generate_test_pattern, row_byte_offset, GridCell,
@@ -57,12 +55,6 @@ pub struct Renderer {
     _bind_group_layout: wgpu::BindGroupLayout,
     _atlas_view: wgpu::TextureView,
     _sampler: wgpu::Sampler,
-    // Overlay pipeline for UI chrome (dividers, focus overlays)
-    overlay_pipeline: wgpu::RenderPipeline,
-    overlay_bind_group: wgpu::BindGroup,
-    overlay_uniform_buffer: wgpu::Buffer,
-    overlay_instance_buffer: Option<wgpu::Buffer>,
-    overlay_instance_count: u32,
     /// Terminal content padding in physical pixels (top, bottom, left, right).
     padding: [f32; 4],
     /// DPI scale factor used for atlas creation.
@@ -211,28 +203,6 @@ impl Renderer {
             &sampler,
         );
 
-        // Overlay pipeline
-        let overlay_bind_group_layout = create_overlay_bind_group_layout(&device);
-        let overlay_pipeline = create_overlay_pipeline(&device, format, &overlay_bind_group_layout);
-        let overlay_uniforms = OverlayUniforms {
-            surface_size: [clamped_width as f32, clamped_height as f32],
-            _padding: [0.0; 2],
-        };
-        let overlay_uniform_buffer =
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Overlay Uniforms"),
-                contents: bytemuck::bytes_of(&overlay_uniforms),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
-        let overlay_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Overlay Bind Group"),
-            layout: &overlay_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: overlay_uniform_buffer.as_entire_binding(),
-            }],
-        });
-
         // Damage tracking
         let damage_state = DamageState::new(grid.columns as usize);
         let pane_damage = PaneDamageMap::new();
@@ -267,11 +237,6 @@ impl Renderer {
             _bind_group_layout: bind_group_layout,
             _atlas_view: atlas_view,
             _sampler: sampler,
-            overlay_pipeline,
-            overlay_bind_group,
-            overlay_uniform_buffer,
-            overlay_instance_buffer: None,
-            overlay_instance_count: 0,
             padding: [0.0; 4],
             scale_factor,
             iced,
@@ -442,17 +407,6 @@ impl Renderer {
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             });
 
-        // Update overlay uniforms with new surface size
-        let overlay_uniforms = OverlayUniforms {
-            surface_size: [width as f32, height as f32],
-            _padding: [0.0; 2],
-        };
-        self.queue.write_buffer(
-            &self.overlay_uniform_buffer,
-            0,
-            bytemuck::bytes_of(&overlay_uniforms),
-        );
-
         // Update iced viewport
         self.iced.resize(width, height, self.scale_factor);
     }
@@ -536,46 +490,6 @@ impl Renderer {
         &mut self.iced
     }
 
-    /// Upload overlay quads (dividers, focus overlays) to GPU buffer.
-    /// Call this before render_panes() each frame with overlay data.
-    pub fn update_overlays(&mut self, quads: &[crate::pane::divider::OverlayQuad]) {
-        if quads.is_empty() {
-            self.overlay_instance_count = 0;
-            return;
-        }
-
-        let instances: Vec<OverlayInstance> = quads
-            .iter()
-            .map(|q| OverlayInstance {
-                rect: [q.rect.x, q.rect.y, q.rect.width, q.rect.height],
-                color: q.color,
-                extras: [q.border_radius, 0.0, 0.0, 0.0],
-            })
-            .collect();
-
-        self.overlay_instance_count = instances.len() as u32;
-
-        let buffer_size =
-            (instances.len() * std::mem::size_of::<OverlayInstance>()) as u64;
-
-        match &self.overlay_instance_buffer {
-            Some(buf) if buf.size() >= buffer_size => {
-                self.queue
-                    .write_buffer(buf, 0, bytemuck::cast_slice(&instances));
-            }
-            _ => {
-                self.overlay_instance_buffer = Some(
-                    self.device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("Overlay Instances"),
-                            contents: bytemuck::cast_slice(&instances),
-                            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                        }),
-                );
-            }
-        }
-    }
-
     /// Render a frame with multiple panes, each getting its own scissor rect.
     ///
     /// For each pane: compute grid dimensions from its rect, generate instances,
@@ -583,7 +497,6 @@ impl Renderer {
     pub fn render_panes(
         &mut self,
         panes: &mut [PaneRenderDescriptor],
-        text_overlays: &[(PaneRect, Vec<GridCell>)],
         ui_state: &iced_layer::UiState,
     ) -> Result<(wgpu::SurfaceTexture, Vec<iced_layer::UiMessage>), wgpu::SurfaceError> {
         // Process damage and prepare per-pane instance data
@@ -654,7 +567,7 @@ impl Renderer {
 
         // Skip custom pipeline rendering when nothing changed and no overlays need drawing,
         // but always clear the surface and run iced for UI chrome.
-        if total_pane_instances == 0 && text_overlays.is_empty() && self.overlay_instance_count == 0 {
+        if total_pane_instances == 0 {
             let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
             // Clear the surface so we don't flash undefined swapchain content
             let mut encoder = self.device.create_command_encoder(
@@ -682,34 +595,9 @@ impl Renderer {
             return Ok((output, iced_messages));
         }
 
-        // Pre-compute text overlay instances
-        // Text overlays use surface-level grid dimensions for NDC mapping so that
-        // cell_size_ndc maps each cell to its actual pixel size. Cell positions
-        // are offset by the rect origin so they render at the correct screen location.
-        struct TextOverlayDrawData {
-            rect: PaneRect,
-            grid: GridDimensions,
-            instances: Vec<gpu::CellInstance>,
-        }
-        let mut text_overlay_data: Vec<TextOverlayDrawData> = Vec::new();
-        for (rect, cells) in text_overlays {
-            let local_grid =
-                GridDimensions::from_pane_rect(rect, self.cell_width(), self.cell_height());
-            let instances = generate_instances(&local_grid, cells, &self.atlas);
-            // Use local grid so NDC maps correctly within the text rect viewport
-            text_overlay_data.push(TextOverlayDrawData {
-                rect: *rect,
-                grid: local_grid,
-                instances,
-            });
-        }
-
-        let text_overlay_instance_count: usize =
-            text_overlay_data.iter().map(|d| d.instances.len()).sum();
-
-        // Build a single combined instance buffer with all pane + text overlay data
+        // Build a single combined instance buffer with all pane data
         let mut all_instances: Vec<gpu::CellInstance> =
-            Vec::with_capacity(total_pane_instances + text_overlay_instance_count);
+            Vec::with_capacity(total_pane_instances);
         let mut pane_ranges: Vec<(PaneRect, GridDimensions, u32, u32)> = Vec::new();
 
         for data in &draw_data {
@@ -725,19 +613,7 @@ impl Renderer {
             pane_ranges.push((data.rect, data.grid.clone(), start, count));
         }
 
-        // Append text overlay instances after pane instances
-        let mut text_overlay_ranges: Vec<(PaneRect, GridDimensions, u32, u32)> = Vec::new();
-        for data in &text_overlay_data {
-            if data.instances.is_empty() {
-                continue;
-            }
-            let start = all_instances.len() as u32;
-            all_instances.extend_from_slice(&data.instances);
-            let count = data.instances.len() as u32;
-            text_overlay_ranges.push((data.rect, data.grid.clone(), start, count));
-        }
-
-        // Upload combined instance buffer
+        // Upload instance buffer
         if !all_instances.is_empty() {
             let buffer_size =
                 (all_instances.len() * std::mem::size_of::<gpu::CellInstance>()) as u64;
@@ -830,71 +706,6 @@ impl Renderer {
                 }
             }
 
-            // Phase 2: Draw UI overlays (dividers, focus dimming, tab/search bar backgrounds)
-            if self.overlay_instance_count > 0 {
-                if let Some(ref overlay_buf) = self.overlay_instance_buffer {
-                    // Reset viewport to full surface for overlay rendering
-                    render_pass.set_viewport(
-                        0.0,
-                        0.0,
-                        self.surface_config.width as f32,
-                        self.surface_config.height as f32,
-                        0.0,
-                        1.0,
-                    );
-                    render_pass.set_scissor_rect(
-                        0,
-                        0,
-                        self.surface_config.width,
-                        self.surface_config.height,
-                    );
-                    render_pass.set_pipeline(&self.overlay_pipeline);
-                    render_pass.set_bind_group(0, &self.overlay_bind_group, &[]);
-                    render_pass.set_vertex_buffer(0, overlay_buf.slice(..));
-                    render_pass.draw(0..6, 0..self.overlay_instance_count);
-                }
-            }
-
-            // Phase 3: Draw text ON overlays (tab labels, search bar text)
-            if !text_overlay_ranges.is_empty() {
-                render_pass.set_pipeline(&self.render_pipeline);
-                render_pass.set_vertex_buffer(0, self.instance_buffer.slice(..));
-
-                for (rect, grid, start, count) in &text_overlay_ranges {
-                    let uniforms = GridUniforms {
-                        cell_size: grid.cell_size_ndc(),
-                        grid_size: grid.grid_size(),
-                        atlas_size: [
-                            self.atlas.atlas_width as f32,
-                            self.atlas.atlas_height as f32,
-                        ],
-                        _padding: [0.0; 2],
-                    };
-                    self.queue
-                        .write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
-
-                    render_pass.set_bind_group(0, &self.bind_group, &[]);
-
-                    let sx = rect.x.max(0.0) as u32;
-                    let sy = rect.y.max(0.0) as u32;
-                    let sw =
-                        (rect.width as u32).min(self.surface_config.width.saturating_sub(sx));
-                    let sh =
-                        (rect.height as u32).min(self.surface_config.height.saturating_sub(sy));
-                    if sw > 0 && sh > 0 {
-                        render_pass.set_viewport(
-                            rect.x,
-                            rect.y,
-                            rect.width,
-                            rect.height,
-                            0.0,
-                            1.0,
-                        );
-                        render_pass.set_scissor_rect(sx, sy, sw, sh);
-                        render_pass.draw(0..6, *start..*start + *count);
-                    }
-                }
-            }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
