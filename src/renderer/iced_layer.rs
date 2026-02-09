@@ -5,7 +5,7 @@ use crate::config::theme::Theme;
 use iced_graphics::Viewport;
 use iced_runtime::user_interface::{Cache, UserInterface};
 use iced_wgpu::Engine;
-use iced_widget::{button, column, container, row, text, MouseArea, Row};
+use iced_widget::{button, column, container, row, stack, text, pin, MouseArea, Row, Stack};
 
 /// Messages produced by iced UI widgets, returned to the application for processing.
 #[derive(Debug, Clone)]
@@ -25,12 +25,29 @@ pub struct TabInfo {
     pub has_notification: bool,
 }
 
+/// Pane descriptor for the iced widget tree.
+/// Positions are relative to the content area origin (after header + tab bar).
+#[derive(Debug, Clone)]
+pub struct PaneInfo {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub is_focused: bool,
+    pub index: usize,
+    pub title: String,
+    pub shell_name: String,
+}
+
 /// State snapshot passed to the iced widget tree each frame.
 pub struct UiState<'a> {
     pub tabs: Vec<TabInfo>,
     pub active_tab_index: usize,
     pub hovered_tab: Option<usize>,
     pub active_pane_index: usize,
+    pub panes: Vec<PaneInfo>,
+    pub pane_count: usize,
+    pub is_zoomed: bool,
     pub theme: &'a Theme,
     pub window_width: f32,
     pub window_height: f32,
@@ -59,6 +76,8 @@ const HEADER_BAR_HEIGHT: f32 = 46.0;
 const TAB_BAR_HEIGHT: f32 = 28.0;
 /// Status bar height in logical pixels.
 const STATUS_BAR_HEIGHT: f32 = 36.0;
+/// Pane header height in logical pixels.
+const PANE_HEADER_HEIGHT: f32 = 36.0;
 
 type IcedElement<'a> = iced_core::Element<'a, UiMessage, iced_core::Theme, iced_wgpu::Renderer>;
 
@@ -168,7 +187,7 @@ impl IcedLayer {
     }
 
     /// Build the full UI chrome widget tree from application state.
-    fn view<'a>(state: &UiState, scale: f32) -> IcedElement<'a> {
+    fn view<'a>(state: &'a UiState, scale: f32) -> IcedElement<'a> {
         let theme = state.theme;
 
         // Header bar
@@ -177,14 +196,26 @@ impl IcedLayer {
         // Tab bar
         let tab_bar = Self::tab_bar(state, scale);
 
-        // Content area (transparent — grid renders underneath via custom pipeline)
-        let content = container(text(""))
+        // Content area: Stack with transparent base + pane chrome overlay
+        let transparent_content = container(text(""))
             .width(iced_core::Length::Fill)
             .height(iced_core::Length::Fill)
             .style(|_: &iced_core::Theme| container::Style {
                 background: None,
                 ..Default::default()
             });
+
+        let content: IcedElement<'a> = if state.panes.is_empty() {
+            // No pane info available yet (e.g., during initialization)
+            transparent_content.into()
+        } else {
+            // Build pane chrome overlay with headers and focus dimming
+            let pane_chrome = Self::pane_chrome(state, scale);
+            stack![transparent_content, pane_chrome]
+                .width(iced_core::Length::Fill)
+                .height(iced_core::Length::Fill)
+                .into()
+        };
 
         // Status bar
         let status = Self::status_bar(state, scale);
@@ -429,6 +460,135 @@ impl IcedLayer {
             .into()
     }
 
+    /// Pane chrome overlay: headers with titles and focus dimming for unfocused panes.
+    /// Positions use Pin for absolute pixel placement within the content area.
+    fn pane_chrome<'a>(state: &'a UiState, scale: f32) -> IcedElement<'a> {
+        let theme = state.theme;
+        let surface = to_iced_color(&theme.surface);
+        let surface_raised = to_iced_color(&theme.surface_raised);
+        let accent = to_iced_color(&theme.accent);
+        let text_color = to_iced_color(&theme.text);
+        let text_secondary = to_iced_color(&theme.text_secondary);
+        let text_dim = to_iced_color(&theme.text_dim);
+        let success = to_iced_color(&theme.success);
+        let border_subtle = to_iced_color(&theme.border_subtle);
+        let bg_color = to_iced_color(&theme.background);
+
+        let header_h = PANE_HEADER_HEIGHT / scale;
+        let font_size = 13.0 / scale;
+        let show_dimming = state.pane_count > 1 && !state.is_zoomed;
+
+        let mut chrome_stack = Stack::new()
+            .width(iced_core::Length::Fill)
+            .height(iced_core::Length::Fill);
+
+        for pane in &state.panes {
+            let px = pane.x / scale;
+            let py = pane.y / scale;
+            let pw = pane.width / scale;
+            let _ph = pane.height / scale;
+
+            let is_active = pane.is_focused;
+            let fg = if is_active { text_color } else { text_secondary };
+            let bg = if is_active { surface_raised } else { surface };
+            let stripe_color = if is_active { accent } else { border_subtle };
+            let stripe_h = if is_active { 2.0 / scale } else { 1.0 / scale };
+            let badge_color = if is_active { accent } else { text_dim };
+
+            // Badge: pane index (1-based)
+            let badge = text(format!("{}", (pane.index % 9) + 1))
+                .size(font_size)
+                .color(badge_color);
+
+            // Title with truncation
+            let max_chars = ((pw / (font_size * 0.6)) as usize).saturating_sub(12);
+            let title_chars: Vec<char> = pane.title.chars().collect();
+            let display_title = if title_chars.len() > max_chars && max_chars > 1 {
+                let mut t: String = title_chars[..max_chars - 1].iter().collect();
+                t.push('\u{2026}');
+                t
+            } else {
+                pane.title.clone()
+            };
+
+            let title = text(display_title).size(font_size).color(fg);
+
+            // Status dot + shell name (right side)
+            let status_dot = text("\u{25CF} ").size(font_size).color(success);
+            let shell = text(&pane.shell_name).size(font_size).color(text_dim);
+
+            let left_content: Row<'_, UiMessage, iced_core::Theme, iced_wgpu::Renderer> = row![
+                text("  ").size(font_size),
+                badge,
+                text(" ").size(font_size),
+                title,
+            ]
+            .align_y(iced_core::Alignment::Center);
+
+            let right_content: Row<'_, UiMessage, iced_core::Theme, iced_wgpu::Renderer> = row![
+                status_dot,
+                shell,
+                text("  ").size(font_size),
+            ]
+            .align_y(iced_core::Alignment::Center);
+
+            let header_inner: Row<'_, UiMessage, iced_core::Theme, iced_wgpu::Renderer> = row![
+                container(left_content).width(iced_core::Length::Fill),
+                container(right_content).align_right(iced_core::Length::Shrink),
+            ]
+            .align_y(iced_core::Alignment::Center)
+            .width(pw);
+
+            // Header background + accent stripe
+            let header_bg = bg;
+            let header_container = container(
+                column![
+                    container(header_inner)
+                        .width(pw)
+                        .height(header_h - stripe_h)
+                        .style(move |_: &iced_core::Theme| container::Style {
+                            background: Some(iced_core::Background::Color(header_bg)),
+                            ..Default::default()
+                        }),
+                    container(text(""))
+                        .width(pw)
+                        .height(stripe_h)
+                        .style(move |_: &iced_core::Theme| container::Style {
+                            background: Some(iced_core::Background::Color(stripe_color)),
+                            ..Default::default()
+                        }),
+                ]
+            )
+            .width(pw)
+            .height(header_h);
+
+            chrome_stack = chrome_stack.push(
+                pin(header_container)
+                    .x(px)
+                    .y(py)
+            );
+
+            // Focus dimming overlay for unfocused panes
+            if show_dimming && !is_active {
+                let dim_color = iced_core::Color { a: 0.3, ..bg_color };
+                let dim_overlay = container(text(""))
+                    .width(pw)
+                    .height(_ph)
+                    .style(move |_: &iced_core::Theme| container::Style {
+                        background: Some(iced_core::Background::Color(dim_color)),
+                        ..Default::default()
+                    });
+                chrome_stack = chrome_stack.push(
+                    pin(dim_overlay)
+                        .x(px)
+                        .y(py)
+                );
+            }
+        }
+
+        chrome_stack.into()
+    }
+
     /// Status bar widget: brand info left, pane indicator center, session info right.
     fn status_bar<'a>(state: &UiState, scale: f32) -> IcedElement<'a> {
         let theme = state.theme;
@@ -532,6 +692,20 @@ mod tests {
             active_tab_index: 0,
             hovered_tab: None,
             active_pane_index: 0,
+            panes: vec![
+                PaneInfo {
+                    x: 12.0,
+                    y: 12.0,
+                    width: 1256.0,
+                    height: 600.0,
+                    is_focused: true,
+                    index: 0,
+                    title: "Shell".to_string(),
+                    shell_name: "bash".to_string(),
+                },
+            ],
+            pane_count: 1,
+            is_zoomed: false,
             theme,
             window_width: 1280.0,
             window_height: 720.0,
@@ -735,6 +909,15 @@ mod tests {
             active_tab_index: 0,
             hovered_tab: Some(1),
             active_pane_index: 0,
+            panes: vec![
+                PaneInfo {
+                    x: 12.0, y: 12.0, width: 1256.0, height: 600.0,
+                    is_focused: true, index: 0,
+                    title: "Shell".to_string(), shell_name: "bash".to_string(),
+                },
+            ],
+            pane_count: 1,
+            is_zoomed: false,
             theme: &theme,
             window_width: 1280.0,
             window_height: 720.0,
@@ -742,6 +925,82 @@ mod tests {
         };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
+    }
+
+    #[test]
+    fn pane_chrome_renders_with_multiple_panes() {
+        let (adapter, device, queue) = match try_create_headless_gpu() {
+            Some(ctx) => ctx,
+            None => return,
+        };
+        let mut layer = IcedLayer::new(
+            &adapter,
+            device.clone(),
+            queue.clone(),
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+            1280,
+            720,
+            1.0,
+        );
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Test Target"),
+            size: wgpu::Extent3d { width: 1280, height: 720, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Bgra8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let theme = Theme::claude_dark();
+        let state = UiState {
+            tabs: vec![
+                TabInfo { title: "Tab 1".to_string(), is_active: true, has_notification: false },
+            ],
+            active_tab_index: 0,
+            hovered_tab: None,
+            active_pane_index: 0,
+            panes: vec![
+                PaneInfo {
+                    x: 12.0, y: 12.0, width: 620.0, height: 600.0,
+                    is_focused: true, index: 0,
+                    title: "src".to_string(), shell_name: "bash".to_string(),
+                },
+                PaneInfo {
+                    x: 636.0, y: 12.0, width: 620.0, height: 600.0,
+                    is_focused: false, index: 1,
+                    title: "tests".to_string(), shell_name: "bash".to_string(),
+                },
+            ],
+            pane_count: 2,
+            is_zoomed: false,
+            theme: &theme,
+            window_width: 1280.0,
+            window_height: 720.0,
+            scale_factor: 1.0,
+        };
+        let messages = layer.render(&view, &state);
+        assert!(messages.is_empty(), "No interactions, no messages expected");
+    }
+
+    #[test]
+    fn pane_info_constructor() {
+        let pane = PaneInfo {
+            x: 10.0, y: 20.0, width: 500.0, height: 400.0,
+            is_focused: true, index: 0,
+            title: "home".to_string(), shell_name: "zsh".to_string(),
+        };
+        assert!(pane.is_focused);
+        assert_eq!(pane.title, "home");
+        assert_eq!(pane.index, 0);
+    }
+
+    #[test]
+    fn pane_header_height_matches_legacy() {
+        assert_eq!(PANE_HEADER_HEIGHT, crate::pane::header::PANE_HEADER_HEIGHT);
     }
 
     #[test]

@@ -20,12 +20,12 @@ use crate::input::{
 use crate::link::opener::open_link;
 use crate::link::LinkDetector;
 use crate::search::SearchState;
-use crate::pane::divider::{generate_divider_quads, generate_unfocused_overlay_quads, OverlayQuad};
-use crate::pane::header::{generate_pane_header_quads, generate_pane_header_text, PANE_HEADER_HEIGHT};
+use crate::pane::divider::{generate_divider_quads, OverlayQuad};
+use crate::pane::header::PANE_HEADER_HEIGHT;
 use crate::search::overlay::{generate_search_bar_quads, generate_search_bar_text_cells, SearchBarParams};
 use crate::pane::interaction::{CursorType, InteractionEffect, PaneInteraction};
 use crate::pane::{PaneId, Rect, SplitDirection};
-use crate::renderer::iced_layer::{TabInfo, UiMessage, UiState};
+use crate::renderer::iced_layer::{PaneInfo, TabInfo, UiMessage, UiState};
 use crate::renderer::PaneRenderDescriptor;
 use crate::status_bar::STATUS_BAR_HEIGHT;
 use crate::tab::bar::TAB_BAR_HEIGHT;
@@ -789,22 +789,13 @@ impl App {
 
         // Header bar: rendered by iced layer (Phase 1 migration)
         // Tab bar: rendered by iced layer (Phase 2 migration)
+        // Pane headers + focus dimming: rendered by iced layer (Phase 3 migration)
         let mut quads = Vec::new();
 
-        // Generate pane header quads for all visible panes (using padded bounds)
         let pane_tree = &self.tab_manager.active_tab().pane_tree;
         let pgrid = self.pane_grid_bounds(width, height);
-        {
-            let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
-            let focused = pane_tree.focused_pane_id();
-            for (pane_id, rect) in &layout {
-                let screen_rect = Rect::new(rect.x + pgrid.x, rect.y + pgrid.y, rect.width, rect.height);
-                let is_active = *pane_id == focused;
-                quads.extend(generate_pane_header_quads(screen_rect, is_active, theme));
-            }
-        }
 
-        // Generate pane overlay quads only if there are multiple panes and not zoomed
+        // Divider quads remain in legacy overlay pipeline (interactive drag resize)
         if pane_tree.pane_count() > 1 && !pane_tree.is_zoomed() {
             let hovered_index = match self.interaction.state() {
                 crate::pane::interaction::InteractionState::Hovering { divider_index } => {
@@ -818,20 +809,6 @@ impl App {
                 &theme.border,
                 &theme.accent,
                 hovered_index,
-            ));
-
-            let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
-            // Offset layout rects by pane grid origin for overlay rendering
-            let offset_layout: Vec<_> = layout
-                .iter()
-                .map(|(id, rect)| (*id, Rect::new(rect.x + pgrid.x, rect.y + pgrid.y, rect.width, rect.height)))
-                .collect();
-            let focused = pane_tree.focused_pane_id();
-            quads.extend(generate_unfocused_overlay_quads(
-                &offset_layout,
-                focused,
-                &theme.background,
-                0.3,
             ));
         }
 
@@ -2096,35 +2073,7 @@ impl ApplicationHandler<UserEvent> for App {
                     let ch = renderer.cell_height();
                     // Header bar text: rendered by iced layer (Phase 1 migration)
                     // Tab bar text: rendered by iced layer (Phase 2 migration)
-
-                    // Pane header text
-                    {
-                        let pane_tree = &self.tab_manager.active_tab().pane_tree;
-                        let pgrid = self.pane_grid_bounds(width as f32, height as f32);
-                        let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
-                        let focused = pane_tree.focused_pane_id();
-                        let visible = pane_tree.visible_panes();
-                        for (idx, (pane_id, rect)) in layout.iter().enumerate() {
-                            if !visible.contains(pane_id) {
-                                continue;
-                            }
-                            let screen_rect = Rect::new(rect.x + pgrid.x, rect.y + pgrid.y, rect.width, rect.height);
-                            let is_active = *pane_id == focused;
-                            // Get pane title from terminal CWD or tab title
-                            let title = self.pane_states.get(pane_id)
-                                .and_then(|s| s.terminal.shell_state().cwd.clone())
-                                .map(|cwd| crate::shell_integration::dir_name_from_path(&cwd).to_string())
-                                .unwrap_or_else(|| "Shell".to_string());
-                            let shell_name = "bash";
-                            if let Some((text_rect, cells)) = generate_pane_header_text(
-                                screen_rect, idx, &title, shell_name,
-                                is_active, cw, ch, theme,
-                            ) {
-                                text_overlays.push((text_rect, cells));
-                            }
-                        }
-                    }
-
+                    // Pane header text: rendered by iced layer (Phase 3 migration)
                     // Status bar text: rendered by iced layer (Phase 1 migration)
 
                     // Search bar text
@@ -2179,11 +2128,34 @@ impl ApplicationHandler<UserEvent> for App {
                 let ui_active_tab = self.tab_manager.active_index();
                 let ui_hovered_tab = self.hovered_tab;
                 let ui_scale = self.window.as_ref().map(|w| w.scale_factor() as f32).unwrap_or(1.0);
-                let ui_active_pane = {
-                    let pane_tree = &self.tab_manager.active_tab().pane_tree;
+                let pane_tree = &self.tab_manager.active_tab().pane_tree;
+                let ui_pane_count = pane_tree.pane_count();
+                let ui_is_zoomed = pane_tree.is_zoomed();
+                let (ui_active_pane, ui_panes) = {
                     let pane_ids: Vec<_> = pane_tree.visible_panes();
                     let focused = pane_tree.focused_pane_id();
-                    pane_ids.iter().position(|id| *id == focused).unwrap_or(0)
+                    let active_idx = pane_ids.iter().position(|id| *id == focused).unwrap_or(0);
+                    let pgrid = self.pane_grid_bounds(width as f32, height as f32);
+                    let chrome_top = Self::chrome_top_height();
+                    let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
+                    let panes: Vec<PaneInfo> = layout.iter().enumerate().map(|(idx, (pane_id, rect))| {
+                        let title = self.pane_states.get(pane_id)
+                            .and_then(|s| s.terminal.shell_state().cwd.clone())
+                            .map(|cwd| crate::shell_integration::dir_name_from_path(&cwd).to_string())
+                            .unwrap_or_else(|| "Shell".to_string());
+                        PaneInfo {
+                            // Positions relative to content area (subtract chrome_top from screen y)
+                            x: rect.x + pgrid.x,
+                            y: rect.y + pgrid.y - chrome_top,
+                            width: rect.width,
+                            height: rect.height,
+                            is_focused: *pane_id == focused,
+                            index: idx,
+                            title,
+                            shell_name: "bash".to_string(),
+                        }
+                    }).collect();
+                    (active_idx, panes)
                 };
 
                 if let Some(renderer) = &mut self.renderer {
@@ -2195,6 +2167,9 @@ impl ApplicationHandler<UserEvent> for App {
                         active_tab_index: ui_active_tab,
                         hovered_tab: ui_hovered_tab,
                         active_pane_index: ui_active_pane,
+                        panes: ui_panes,
+                        pane_count: ui_pane_count,
+                        is_zoomed: ui_is_zoomed,
                         theme: &theme_clone,
                         window_width: width as f32,
                         window_height: height as f32,
