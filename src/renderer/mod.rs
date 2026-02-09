@@ -3,6 +3,7 @@ pub mod damage;
 pub mod glyph_atlas;
 pub mod gpu;
 pub mod grid_renderer;
+pub mod iced_layer;
 
 use crate::config::theme::Theme;
 use crate::pane::{PaneId, Rect as PaneRect};
@@ -37,6 +38,8 @@ pub struct PaneRenderDescriptor {
 /// Top-level render coordinator.
 /// Holds all GPU state, glyph atlas, grid, and render resources.
 pub struct Renderer {
+    #[allow(dead_code)] // Retained for iced Engine recreation on config change
+    adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
     surface: wgpu::Surface<'static>,
@@ -64,6 +67,8 @@ pub struct Renderer {
     padding: [f32; 4],
     /// DPI scale factor used for atlas creation.
     scale_factor: f32,
+    /// iced UI layer for widget rendering (composited on top of custom pipeline).
+    iced: iced_layer::IcedLayer,
 }
 
 impl Renderer {
@@ -100,7 +105,7 @@ impl Renderer {
                 compatible_surface: Some(&surface),
             })
             .await
-            .ok_or(GpuError::AdapterNotFound)?;
+            .map_err(|_| GpuError::AdapterNotFound)?;
 
         let info = adapter.get_info();
         log::info!(
@@ -117,8 +122,9 @@ impl Renderer {
                     required_features: wgpu::Features::empty(),
                     required_limits: wgpu::Limits::downlevel_defaults(),
                     memory_hints: wgpu::MemoryHints::default(),
+                    trace: wgpu::Trace::Off,
+                    experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 },
-                None,
             )
             .await
             .map_err(GpuError::DeviceCreationFailed)?;
@@ -231,7 +237,19 @@ impl Renderer {
         let damage_state = DamageState::new(grid.columns as usize);
         let pane_damage = PaneDamageMap::new();
 
+        // iced UI layer (shares device/queue via Clone — wgpu 27 uses internal Arc)
+        let iced = iced_layer::IcedLayer::new(
+            &adapter,
+            device.clone(),
+            queue.clone(),
+            format,
+            clamped_width,
+            clamped_height,
+            scale_factor,
+        );
+
         Ok(Self {
+            adapter,
             device,
             queue,
             surface,
@@ -256,6 +274,7 @@ impl Renderer {
             overlay_instance_count: 0,
             padding: [0.0; 4],
             scale_factor,
+            iced,
         })
     }
 
@@ -350,6 +369,7 @@ impl Renderer {
                         load: wgpu::LoadOp::Clear(clear_color()),
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
@@ -432,6 +452,9 @@ impl Renderer {
             0,
             bytemuck::bytes_of(&overlay_uniforms),
         );
+
+        // Update iced viewport
+        self.iced.resize(width, height, self.scale_factor);
     }
 
     /// Get a reference to the grid dimensions.
@@ -506,6 +529,11 @@ impl Renderer {
     /// Remove a pane's damage state when the pane is closed.
     pub fn remove_pane_damage(&mut self, pane_id: PaneId) {
         self.pane_damage.remove(pane_id);
+    }
+
+    /// Get a mutable reference to the iced UI layer for event routing.
+    pub fn iced_layer_mut(&mut self) -> &mut iced_layer::IcedLayer {
+        &mut self.iced
     }
 
     /// Upload overlay quads (dividers, focus overlays) to GPU buffer.
@@ -728,6 +756,7 @@ impl Renderer {
                         load: wgpu::LoadOp::Clear(clear_color()),
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
@@ -843,6 +872,11 @@ impl Renderer {
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
+
+        // Phase 4: iced UI layer — composites widget output on top of the custom pipeline.
+        // iced's present() creates its own render pass and submits internally.
+        self.iced.render(&view);
+
         // Don't present yet - let caller capture screenshot if needed, then present
         Ok(output)
     }
@@ -878,15 +912,15 @@ impl Renderer {
             });
 
         encoder.copy_texture_to_buffer(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: surface_texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            wgpu::ImageCopyBuffer {
+            wgpu::TexelCopyBufferInfo {
                 buffer: &output_buffer,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(padded_bytes_per_row),
                     rows_per_image: Some(height),
@@ -907,7 +941,7 @@ impl Renderer {
         buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
             sender.send(result).ok();
         });
-        self.device.poll(wgpu::Maintain::Wait);
+        self.device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None }).ok();
         receiver.recv()??;
 
         let data = buffer_slice.get_mapped_range();

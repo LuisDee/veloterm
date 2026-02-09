@@ -24,7 +24,7 @@ impl GpuContext {
                 compatible_surface: None,
             })
             .await
-            .ok_or(GpuError::AdapterNotFound)?;
+            .map_err(|_| GpuError::AdapterNotFound)?;
 
         let (device, queue) = adapter
             .request_device(
@@ -33,8 +33,9 @@ impl GpuContext {
                     required_features: wgpu::Features::empty(),
                     required_limits: wgpu::Limits::downlevel_defaults(),
                     memory_hints: wgpu::MemoryHints::default(),
+                    trace: wgpu::Trace::Off,
+                    experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 },
-                None,
             )
             .await
             .map_err(GpuError::DeviceCreationFailed)?;

@@ -9,11 +9,18 @@ description = "A cross-platform, GPU-accelerated terminal emulator with native s
 winit = "0.30"
 
 # GPU Rendering
-wgpu = "24"
+wgpu = "27"
+
+# iced UI framework (integration mode — sharing wgpu device/queue)
+iced_wgpu = "0.14"
+iced_winit = "0.14"
+iced_widget = "0.14"
+iced_runtime = "0.14"
+iced_graphics = "0.14"
+iced_core = "0.14"
 
 # Text Rendering
 cosmic-text = "0.12"
-glyphon = "0.8"
 
 # Utilities
 log = "0.4"

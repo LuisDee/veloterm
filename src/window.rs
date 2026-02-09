@@ -1412,6 +1412,12 @@ impl ApplicationHandler<UserEvent> for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
+        // Forward events to iced layer for UI widget interaction
+        if let Some(renderer) = &mut self.renderer {
+            let scale = self.window.as_ref().map(|w| w.scale_factor() as f32).unwrap_or(1.0);
+            renderer.iced_layer_mut().push_event(&event, scale, self.modifiers);
+        }
+
         match event {
             WindowEvent::CloseRequested => {
                 log::info!("Window close requested");
