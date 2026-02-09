@@ -102,7 +102,7 @@ _Link: [./conductor/tracks/22_shell_hardening_20260208/](./conductor/tracks/22_s
 ### [ ] Track 23: iced_wgpu Integration Foundation (L)
 _Link: [./conductor/tracks/23_iced_foundation_20260209/](./conductor/tracks/23_iced_foundation_20260209/)_
 
-### [ ] Track 25: Glyphon Glyph Rasterizer Swap (M)
+### [x] Track 25: Glyphon Glyph Rasterizer Swap (M)
 _Link: [./conductor/tracks/25_glyphon_text_20260209/](./conductor/tracks/25_glyphon_text_20260209/)_
 
 ---
