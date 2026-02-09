@@ -429,7 +429,7 @@ impl IcedLayer {
             tab_row = tab_row.push(tab_widget);
 
             // Separator between tabs
-            if i < tab_count - 1 {
+            if i + 1 < tab_count {
                 let sep_color = iced_core::Color {
                     a: 0.5,
                     ..to_iced_color(&theme.border)
