@@ -78,7 +78,7 @@ _Link: [./conductor/tracks/18_scrollback_scrollbar_20260208/](./conductor/tracks
 ### [x] Track 19: Tab Management Polish (M)
 _Link: [./conductor/tracks/19_tab_management_20260208/](./conductor/tracks/19_tab_management_20260208/)_
 
-### [ ] Track 20: Context Menus (M)
+### [x] Track 20: Context Menus (M)
 _Link: [./conductor/tracks/20_context_menus_20260208/](./conductor/tracks/20_context_menus_20260208/)_
 
 ---
