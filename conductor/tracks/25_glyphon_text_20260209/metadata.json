@@ -1,0 +1,20 @@
+{
+  "track_id": "25_glyphon_text",
+  "state": "NOT_STARTED",
+  "complexity": "M",
+  "wave": 10,
+  "cc_version_at_brief": "v1",
+  "cc_version_current": "v1",
+  "dependencies": [],
+  "interfaces_owned": ["glyphon_text_atlas", "glyph_rasterization_backend"],
+  "interfaces_consumed": ["Config.font_size", "Config.font_family", "Config.line_height_multiplier", "GridRenderer.atlas_uv", "Renderer.atlas_texture"],
+  "events_published": [],
+  "events_consumed": [],
+  "test_prerequisites": [],
+  "quality_threshold": {"line_coverage": 80, "pass_rate": 100},
+  "override_log": [],
+  "patches": [],
+  "created_at": "2026-02-09T18:00:00Z",
+  "started_at": null,
+  "completed_at": null
+}

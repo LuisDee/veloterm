@@ -4,9 +4,6 @@ pub mod glyph_atlas;
 pub mod gpu;
 pub mod grid_renderer;
 
-#[cfg(target_os = "macos")]
-mod coretext_raster;
-
 use crate::config::theme::Theme;
 use crate::pane::{PaneId, Rect as PaneRect};
 use damage::{DamageState, PaneDamageMap};

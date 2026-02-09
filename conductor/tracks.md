@@ -97,7 +97,24 @@ _Link: [./conductor/tracks/22_shell_hardening_20260208/](./conductor/tracks/22_s
 
 ---
 
-## Wave 10+ — Deferred Features (blocked until Waves 6-9 complete)
+## Wave 10 — iced Renderer Migration (Foundation)
+
+### [ ] Track 23: iced_wgpu Integration Foundation (L)
+_Link: [./conductor/tracks/23_iced_foundation_20260209/](./conductor/tracks/23_iced_foundation_20260209/)_
+
+### [ ] Track 25: Glyphon Glyph Rasterizer Swap (M)
+_Link: [./conductor/tracks/25_glyphon_text_20260209/](./conductor/tracks/25_glyphon_text_20260209/)_
+
+---
+
+## Wave 11 — iced Renderer Migration (UI Chrome)
+
+### [ ] Track 24: UI Chrome Migration to iced Widgets (L)
+_Link: [./conductor/tracks/24_iced_ui_chrome_20260209/](./conductor/tracks/24_iced_ui_chrome_20260209/)_
+
+---
+
+## Wave 12+ — Deferred Features
 
 ### [ ] Track 14: Quick Terminal (S)
 _Link: [./conductor/tracks/14_quick_terminal_20260207/](./conductor/tracks/14_quick_terminal_20260207/)_

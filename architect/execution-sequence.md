@@ -96,15 +96,51 @@
 
 ---
 
+## Wave 10 — iced Renderer Migration (Foundation)
+
+| # | Track ID | Complexity | Description |
+|---|----------|------------|-------------|
+| 23 | 23_iced_foundation | L | iced_wgpu Engine/Renderer setup, winit event wiring, compositor proof-of-concept |
+| 25 | 25_glyphon_text | M | Replace hand-rolled glyph atlas with glyphon 0.8 (cosmic-text backend) for HiDPI text |
+
+### Wave 10 Completion Criteria
+- [ ] iced Engine/Renderer initialized sharing existing wgpu device/queue
+- [ ] winit events converted and routed to iced UserInterface
+- [ ] iced can render widgets overlaid on terminal content
+- [ ] Glyphon replaces GlyphAtlas + CoreText rasterizer for crisp Retina text
+- [ ] All existing tests pass with new glyph backend
+
+---
+
+## Wave 11 — iced Renderer Migration (UI Chrome)
+
+| # | Track ID | Complexity | Description |
+|---|----------|------------|-------------|
+| 24 | 24_iced_ui_chrome | L | Replace overlay.wgsl pipeline with iced widgets for all UI chrome |
+
+### Wave 11 Completion Criteria
+- [ ] Tab bar, header, status bar, dividers, search overlay rendered via iced widgets
+- [ ] overlay.wgsl and OverlayQuad/OverlayInstance types removed
+- [ ] All generate_*_quads() and generate_*_text_cells() functions removed
+- [ ] Theme hot-reload works with iced widget styling
+
+---
+
 ## Progress Summary
 
 | Wave | Tracks | Total Complexity | Status |
 |------|--------|-----------------|--------|
 | 0 | 2 | 8 (XL+XL) | COMPLETE |
-| 1 | 2 | 4 (M+M) | NOT_STARTED |
-| 2 | 1 | 3 (L) | NOT_STARTED |
-| 3 | 2 | 4 (M+M) | NOT_STARTED |
-| 4 | 5 | 8 (S+M+M+M+S) | NOT_STARTED |
+| 1 | 2 | 4 (M+M) | COMPLETE |
+| 2 | 1 | 3 (L) | COMPLETE |
+| 3 | 2 | 4 (M+M) | COMPLETE |
+| 4 | 4 | 6 (S+M+M+M) | COMPLETE |
 | 5 | 2 | 4 (M+M) | NOT_STARTED |
+| 6 | 4 | 7 (M+S+M+M) | COMPLETE |
+| 7 | 2 | 4 (M+M) | IN_PROGRESS |
+| 8 | 1 | 2 (M) | COMPLETE |
+| 9 | 1 | 2 (M) | NOT_STARTED |
+| 10 | 2 | 5 (L+M) | NOT_STARTED |
+| 11 | 1 | 3 (L) | NOT_STARTED |
 
-Overall: 8/31 complexity-weighted units complete (26%)
+Overall: 34/52 complexity-weighted units complete (65%)
