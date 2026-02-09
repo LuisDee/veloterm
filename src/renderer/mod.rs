@@ -107,12 +107,16 @@ impl Renderer {
             info.backend
         );
 
+        // Request adapter's actual limits so the device supports the full
+        // display resolution (downlevel_defaults caps at 2048 which is too
+        // small for Retina displays).
+        let adapter_limits = adapter.limits();
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("VeloTerm Device"),
                     required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::downlevel_defaults(),
+                    required_limits: adapter_limits,
                     memory_hints: wgpu::MemoryHints::default(),
                     trace: wgpu::Trace::Off,
                     experimental_features: wgpu::ExperimentalFeatures::disabled(),
