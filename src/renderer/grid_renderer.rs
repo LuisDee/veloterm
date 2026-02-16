@@ -151,9 +151,9 @@ pub fn generate_row_instances(
             .copied()
             .unwrap_or(GridCell::empty(color_new(0.0, 0.0, 0.0, 1.0)));
 
-        let is_bold = cell.flags & CELL_FLAG_BOLD != 0;
+        let _is_bold = cell.flags & CELL_FLAG_BOLD != 0;
         let (atlas_uv, has_glyph) = if cell.ch != ' ' {
-            if let Some(info) = atlas.glyph_info(cell.ch, is_bold) {
+            if let Some(info) = atlas.glyph_info(cell.ch) {
                 (info.uv, true)
             } else {
                 ([0.0, 0.0, 0.0, 0.0], false)
@@ -196,9 +196,9 @@ pub fn generate_instances(
             .copied()
             .unwrap_or(GridCell::empty(color_new(0.0, 0.0, 0.0, 1.0)));
 
-        let is_bold = cell.flags & CELL_FLAG_BOLD != 0;
+        let _is_bold = cell.flags & CELL_FLAG_BOLD != 0;
         let (atlas_uv, has_glyph) = if cell.ch != ' ' {
-            if let Some(info) = atlas.glyph_info(cell.ch, is_bold) {
+            if let Some(info) = atlas.glyph_info(cell.ch) {
                 (info.uv, true)
             } else {
                 ([0.0, 0.0, 0.0, 0.0], false)
@@ -473,7 +473,7 @@ mod tests {
         let grid = test_grid(1, 1);
         let cells = vec![GridCell::new('A', test_fg(), test_bg())];
         let instances = generate_instances(&grid, &cells, &atlas);
-        let expected_uv = atlas.glyph_info('A', false).unwrap().uv;
+        let expected_uv = atlas.glyph_info('A').unwrap().uv;
         assert_eq!(instances[0].atlas_uv, expected_uv);
     }
 
@@ -537,22 +537,6 @@ mod tests {
         cell.flags = CELL_FLAG_BOLD;
         let instances = generate_instances(&grid, &[cell], &atlas);
         assert_ne!(instances[0].flags & CELL_FLAG_BOLD, 0);
-    }
-
-    #[test]
-    fn generate_instances_bold_uses_different_uv() {
-        let atlas = test_atlas();
-        let grid = test_grid(2, 1);
-        let mut regular = GridCell::new('A', test_fg(), test_bg());
-        regular.flags = 0;
-        let mut bold = GridCell::new('A', test_fg(), test_bg());
-        bold.flags = CELL_FLAG_BOLD;
-        let instances = generate_instances(&grid, &[regular, bold], &atlas);
-        // Bold 'A' should use a different atlas UV than regular 'A'
-        assert_ne!(
-            instances[0].atlas_uv, instances[1].atlas_uv,
-            "bold 'A' should have different atlas UV than regular 'A'"
-        );
     }
 
     #[test]

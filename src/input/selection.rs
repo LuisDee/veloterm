@@ -206,12 +206,12 @@ pub fn selected_text_lines(cells: &[GridCell], selection: &Selection, cols: usiz
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::theme::Color;
+    use crate::config::theme::{Color, color_new};
 
     /// Helper: create a row of cells from a string, padded to `cols` with spaces.
     fn make_row(text: &str, cols: usize) -> Vec<GridCell> {
-        let fg = Color::new(1.0, 1.0, 1.0, 1.0);
-        let bg = Color::new(0.0, 0.0, 0.0, 1.0);
+        let fg = color_new(1.0, 1.0, 1.0, 1.0);
+        let bg = color_new(0.0, 0.0, 0.0, 1.0);
         let mut cells = Vec::with_capacity(cols);
         for ch in text.chars().take(cols) {
             cells.push(GridCell::new(ch, fg, bg));

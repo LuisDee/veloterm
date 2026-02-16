@@ -30,6 +30,9 @@ pub enum PaletteAction {
     ToggleViMode,
     // Window
     NewWindow,
+    // UI toggles
+    ToggleSidebar,
+    CycleTheme,
 }
 
 /// A single entry in the command palette.
@@ -157,6 +160,18 @@ pub fn command_registry() -> Vec<PaletteEntry> {
             description: "Open a new VeloTerm window",
             keybinding: "Cmd+N",
             action: PaletteAction::NewWindow,
+        },
+        PaletteEntry {
+            name: "Toggle Sidebar",
+            description: "Show or hide the session sidebar",
+            keybinding: "Cmd+B",
+            action: PaletteAction::ToggleSidebar,
+        },
+        PaletteEntry {
+            name: "Cycle Theme",
+            description: "Switch to the next color theme",
+            keybinding: "",
+            action: PaletteAction::CycleTheme,
         },
     ]
 }

@@ -1,4 +1,4 @@
-use crate::config::theme::Color;
+use crate::config::theme::color_new;
 use crate::pane::divider::OverlayQuad;
 use crate::pane::Rect;
 use crate::renderer::grid_renderer::GridCell;
@@ -56,16 +56,16 @@ pub fn generate_search_bar_text_cells(
     let text_y = bar.y + (bar.height - params.cell_height) / 2.0;
     let text_rect = Rect::new(bar.x, text_y, bar.width, params.cell_height);
 
-    let bar_bg = Color::new(
+    let bar_bg = color_new(
         params.bar_color[0],
         params.bar_color[1],
         params.bar_color[2],
         params.bar_color[3],
     );
     let text_fg = if params.has_error {
-        Color::new(1.0, 0.3, 0.3, 1.0)
+        color_new(1.0, 0.3, 0.3, 1.0)
     } else {
-        Color::new(
+        color_new(
             params.text_color[0],
             params.text_color[1],
             params.text_color[2],
@@ -98,7 +98,7 @@ pub fn generate_search_bar_text_cells(
     if !status.is_empty() {
         let status_chars: Vec<char> = status.chars().collect();
         let status_start = columns.saturating_sub(status_chars.len() + 1);
-        let muted_fg = Color::new(
+        let muted_fg = color_new(
             params.text_color[0] * 0.7,
             params.text_color[1] * 0.7,
             params.text_color[2] * 0.7,

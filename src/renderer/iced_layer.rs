@@ -858,7 +858,7 @@ impl IcedLayer {
         let font_size = 12.0;
         let item_h = 32.0 / scale;
         let pad_h = 12.0 / scale;
-        let popup_w = 180.0 / scale;
+        let popup_w = 500.0 / scale;
         let radius = 8.0 / scale;
         let swatch_size = 10.0 / scale;
         let swatch_radius = 2.0 / scale;

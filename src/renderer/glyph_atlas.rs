@@ -26,7 +26,7 @@ pub struct GlyphInfo {
 /// Contains an R8 texture with all ASCII printable glyphs (0x20..=0x7E)
 /// plus UI chrome characters, pre-rendered in cell-sized slots, ready for GPU upload.
 pub struct GlyphAtlas {
-    /// R8 pixel data for the atlas texture (one byte per pixel, glyph mask).
+    /// Pixel data for the atlas texture.
     pub atlas_data: Vec<u8>,
     /// Atlas texture width in pixels (power of two).
     pub atlas_width: u32,
@@ -36,6 +36,8 @@ pub struct GlyphAtlas {
     pub cell_width: f32,
     /// Cell height in pixels (line height at the given scale).
     pub cell_height: f32,
+    /// Bytes per pixel: 1 for R8 grayscale, 4 for RGBA.
+    pub bytes_per_pixel: u32,
     glyphs: HashMap<char, GlyphInfo>,
 }
 
@@ -48,6 +50,20 @@ const EXTRA_CHARS: &[char] = &[
     '\u{00B7}', // · MIDDLE DOT (separator)
     '\u{00D7}', // × MULTIPLICATION SIGN (tab close)
     '\u{2026}', // … HORIZONTAL ELLIPSIS
+    '\u{276F}', // ❯ HEAVY RIGHT-POINTING ANGLE QUOTATION MARK (starship prompt)
+    '\u{2714}', // ✔ HEAVY CHECK MARK
+    '\u{2718}', // ✘ HEAVY BALLOT X
+    '\u{279C}', // ➜ HEAVY ROUND-TIPPED RIGHTWARDS ARROW
+    '\u{2192}', // → RIGHTWARDS ARROW
+    '\u{2190}', // ← LEFTWARDS ARROW
+    '\u{2502}', // │ BOX DRAWINGS LIGHT VERTICAL
+    '\u{251C}', // ├ BOX DRAWINGS LIGHT VERTICAL AND RIGHT
+    '\u{2514}', // └ BOX DRAWINGS LIGHT UP AND RIGHT
+    '\u{2500}', // ─ BOX DRAWINGS LIGHT HORIZONTAL
+    '\u{25B6}', // ▶ BLACK RIGHT-POINTING TRIANGLE
+    '\u{25C0}', // ◀ BLACK LEFT-POINTING TRIANGLE
+    '\u{25D0}', // ◐ CIRCLE WITH LEFT HALF BLACK (theme icon)
+    '\u{2713}', // ✓ CHECK MARK
 ];
 
 impl GlyphAtlas {
@@ -173,6 +189,7 @@ impl GlyphAtlas {
             atlas_height,
             cell_width,
             cell_height,
+            bytes_per_pixel: 1,
             glyphs,
         }
     }

@@ -1,6 +1,6 @@
 // Cursor rendering: generates cursor overlay cell instances for the GPU.
 
-use crate::config::theme::Color;
+use crate::config::theme::{Color, color_new};
 use crate::renderer::gpu::CellInstance;
 use std::time::{Duration, Instant};
 
@@ -26,10 +26,10 @@ pub const FLAG_CURSOR_HOLLOW: u32 = 0x03 << 2;
 pub const BLINK_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Cursor foreground color (text under block cursor — contrasts with accent).
-pub const CURSOR_FG: Color = Color::new(0.0784, 0.0784, 0.0745, 1.0); // #141413
+pub const CURSOR_FG: Color = color_new(0.0784, 0.0784, 0.0745, 1.0); // #141413
 
 /// Cursor background color (cursor block — accent orange).
-pub const CURSOR_BG: Color = Color::new(0.8510, 0.4667, 0.3412, 1.0); // #D97757
+pub const CURSOR_BG: Color = color_new(0.8510, 0.4667, 0.3412, 1.0); // #D97757
 
 /// Manages cursor state and generates cursor overlay instances.
 pub struct CursorState {

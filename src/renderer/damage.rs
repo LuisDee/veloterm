@@ -355,19 +355,19 @@ mod tests {
 
     // ── GridCell PartialEq tests ────────────────────────────────────
 
-    use crate::config::theme::Color;
+    use crate::config::theme::{Color, color_new};
     use crate::renderer::grid_renderer::GridCell;
 
     fn white() -> Color {
-        Color::new(1.0, 1.0, 1.0, 1.0)
+        color_new(1.0, 1.0, 1.0, 1.0)
     }
 
     fn black() -> Color {
-        Color::new(0.0, 0.0, 0.0, 1.0)
+        color_new(0.0, 0.0, 0.0, 1.0)
     }
 
     fn red() -> Color {
-        Color::new(1.0, 0.0, 0.0, 1.0)
+        color_new(1.0, 0.0, 0.0, 1.0)
     }
 
     #[test]

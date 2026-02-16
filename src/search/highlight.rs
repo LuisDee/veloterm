@@ -61,11 +61,12 @@ pub fn clear_search_highlights(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::theme::color_new;
 
-    const MATCH_COLOR: Color = Color::new(0.36, 0.29, 0.12, 1.0); // #5C4A1E
-    const ACTIVE_COLOR: Color = Color::new(0.55, 0.41, 0.08, 1.0); // #8B6914
-    const DEFAULT_BG: Color = Color::new(0.10, 0.09, 0.09, 1.0);
-    const DEFAULT_FG: Color = Color::new(0.91, 0.90, 0.87, 1.0);
+    const MATCH_COLOR: Color = color_new(0.36, 0.29, 0.12, 1.0); // #5C4A1E
+    const ACTIVE_COLOR: Color = color_new(0.55, 0.41, 0.08, 1.0); // #8B6914
+    const DEFAULT_BG: Color = color_new(0.10, 0.09, 0.09, 1.0);
+    const DEFAULT_FG: Color = color_new(0.91, 0.90, 0.87, 1.0);
 
     fn make_cells(cols: usize, rows: usize, text_rows: &[&str]) -> Vec<GridCell> {
         let mut cells = vec![GridCell::new(' ', DEFAULT_FG, DEFAULT_BG); cols * rows];

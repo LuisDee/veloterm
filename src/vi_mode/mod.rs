@@ -1602,9 +1602,9 @@ mod tests {
     // ── Yank text extraction ────────────────────────────────────────
 
     fn make_cells(lines: &[&str], cols: usize) -> Vec<GridCell> {
-        use crate::config::theme::Color;
-        let fg = Color::new(1.0, 1.0, 1.0, 1.0);
-        let bg = Color::new(0.0, 0.0, 0.0, 1.0);
+        use crate::config::theme::{Color, color_new};
+        let fg = color_new(1.0, 1.0, 1.0, 1.0);
+        let bg = color_new(0.0, 0.0, 0.0, 1.0);
         let mut cells = Vec::new();
         for line in lines {
             for ch in line.chars().take(cols) {

@@ -3742,10 +3742,10 @@ blink = false
             },
         );
 
-        // Cursor always starts with blink disabled
-        assert_eq!(app.pane_states[&pane_id].cursor.blink_rate_ms, 0);
+        // CursorState::new() defaults to 500ms blink
+        assert_eq!(app.pane_states[&pane_id].cursor.blink_rate_ms, 500);
 
-        // Even after config reload requesting blink, rate stays 0
+        // After config reload requesting blink, rate is forced to 0
         let mut new_config = Config::default();
         new_config.cursor.blink = true;
         new_config.cursor.blink_rate = 750;

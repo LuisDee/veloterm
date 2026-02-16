@@ -163,6 +163,10 @@ mod tests {
         let result = rx.recv_timeout(Duration::from_secs(5));
         assert!(result.is_ok(), "Valid change should trigger callback");
 
+        // Drain any duplicate filesystem events from the valid write
+        std::thread::sleep(Duration::from_millis(500));
+        while rx.try_recv().is_ok() {}
+
         // Now: invalid change (font size 0 fails validation)
         std::thread::sleep(Duration::from_millis(200));
         std::fs::write(&path, "[font]\nsize = 0.0\n").unwrap();

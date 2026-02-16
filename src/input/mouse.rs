@@ -329,12 +329,12 @@ impl MouseSelectionState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::theme::Color;
+    use crate::config::theme::{Color, color_new};
     use std::time::Duration;
 
     fn make_cells(text: &str, cols: usize) -> Vec<GridCell> {
-        let fg = Color::new(1.0, 1.0, 1.0, 1.0);
-        let bg = Color::new(0.0, 0.0, 0.0, 1.0);
+        let fg = color_new(1.0, 1.0, 1.0, 1.0);
+        let bg = color_new(0.0, 0.0, 0.0, 1.0);
         let mut cells = Vec::with_capacity(cols);
         for ch in text.chars().take(cols) {
             cells.push(GridCell::new(ch, fg, bg));
