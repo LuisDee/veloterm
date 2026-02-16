@@ -1,12 +1,13 @@
 // Pane header: badge, title, status dot, and shell label above each pane.
 
-use crate::config::theme::{Color, Theme};
+use crate::config::theme::{TerminalTheme, color_new};
 use crate::pane::divider::OverlayQuad;
 use crate::pane::Rect;
 use crate::renderer::grid_renderer::GridCell;
 
 /// Height of the pane header in physical pixels.
-pub const PANE_HEADER_HEIGHT: f32 = 36.0;
+/// Set to 0.0 — pane headers removed; chrome bar handles tab/shell info.
+pub const PANE_HEADER_HEIGHT: f32 = 0.0;
 
 /// Accent stripe height for the active pane header.
 const ACTIVE_STRIPE_HEIGHT: f32 = 2.0;
@@ -23,16 +24,16 @@ fn badge_char(index: usize) -> char {
 pub fn generate_pane_header_quads(
     pane_rect: Rect,
     is_active: bool,
-    theme: &Theme,
+    theme: &TerminalTheme,
 ) -> Vec<OverlayQuad> {
     let mut quads = Vec::new();
 
     // Rounded pane border: outer filled rounded rect (border color) with inner
     // filled rounded rect (terminal_bg) inset by 1px, creating a 1px border.
     let border_color = if is_active {
-        &theme.accent
+        &theme.accent_orange
     } else {
-        &theme.border
+        &theme.border_visible
     };
     let bc = [border_color.r, border_color.g, border_color.b, 1.0];
     // Outer border fill (full pane, 8px radius)
@@ -42,7 +43,7 @@ pub fn generate_pane_header_quads(
         border_radius: 8.0,
     });
     // Inner fill (terminal bg, inset 1px, 7px radius)
-    let tbg = &theme.terminal_bg;
+    let tbg = &theme.bg_deep;
     quads.push(OverlayQuad {
         rect: Rect::new(
             pane_rect.x + 1.0,
@@ -56,9 +57,9 @@ pub fn generate_pane_header_quads(
 
     // Header background (on top of inner fill)
     let bg = if is_active {
-        &theme.surface_raised
+        &theme.bg_hover
     } else {
-        &theme.surface
+        &theme.bg_surface
     };
     quads.push(OverlayQuad {
         rect: Rect::new(pane_rect.x + 1.0, pane_rect.y + 1.0, pane_rect.width - 2.0, PANE_HEADER_HEIGHT),
@@ -68,7 +69,7 @@ pub fn generate_pane_header_quads(
 
     // Accent stripe below the header (separator between header and terminal content)
     let (stripe_color, stripe_h) = if is_active {
-        (&theme.accent, ACTIVE_STRIPE_HEIGHT)
+        (&theme.accent_orange, ACTIVE_STRIPE_HEIGHT)
     } else {
         (&theme.border_subtle, INACTIVE_STRIPE_HEIGHT)
     };
@@ -91,7 +92,7 @@ pub fn generate_pane_header_text(
     is_active: bool,
     cell_width: f32,
     cell_height: f32,
-    theme: &Theme,
+    theme: &TerminalTheme,
 ) -> Option<(Rect, Vec<GridCell>)> {
     if cell_width == 0.0 || cell_height == 0.0 || pane_rect.width < cell_width * 5.0 {
         return None;
@@ -105,16 +106,16 @@ pub fn generate_pane_header_text(
     let text_y = pane_rect.y + (PANE_HEADER_HEIGHT - cell_height) / 2.0;
     let text_rect = Rect::new(pane_rect.x, text_y.max(0.0), pane_rect.width, cell_height);
 
-    let bg = Color::new(0.0, 0.0, 0.0, 0.0); // transparent
+    let bg = color_new(0.0, 0.0, 0.0, 0.0); // transparent
     let mut cells = vec![GridCell::empty(bg); columns];
 
-    let accent = Color::new(theme.accent.r, theme.accent.g, theme.accent.b, 1.0);
-    let text_primary = Color::new(theme.text.r, theme.text.g, theme.text.b, 1.0);
-    let text_secondary = Color::new(
+    let accent = color_new(theme.accent_orange.r, theme.accent_orange.g, theme.accent_orange.b, 1.0);
+    let text_primary = color_new(theme.text_primary.r, theme.text_primary.g, theme.text_primary.b, 1.0);
+    let text_secondary = color_new(
         theme.text_secondary.r, theme.text_secondary.g, theme.text_secondary.b, 1.0,
     );
-    let text_dim = Color::new(theme.text_dim.r, theme.text_dim.g, theme.text_dim.b, 1.0);
-    let success = Color::new(theme.success.r, theme.success.g, theme.success.b, 1.0);
+    let text_dim = color_new(theme.text_ghost.r, theme.text_ghost.g, theme.text_ghost.b, 1.0);
+    let success = color_new(theme.accent_green.r, theme.accent_green.g, theme.accent_green.b, 1.0);
 
     // Left padding (2 cells)
     let left_pad = 2;
@@ -175,11 +176,11 @@ pub fn generate_pane_header_text(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::theme::Theme;
+    use crate::config::theme::TerminalTheme;
 
     #[test]
     fn pane_header_height_constant() {
-        assert_eq!(PANE_HEADER_HEIGHT, 36.0);
+        assert_eq!(PANE_HEADER_HEIGHT, 0.0);
     }
 
     #[test]
@@ -201,7 +202,7 @@ mod tests {
 
     #[test]
     fn pane_header_quads_active_vs_inactive() {
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         let rect = Rect::new(0.0, 0.0, 640.0, 400.0);
 
         let active_quads = generate_pane_header_quads(rect, true, &theme);
@@ -222,7 +223,7 @@ mod tests {
 
     #[test]
     fn pane_header_text_generated() {
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         let rect = Rect::new(0.0, 0.0, 640.0, 400.0);
         let result = generate_pane_header_text(
             rect, 0, "~/work/project", "bash", true, 10.0, 20.0, &theme,
@@ -235,7 +236,7 @@ mod tests {
 
     #[test]
     fn pane_header_text_has_badge() {
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         let rect = Rect::new(0.0, 0.0, 640.0, 400.0);
         let (_, cells) = generate_pane_header_text(
             rect, 0, "~/work", "bash", true, 10.0, 20.0, &theme,
@@ -246,7 +247,7 @@ mod tests {
 
     #[test]
     fn pane_header_text_none_for_narrow_pane() {
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         let rect = Rect::new(0.0, 0.0, 30.0, 400.0);
         let result = generate_pane_header_text(
             rect, 0, "test", "bash", true, 10.0, 20.0, &theme,

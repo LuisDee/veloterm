@@ -1,6 +1,6 @@
 // wgpu device, surface, and render pipeline setup.
 
-use crate::config::theme::Color;
+use crate::config::theme::TerminalTheme;
 
 /// GPU state holding the wgpu instance, adapter, device, and queue.
 /// Surface management is separate because it requires a window handle.
@@ -123,10 +123,10 @@ fn srgb_to_linear(c: f64) -> f64 {
     }
 }
 
-/// The clear color for Claude Dark theme background (#141413).
+/// The clear color for the given theme's background (bg_deep).
 /// Returns linear color values for correct rendering on sRGB surfaces.
-pub fn clear_color() -> wgpu::Color {
-    let c = Color::from_hex("#141413");
+pub fn clear_color(theme: &TerminalTheme) -> wgpu::Color {
+    let c = theme.bg_deep;
     wgpu::Color {
         r: srgb_to_linear(c.r as f64),
         g: srgb_to_linear(c.g as f64),
@@ -197,7 +197,9 @@ pub struct GridUniforms {
     pub cell_size: [f32; 2],
     pub grid_size: [f32; 2],
     pub atlas_size: [f32; 2],
-    pub _padding: [f32; 2],
+    /// [0]: 1.0 if atlas is RGBA (per-channel subpixel blending), 0.0 for R8 (grayscale alpha).
+    /// [1]: reserved.
+    pub flags: [f32; 2],
 }
 
 /// Create the bind group layout for the grid shader.
@@ -206,14 +208,16 @@ pub fn create_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout 
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("Grid Bind Group Layout"),
         entries: &[
-            // Uniforms
+            // Uniforms (dynamic offset for per-pane grid dimensions)
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
+                    has_dynamic_offset: true,
+                    min_binding_size: std::num::NonZeroU64::new(
+                        std::mem::size_of::<GridUniforms>() as u64,
+                    ),
                 },
                 count: None,
             },
@@ -222,7 +226,7 @@ pub fn create_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout 
                 binding: 1,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
                     view_dimension: wgpu::TextureViewDimension::D2,
                     multisampled: false,
                 },
@@ -232,7 +236,7 @@ pub fn create_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout 
             wgpu::BindGroupLayoutEntry {
                 binding: 2,
                 visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
                 count: None,
             },
         ],
@@ -287,14 +291,23 @@ pub fn create_render_pipeline(
     })
 }
 
-/// Upload glyph atlas R8 data to a GPU texture.
+/// Upload glyph atlas data to a GPU texture.
+///
+/// `bytes_per_pixel`: 1 for R8Unorm (swash grayscale), 4 for Rgba8Unorm (CoreText RGBA).
 pub fn create_atlas_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     width: u32,
     height: u32,
     data: &[u8],
+    bytes_per_pixel: u32,
 ) -> wgpu::Texture {
+    let format = if bytes_per_pixel == 4 {
+        wgpu::TextureFormat::Rgba8Unorm
+    } else {
+        wgpu::TextureFormat::R8Unorm
+    };
+
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("Glyph Atlas"),
         size: wgpu::Extent3d {
@@ -305,7 +318,7 @@ pub fn create_atlas_texture(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R8Unorm,
+        format,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
@@ -320,7 +333,7 @@ pub fn create_atlas_texture(
         data,
         wgpu::TexelCopyBufferLayout {
             offset: 0,
-            bytes_per_row: Some(width),
+            bytes_per_row: Some(width * bytes_per_pixel),
             rows_per_image: Some(height),
         },
         wgpu::Extent3d {
@@ -333,13 +346,13 @@ pub fn create_atlas_texture(
     texture
 }
 
-/// Create a linear-filtering sampler for the glyph atlas.
-/// Linear filtering smooths fractional-pixel glyph positions instead of producing jagged edges.
+/// Create a nearest-filtering sampler for the glyph atlas.
+/// At Retina scale, glyphs are rasterized at exact pixel size — Nearest preserves sharp edges.
 pub fn create_atlas_sampler(device: &wgpu::Device) -> wgpu::Sampler {
     device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("Atlas Sampler"),
-        mag_filter: wgpu::FilterMode::Linear,
-        min_filter: wgpu::FilterMode::Linear,
+        mag_filter: wgpu::FilterMode::Nearest,
+        min_filter: wgpu::FilterMode::Nearest,
         mipmap_filter: wgpu::FilterMode::Nearest,
         address_mode_u: wgpu::AddressMode::ClampToEdge,
         address_mode_v: wgpu::AddressMode::ClampToEdge,
@@ -362,7 +375,13 @@ pub fn create_grid_bind_group(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: uniform_buffer,
+                    offset: 0,
+                    size: std::num::NonZeroU64::new(
+                        std::mem::size_of::<GridUniforms>() as u64,
+                    ),
+                }),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
@@ -460,8 +479,9 @@ mod tests {
     // ── Clear color tests ──────────────────────────────────────────
 
     #[test]
-    fn clear_color_is_linear_version_of_claude_dark_background() {
-        let c = clear_color();
+    fn clear_color_is_linear_version_of_warm_dark_background() {
+        use crate::config::theme::DARK;
+        let c = clear_color(&DARK);
         // #141413 = sRGB(20/255, 20/255, 19/255) → linear values are much smaller
         // srgb_to_linear(20/255) ≈ 0.00607
         assert!(c.r < 0.01, "red should be linearized: {}", c.r);
@@ -518,7 +538,7 @@ mod tests {
         assert_eq!(
             std::mem::size_of::<GridUniforms>(),
             32,
-            "GridUniforms must be 32 bytes (cell_size 8 + grid_size 8 + atlas_size 8 + pad 8)"
+            "GridUniforms must be 32 bytes (cell_size 8 + grid_size 8 + atlas_size 8 + flags 8)"
         );
     }
 
@@ -554,17 +574,25 @@ mod tests {
     fn atlas_texture_has_correct_dimensions() {
         let ctx = try_create_headless().expect("GPU required");
         let data = vec![128u8; 64 * 64];
-        let texture = create_atlas_texture(&ctx.device, &ctx.queue, 64, 64, &data);
+        let texture = create_atlas_texture(&ctx.device, &ctx.queue, 64, 64, &data, 1);
         assert_eq!(texture.width(), 64);
         assert_eq!(texture.height(), 64);
     }
 
     #[test]
-    fn atlas_texture_format_is_r8unorm() {
+    fn atlas_texture_format_r8_for_bpp1() {
         let ctx = try_create_headless().expect("GPU required");
         let data = vec![0u8; 64 * 64];
-        let texture = create_atlas_texture(&ctx.device, &ctx.queue, 64, 64, &data);
+        let texture = create_atlas_texture(&ctx.device, &ctx.queue, 64, 64, &data, 1);
         assert_eq!(texture.format(), wgpu::TextureFormat::R8Unorm);
+    }
+
+    #[test]
+    fn atlas_texture_format_rgba_for_bpp4() {
+        let ctx = try_create_headless().expect("GPU required");
+        let data = vec![0u8; 64 * 64 * 4];
+        let texture = create_atlas_texture(&ctx.device, &ctx.queue, 64, 64, &data, 4);
+        assert_eq!(texture.format(), wgpu::TextureFormat::Rgba8Unorm);
     }
 
     #[test]
@@ -585,7 +613,7 @@ mod tests {
         });
 
         let data = vec![0u8; 64 * 64];
-        let texture = create_atlas_texture(&ctx.device, &ctx.queue, 64, 64, &data);
+        let texture = create_atlas_texture(&ctx.device, &ctx.queue, 64, 64, &data, 1);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = create_atlas_sampler(&ctx.device);
 

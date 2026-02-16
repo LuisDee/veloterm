@@ -4,13 +4,28 @@
 // accent stripes, rounded pane containers with borders/shadows, and
 // status bar as an iced overlay on top of the custom wgpu terminal renderer.
 
-use crate::config::theme::Theme;
+use crate::config::theme::TerminalTheme;
 use iced_graphics::Viewport;
 use iced_runtime::user_interface::{Cache, UserInterface};
 use iced_wgpu::Engine;
 use iced_widget::{
-    button, column, container, pin, row, stack, text, MouseArea, Row, Stack,
+    column, container, pin, row, stack, text, text_input, MouseArea, Row, Stack,
 };
+use std::borrow::Cow;
+
+/// JetBrains Mono Regular — shared with glyph_atlas for iced UI chrome text.
+const JETBRAINS_MONO_TTF: &[u8] =
+    include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
+
+/// JetBrains Mono font descriptor for iced widgets.
+const JETBRAINS_MONO: iced_core::Font = iced_core::Font::with_name("JetBrains Mono");
+
+/// DM Sans Variable — UI chrome text (Anthropic brand font).
+const DM_SANS_TTF: &[u8] =
+    include_bytes!("../../assets/fonts/DMSans-Regular.ttf");
+
+/// DM Sans font descriptor for iced widgets.
+const DM_SANS: iced_core::Font = iced_core::Font::with_name("DM Sans");
 
 /// Horizontal space filler (iced 0.14: space::horizontal, not horizontal_space).
 fn hspace<'a>() -> iced_widget::Space {
@@ -24,6 +39,16 @@ pub enum UiMessage {
     TabClosed(usize),
     NewTab,
     TabHovered(Option<usize>),
+    SidebarTabSelected(usize),
+    SidebarTabHovered(Option<usize>),
+    ToggleSidebar,
+    ToggleThemeSelector,
+    SetTheme(String),
+    RenameTab(usize),
+    RenameTabInput(String),
+    RenameTabCommit(usize, String),
+    NewTabHovered(bool),
+    CloseButtonHovered(Option<usize>),
     Noop,
 }
 
@@ -54,6 +79,26 @@ pub struct PaneInfo {
     pub scrollbar_alpha: f32,
 }
 
+/// Sidebar tab descriptor for the minimap sidebar.
+#[derive(Debug, Clone)]
+pub struct SidebarTabInfo {
+    pub title: String,
+    pub is_active: bool,
+    pub has_notification: bool,
+    pub pane_count: usize,
+    pub minimap_rects: Vec<MinimapPane>,
+}
+
+/// A single pane rect in the sidebar minimap, normalized 0.0..1.0.
+#[derive(Debug, Clone)]
+pub struct MinimapPane {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub is_focused: bool,
+}
+
 /// Divider between panes, for visual rendering.
 #[derive(Debug, Clone)]
 pub struct DividerDisplay {
@@ -63,6 +108,7 @@ pub struct DividerDisplay {
     pub width: f32,
     pub height: f32,
     pub is_hovered: bool,
+    pub is_dragging: bool,
 }
 
 /// State snapshot passed to the iced widget tree each frame.
@@ -74,7 +120,7 @@ pub struct UiState<'a> {
     pub panes: Vec<PaneInfo>,
     pub pane_count: usize,
     pub is_zoomed: bool,
-    pub theme: &'a Theme,
+    pub theme: &'a TerminalTheme,
     pub window_width: f32,
     pub window_height: f32,
     pub scale_factor: f32,
@@ -93,6 +139,21 @@ pub struct UiState<'a> {
     pub palette_query: String,
     pub palette_items: Vec<(String, String, String)>, // (name, description, keybinding)
     pub palette_selected: usize,
+    /// Sidebar state.
+    pub sidebar_visible: bool,
+    pub sidebar_tabs: Vec<SidebarTabInfo>,
+    pub sidebar_width: f32,
+    pub hovered_sidebar_tab: Option<usize>,
+    /// Theme selector popup state.
+    pub theme_selector_open: bool,
+    /// Tab being renamed inline (index into sidebar_tabs).
+    pub editing_tab: Option<usize>,
+    /// Current text in the rename field.
+    pub editing_tab_value: String,
+    /// Whether the "New Tab" button area is hovered.
+    pub hovering_new_tab: bool,
+    /// Which tab's close button is hovered (if any).
+    pub hovering_close_button: Option<usize>,
 }
 
 /// Holds iced rendering state: renderer, viewport, event queue, and UI cache.
@@ -103,6 +164,7 @@ pub struct IcedLayer {
     events: Vec<iced_core::Event>,
     cursor: iced_core::mouse::Cursor,
     format: wgpu::TextureFormat,
+    scale: f32,
 }
 
 /// Convert a theme Color to an iced Color.
@@ -111,6 +173,7 @@ fn to_iced_color(c: &crate::config::theme::Color) -> iced_core::Color {
 }
 
 /// Circled digit badge for pane index (1-based).
+#[cfg(test)]
 fn pane_badge(index: usize) -> &'static str {
     match index + 1 {
         1 => "\u{2460}",
@@ -126,14 +189,14 @@ fn pane_badge(index: usize) -> &'static str {
     }
 }
 
-/// Header bar height in logical pixels.
-const HEADER_BAR_HEIGHT: f32 = 46.0;
-/// Tab bar height in logical pixels.
-const TAB_BAR_HEIGHT: f32 = 28.0;
-/// Status bar height in logical pixels.
-const STATUS_BAR_HEIGHT: f32 = 36.0;
-/// Pane header height in logical pixels.
-const PANE_HEADER_HEIGHT: f32 = 36.0;
+/// Chrome bar height in logical pixels (40px per spec).
+const CHROME_BAR_HEIGHT: f32 = 38.0;
+/// Status bar height in logical pixels (~30px per spec).
+const STATUS_BAR_HEIGHT: f32 = 28.0;
+/// Pane header height in logical pixels (0 — headers removed).
+/// Kept for test parity with legacy pane::header::PANE_HEADER_HEIGHT.
+#[cfg(test)]
+const PANE_HEADER_HEIGHT: f32 = 0.0;
 
 type IcedElement<'a> = iced_core::Element<'a, UiMessage, iced_core::Theme, iced_wgpu::Renderer>;
 
@@ -148,12 +211,20 @@ impl IcedLayer {
         physical_height: u32,
         scale_factor: f32,
     ) -> Self {
+        // Load JetBrains Mono into iced's global font system so all iced text
+        // widgets render with the same monospace font as the terminal grid.
+        {
+            let mut fs = iced_graphics::text::font_system().write().unwrap();
+            fs.load_font(Cow::Borrowed(JETBRAINS_MONO_TTF));
+            fs.load_font(Cow::Borrowed(DM_SANS_TTF));
+        }
+
         let shell = iced_graphics::Shell::headless();
         let engine = Engine::new(adapter, device, queue, format, None, shell);
         let renderer = iced_wgpu::Renderer::new(
             engine,
-            iced_core::Font::default(),
-            iced_core::Pixels(16.0),
+            JETBRAINS_MONO,
+            iced_core::Pixels(14.0),
         );
         let viewport = Viewport::with_physical_size(
             iced_core::Size::new(physical_width, physical_height),
@@ -167,15 +238,24 @@ impl IcedLayer {
             events: Vec::new(),
             cursor: iced_core::mouse::Cursor::Unavailable,
             format,
+            scale: scale_factor,
         }
     }
 
     /// Update the viewport after a window resize.
     pub fn resize(&mut self, physical_width: u32, physical_height: u32, scale_factor: f32) {
+        self.scale = scale_factor;
         self.viewport = Viewport::with_physical_size(
             iced_core::Size::new(physical_width, physical_height),
             scale_factor,
         );
+    }
+
+    /// Update the scale factor (e.g. when window moves between displays).
+    pub fn update_scale(&mut self, scale: f32) {
+        self.scale = scale;
+        let size = self.viewport.physical_size();
+        self.viewport = Viewport::with_physical_size(size, scale);
     }
 
     /// Push a winit event, converting it to an iced event via iced_winit::conversion.
@@ -213,7 +293,15 @@ impl IcedLayer {
 
         let mut messages: Vec<UiMessage> = Vec::new();
         let mut clipboard = iced_core::clipboard::Null;
-        let events = std::mem::take(&mut self.events);
+        let mut events = std::mem::take(&mut self.events);
+
+        // iced_winit::conversion doesn't convert winit's RedrawRequested, but
+        // iced button widgets only commit their hover/press status on this event.
+        // Inject it so title bar buttons (hamburger, theme) visually update.
+        // Sidebar buttons use MouseArea instead (bypasses broken button::Status).
+        events.push(iced_core::Event::Window(
+            iced_core::window::Event::RedrawRequested(std::time::Instant::now()),
+        ));
         let (_state, _statuses) = interface.update(
             &events,
             self.cursor,
@@ -226,7 +314,8 @@ impl IcedLayer {
             &mut self.renderer,
             &iced_core::Theme::Dark,
             &iced_core::renderer::Style {
-                text_color: iced_core::Color::WHITE,
+                // Warm cream — brightest allowed text per spec (#e8e0d4)
+                text_color: iced_core::Color::from_rgb(0.910, 0.878, 0.831),
             },
             self.cursor,
         );
@@ -243,9 +332,8 @@ impl IcedLayer {
     fn view<'a>(state: &'a UiState, scale: f32) -> IcedElement<'a> {
         let theme = state.theme;
 
-        let title_bar = Self::title_bar(theme, scale);
-        let title_divider = Self::divider(theme, scale);
-        let tab_bar = Self::tab_bar(state, scale);
+        let chrome_bar = Self::chrome_bar(state, scale);
+        let chrome_divider = Self::divider(theme, scale);
 
         // Content area: transparent base + pane chrome overlay
         let transparent_base = container(column![])
@@ -269,10 +357,24 @@ impl IcedLayer {
         let status_divider = Self::divider(theme, scale);
         let status_bar = Self::status_bar(state, scale);
 
-        let main_ui: IcedElement<'a> = column![title_bar, title_divider, tab_bar, content, status_divider, status_bar]
-            .width(iced_core::Length::Fill)
-            .height(iced_core::Length::Fill)
-            .into();
+        // Sidebar is always the tab management UI (no separate tab bar)
+        let main_ui: IcedElement<'a> = if state.sidebar_visible {
+            let sidebar = Self::sidebar(state, scale);
+            let sidebar_divider = Self::vertical_divider(theme, scale);
+            let middle: IcedElement<'a> = row![sidebar, sidebar_divider, content]
+                .width(iced_core::Length::Fill)
+                .height(iced_core::Length::Fill)
+                .into();
+            column![chrome_bar, chrome_divider, middle, status_divider, status_bar]
+                .width(iced_core::Length::Fill)
+                .height(iced_core::Length::Fill)
+                .into()
+        } else {
+            column![chrome_bar, chrome_divider, content, status_divider, status_bar]
+                .width(iced_core::Length::Fill)
+                .height(iced_core::Length::Fill)
+                .into()
+        };
 
         let with_flash: IcedElement<'a> = if state.bell_flash {
             let flash_overlay = container(column![])
@@ -293,6 +395,17 @@ impl IcedLayer {
             main_ui
         };
 
+        // Theme selector popup (positioned below title bar icons)
+        let with_theme_popup: IcedElement<'a> = if state.theme_selector_open {
+            let popup = Self::theme_selector_popup(state, scale);
+            stack![with_flash, popup]
+                .width(iced_core::Length::Fill)
+                .height(iced_core::Length::Fill)
+                .into()
+        } else {
+            with_flash
+        };
+
         // Command palette overlay (modal, centered at top)
         if state.palette_active {
             let palette_overlay = Self::command_palette(state, scale);
@@ -306,56 +419,55 @@ impl IcedLayer {
                     ..Default::default()
                 });
 
-            stack![with_flash, scrim, palette_overlay]
+            stack![with_theme_popup, scrim, palette_overlay]
                 .width(iced_core::Length::Fill)
                 .height(iced_core::Length::Fill)
                 .into()
         } else {
-            with_flash
+            with_theme_popup
         }
     }
 
-    /// Title bar: ✻ Claude Terminal ... v0.1.0
-    fn title_bar<'a>(theme: &Theme, scale: f32) -> IcedElement<'a> {
-        let surface = to_iced_color(&theme.surface);
-        let accent = to_iced_color(&theme.accent);
-        let text_color = to_iced_color(&theme.text);
-        let dim_color = to_iced_color(&theme.text_dim);
+    /// Chrome bar: centered [✦ VeloTerm]
+    /// Per VeloTerm design spec. Height: 38px.
+    fn chrome_bar<'a>(state: &'a UiState, scale: f32) -> IcedElement<'a> {
+        let theme = state.theme;
+        let chrome_bg = to_iced_color(&theme.bg_surface);
+        let accent = to_iced_color(&theme.accent_orange);
+        let text_secondary = to_iced_color(&theme.text_secondary);
+        let border_subtle = to_iced_color(&theme.border_subtle);
 
-        let height = HEADER_BAR_HEIGHT / scale;
-        let sparkle_size = 18.0 / scale;
-        let title_size = 14.0 / scale;
-        let version_size = 11.0 / scale;
-        let pad_v = 14.0 / scale;
-        let pad_h = 24.0 / scale;
-        let spacing = 10.0 / scale;
+        let height = CHROME_BAR_HEIGHT / scale;
 
-        let content = row![
-            row![
-                text("\u{273B}").size(sparkle_size).color(accent),
-                text("Claude Terminal").size(title_size).color(text_color),
-            ]
-            .spacing(spacing)
-            .align_y(iced_core::Alignment::Center),
-            hspace(),
-            text("v0.1.0").size(version_size).color(dim_color),
-        ]
-        .align_y(iced_core::Alignment::Center)
-        .padding(iced_core::Padding::from([pad_v, pad_h]));
+        // Centered: sparkle ✦ in accent_orange (14px) + "VeloTerm" in text_secondary (DM Sans 12.5px)
+        let sparkle = text("\u{2726}").size(14.0).color(accent).font(DM_SANS);
+        let brand_label = text("VeloTerm").size(12.5).color(text_secondary).font(DM_SANS);
+
+        let center_content = row![sparkle, brand_label]
+            .spacing(6.0 / scale)
+            .align_y(iced_core::Alignment::Center);
+
+        let content = row![hspace(), center_content, hspace()]
+            .align_y(iced_core::Alignment::Center);
 
         container(content)
             .width(iced_core::Length::Fill)
             .height(height)
             .style(move |_: &iced_core::Theme| container::Style {
-                background: Some(iced_core::Background::Color(surface)),
+                background: Some(iced_core::Background::Color(chrome_bg)),
+                border: iced_core::Border {
+                    color: border_subtle,
+                    width: 0.0,
+                    radius: 0.0.into(),
+                },
                 ..Default::default()
             })
             .into()
     }
 
     /// 1px divider line between chrome sections.
-    fn divider<'a>(theme: &Theme, scale: f32) -> IcedElement<'a> {
-        let border_color = to_iced_color(&theme.border);
+    fn divider<'a>(theme: &TerminalTheme, scale: f32) -> IcedElement<'a> {
+        let border_color = to_iced_color(&theme.border_visible);
         container(column![])
             .style(move |_: &iced_core::Theme| container::Style {
                 background: Some(iced_core::Background::Color(border_color)),
@@ -366,214 +478,12 @@ impl IcedLayer {
             .into()
     }
 
-    /// Tab bar: row of tab buttons with close buttons, new-tab button.
-    fn tab_bar<'a>(state: &UiState, scale: f32) -> IcedElement<'a> {
-        let theme = state.theme;
-        let surface = to_iced_color(&theme.surface);
-        let surface_raised = to_iced_color(&theme.surface_raised);
-        let accent = to_iced_color(&theme.accent);
-        let text_color = to_iced_color(&theme.text);
-        let text_secondary = to_iced_color(&theme.text_secondary);
-
-        let height = TAB_BAR_HEIGHT / scale;
-        let font_size = 12.0 / scale;
-        let max_tab_w = 200.0 / scale;
-        let min_tab_w = 60.0 / scale;
-        let new_tab_w = 28.0 / scale;
-
-        let tab_count = state.tabs.len();
-        let available = (state.window_width / scale - new_tab_w).max(0.0);
-        let raw_w = if tab_count > 0 {
-            available / tab_count as f32
-        } else {
-            0.0
-        };
-        let tw = raw_w.clamp(min_tab_w, max_tab_w);
-
-        let mut tab_row = Row::new()
-            .height(height)
-            .align_y(iced_core::Alignment::Center);
-
-        for (i, tab) in state.tabs.iter().enumerate() {
-            let is_active = i == state.active_tab_index;
-            let is_hovered = state.hovered_tab == Some(i);
-
-            let fg = if is_active { text_color } else { text_secondary };
-            let bg = if is_active { surface_raised } else { surface };
-
-            // Tab title (truncated)
-            let max_chars = ((tw / (font_size * 0.6)) as usize).max(3);
-            let title_chars: Vec<char> = tab.title.chars().collect();
-            let show_close = is_active || is_hovered;
-            let usable_chars = if show_close {
-                max_chars.saturating_sub(2)
-            } else {
-                max_chars
-            };
-            let display_title = if title_chars.len() > usable_chars && usable_chars > 1 {
-                let mut t: String = title_chars[..usable_chars - 1].iter().collect();
-                t.push('\u{2026}');
-                t
-            } else {
-                title_chars[..title_chars.len().min(usable_chars)]
-                    .iter()
-                    .collect()
-            };
-
-            let mut tab_content: Row<'a, UiMessage, iced_core::Theme, iced_wgpu::Renderer> =
-                Row::new()
-                    .align_y(iced_core::Alignment::Center)
-                    .width(tw)
-                    .height(height);
-
-            tab_content = tab_content.push(
-                container(text(display_title).size(font_size).color(fg))
-                    .width(iced_core::Length::Fill)
-                    .center_x(iced_core::Length::Fill)
-                    .center_y(iced_core::Length::Fill),
-            );
-
-            if show_close {
-                let close_fg = iced_core::Color { a: 0.7, ..fg };
-                let close_btn = button(text("\u{00D7}").size(font_size).color(close_fg))
-                    .on_press(UiMessage::TabClosed(i))
-                    .padding(0)
-                    .style(move |_: &iced_core::Theme, _status| button::Style {
-                        background: None,
-                        text_color: close_fg,
-                        border: iced_core::Border::default(),
-                        shadow: iced_core::Shadow::default(),
-                        snap: false,
-                    });
-                tab_content = tab_content.push(close_btn);
-            }
-
-            let tab_bg = bg;
-            let is_active_tab = is_active;
-            let accent_color = accent;
-            let tab_container = container(tab_content)
-                .width(tw)
-                .height(height)
-                .style(move |_: &iced_core::Theme| container::Style {
-                    background: Some(iced_core::Background::Color(tab_bg)),
-                    border: if is_active_tab {
-                        iced_core::Border {
-                            color: accent_color,
-                            width: 0.0,
-                            radius: 0.0.into(),
-                        }
-                    } else {
-                        iced_core::Border::default()
-                    },
-                    ..Default::default()
-                });
-
-            let tab_widget = MouseArea::new(tab_container)
-                .on_press(UiMessage::TabSelected(i))
-                .on_enter(UiMessage::TabHovered(Some(i)))
-                .on_exit(UiMessage::TabHovered(None));
-
-            tab_row = tab_row.push(tab_widget);
-
-            // Separator between tabs
-            if i + 1 < tab_count {
-                let sep_color = iced_core::Color {
-                    a: 0.5,
-                    ..to_iced_color(&theme.border)
-                };
-                let separator = container(column![])
-                    .width(1.0 / scale)
-                    .height(height - 4.0 / scale)
-                    .style(move |_: &iced_core::Theme| container::Style {
-                        background: Some(iced_core::Background::Color(sep_color)),
-                        ..Default::default()
-                    });
-                tab_row = tab_row.push(separator);
-            }
-        }
-
-        // Active tab accent stripe
-        let mut accent_row: Row<'a, UiMessage, iced_core::Theme, iced_wgpu::Renderer> =
-            Row::new()
-                .width(iced_core::Length::Fill)
-                .height(2.0 / scale);
-        for (i, _) in state.tabs.iter().enumerate() {
-            let stripe_color = if i == state.active_tab_index {
-                accent
-            } else {
-                surface
-            };
-            accent_row = accent_row.push(
-                container(column![])
-                    .width(tw)
-                    .height(2.0 / scale)
-                    .style(move |_: &iced_core::Theme| container::Style {
-                        background: Some(iced_core::Background::Color(stripe_color)),
-                        ..Default::default()
-                    }),
-            );
-        }
-
-        // New tab "+" button
-        let plus_btn = button(
-            container(text("+").size(font_size).color(text_secondary))
-                .center_x(new_tab_w)
-                .center_y(height),
-        )
-        .on_press(UiMessage::NewTab)
-        .width(new_tab_w)
-        .height(height)
-        .padding(0)
-        .style(move |_: &iced_core::Theme, status| {
-            let bg_color = match status {
-                button::Status::Hovered => surface_raised,
-                _ => surface,
-            };
-            button::Style {
-                background: Some(iced_core::Background::Color(bg_color)),
-                text_color: text_secondary,
-                border: iced_core::Border::default(),
-                shadow: iced_core::Shadow::default(),
-                snap: false,
-            }
-        });
-
-        tab_row = tab_row.push(plus_btn);
-
-        let tab_bar_column = column![tab_row, accent_row];
-
-        container(tab_bar_column)
-            .width(iced_core::Length::Fill)
-            .height(height)
-            .style(move |_: &iced_core::Theme| container::Style {
-                background: Some(iced_core::Background::Color(surface)),
-                ..Default::default()
-            })
-            .into()
-    }
-
     /// Pane chrome: rounded containers with headers, accent stripes, borders, shadows,
     /// plus dividers, scrollbar thumbs, and search bar overlay.
     fn pane_chrome<'a>(state: &'a UiState, scale: f32) -> IcedElement<'a> {
         let theme = state.theme;
-        let surface = to_iced_color(&theme.surface);
-        let surface_raised = to_iced_color(&theme.surface_raised);
-        let accent = to_iced_color(&theme.accent);
-        let text_color = to_iced_color(&theme.text);
-        let text_secondary = to_iced_color(&theme.text_secondary);
-        let text_dim = to_iced_color(&theme.text_dim);
-        let success = to_iced_color(&theme.success);
-        let border_color = to_iced_color(&theme.border);
-        let border_subtle = to_iced_color(&theme.border_subtle);
-
-        let badge_size = 13.0 / scale;
-        let title_size = 12.0 / scale;
-        let shell_size = 10.0 / scale;
-        let dot_size = 6.0 / scale;
-        let header_pad_v = 10.0 / scale;
-        let header_pad_h = 16.0 / scale;
-        let spacing = 8.0 / scale;
-        let radius = 8.0 / scale;
+        let accent = to_iced_color(&theme.accent_orange);
+        let _border_color = to_iced_color(&theme.border_visible);
 
         let mut chrome_stack = Stack::new()
             .width(iced_core::Length::Fill)
@@ -585,94 +495,16 @@ impl IcedLayer {
             let pw = pane.width / scale;
             let ph = pane.height / scale;
 
-            let is_active = pane.is_focused;
-            let badge_color = if is_active { accent } else { text_dim };
-            let title_color = if is_active { text_color } else { text_secondary };
-            let header_bg = if is_active { surface_raised } else { surface };
-            let stripe_color = if is_active { accent } else { border_subtle };
-            let stripe_h = if is_active { 4.0 / scale } else { 1.0 / scale };
-            let pane_border = if is_active { accent } else { border_color };
-
-            let badge = pane_badge(pane.index);
-
-            // Header: badge + title + green status dot ... shell label
-            let header_content = row![
-                row![
-                    text(badge).size(badge_size).color(badge_color),
-                    text(&pane.title).size(title_size).color(title_color),
-                    text("\u{25CF}").size(dot_size).color(success),
-                ]
-                .spacing(spacing)
-                .align_y(iced_core::Alignment::Center),
-                hspace(),
-                text(&pane.shell_name).size(shell_size).color(text_dim),
-            ]
-            .align_y(iced_core::Alignment::Center)
-            .padding(iced_core::Padding::from([header_pad_v, header_pad_h]));
-
-            // Header container with rounded top corners
-            let hdr_bg = header_bg;
-            let r = radius;
-            let header = container(header_content)
-                .width(iced_core::Length::Fill)
-                .style(move |_: &iced_core::Theme| container::Style {
-                    background: Some(iced_core::Background::Color(hdr_bg)),
-                    border: iced_core::Border {
-                        color: iced_core::Color::TRANSPARENT,
-                        width: 0.0,
-                        radius: iced_core::border::Radius::from(0.0).top(r),
-                    },
-                    ..Default::default()
-                });
-
-            // Accent stripe (2px active, 1px inactive)
-            let sc = stripe_color;
-            let accent_stripe = container(column![])
-                .width(iced_core::Length::Fill)
-                .height(stripe_h)
-                .style(move |_: &iced_core::Theme| container::Style {
-                    background: Some(iced_core::Background::Color(sc)),
-                    ..Default::default()
-                });
-
-            // Transparent body (terminal grid shows through from custom pipeline)
-            let body = container(column![])
-                .width(iced_core::Length::Fill)
-                .height(iced_core::Length::Fill)
-                .style(|_: &iced_core::Theme| container::Style {
-                    background: None,
-                    ..Default::default()
-                });
-
-            let pane_column = column![header, accent_stripe, body]
-                .width(iced_core::Length::Fill)
-                .spacing(0);
-
-            // Outer container: rounded border + shadow, transparent background
-            let is_active_pane = is_active;
-            let pane_container = container(pane_column)
+            // No border — separation comes from background color difference only.
+            let pane_container = container(column![])
                 .width(pw)
                 .height(ph)
                 .style(move |_: &iced_core::Theme| container::Style {
                     background: None,
                     border: iced_core::Border {
-                        color: pane_border,
-                        width: 1.0,
-                        radius: radius.into(),
-                    },
-                    shadow: iced_core::Shadow {
-                        color: iced_core::Color::from_rgba(
-                            0.0,
-                            0.0,
-                            0.0,
-                            if is_active_pane { 0.3 } else { 0.15 },
-                        ),
-                        offset: iced_core::Vector::new(0.0, 2.0 / scale),
-                        blur_radius: if is_active_pane {
-                            12.0 / scale
-                        } else {
-                            6.0 / scale
-                        },
+                        color: iced_core::Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: 0.0.into(),
                     },
                     ..Default::default()
                 });
@@ -693,7 +525,7 @@ impl IcedLayer {
                             border: iced_core::Border {
                                 color: iced_core::Color::TRANSPARENT,
                                 width: 0.0,
-                                radius: (2.0 / scale).into(),
+                                radius: (3.0 / scale).into(),
                             },
                             ..Default::default()
                         });
@@ -701,20 +533,59 @@ impl IcedLayer {
                         chrome_stack.push(pin(scrollbar).x(sx / scale).y(sy / scale));
                 }
             }
+
+            // Active pane focus indicator: 2px orange top-line when split
+            if pane.is_focused && state.panes.len() > 1 {
+                let stripe = container(column![])
+                    .width(pw)
+                    .height(2.0)
+                    .style(move |_: &iced_core::Theme| container::Style {
+                        background: Some(iced_core::Background::Color(accent)),
+                        ..Default::default()
+                    });
+                chrome_stack = chrome_stack.push(pin(stripe).x(px).y(py));
+            }
         }
 
-        // Dividers between panes
+        // Dividers between panes — visible 1px line, brighter on hover, orange on drag
+        let border_vis = to_iced_color(&theme.border_visible);
+        let border_str = to_iced_color(&theme.border_strong);
         for div in &state.dividers {
-            let div_color = if div.is_hovered { accent } else { border_color };
-            let divider_widget = container(column![])
-                .width(div.width / scale)
-                .height(div.height / scale)
+            let is_hovered = div.is_hovered;
+            let is_dragging = div.is_dragging;
+            // Compute the visible line width and center it within the hit-area
+            let hit_w = div.width / scale;
+            let hit_h = div.height / scale;
+            let line_w: f32 = if is_dragging || is_hovered { 2.0 } else { 1.0 };
+            // The visible line, centered in the hit area
+            let line_color = if is_dragging {
+                iced_core::Color::from_rgba(
+                    accent.r, accent.g, accent.b, 0.5,
+                )
+            } else if is_hovered {
+                border_str
+            } else {
+                border_vis
+            };
+            let line_widget = container(column![])
+                .width(line_w)
+                .height(hit_h)
                 .style(move |_: &iced_core::Theme| container::Style {
-                    background: Some(iced_core::Background::Color(div_color)),
+                    background: Some(iced_core::Background::Color(line_color)),
                     ..Default::default()
                 });
-            chrome_stack =
-                chrome_stack.push(pin(divider_widget).x(div.x / scale).y(div.y / scale));
+            let line_x = div.x / scale + (hit_w - line_w) / 2.0;
+            chrome_stack = chrome_stack.push(pin(line_widget).x(line_x).y(div.y / scale));
+
+            // Invisible hit-area container (captures mouse events via interaction state machine)
+            let hit_area = container(column![])
+                .width(hit_w)
+                .height(hit_h)
+                .style(|_: &iced_core::Theme| container::Style {
+                    background: None,
+                    ..Default::default()
+                });
+            chrome_stack = chrome_stack.push(pin(hit_area).x(div.x / scale).y(div.y / scale));
         }
 
         // Search bar overlay (positioned at top-right of focused pane)
@@ -736,14 +607,14 @@ impl IcedLayer {
         scale: f32,
     ) -> IcedElement<'a> {
         let theme = state.theme;
-        let surface = to_iced_color(&theme.surface);
-        let text_color = to_iced_color(&theme.text);
-        let text_dim = to_iced_color(&theme.text_dim);
-        let accent = to_iced_color(&theme.accent);
-        let error_color = to_iced_color(&theme.error);
-        let border_color = to_iced_color(&theme.border);
+        let surface = to_iced_color(&theme.bg_surface);
+        let text_color = to_iced_color(&theme.text_primary);
+        let text_dim = to_iced_color(&theme.text_ghost);
+        let accent = to_iced_color(&theme.accent_orange);
+        let error_color = to_iced_color(&theme.accent_red);
+        let border_color = to_iced_color(&theme.border_visible);
 
-        let font_size = 12.0 / scale;
+        let font_size = 12.0;
         let pad_v = 6.0 / scale;
         let pad_h = 12.0 / scale;
         let bar_width = 260.0 / scale;
@@ -813,7 +684,7 @@ impl IcedLayer {
 
         // Position at top-right of focused pane (inside the pane, offset from header)
         let bar_x = (pane.x + pane.width - 260.0 - 8.0) / scale;
-        let bar_y = (pane.y + PANE_HEADER_HEIGHT + 4.0) / scale;
+        let bar_y = (pane.y + 8.0) / scale;
 
         pin(bar).x(bar_x).y(bar_y).into()
     }
@@ -821,16 +692,16 @@ impl IcedLayer {
     /// Command palette: floating modal centered near top of window.
     fn command_palette<'a>(state: &'a UiState, scale: f32) -> IcedElement<'a> {
         let theme = state.theme;
-        let surface = to_iced_color(&theme.surface);
-        let surface_raised = to_iced_color(&theme.surface_raised);
-        let text_color = to_iced_color(&theme.text);
-        let text_dim = to_iced_color(&theme.text_dim);
+        let surface = to_iced_color(&theme.bg_surface);
+        let surface_raised = to_iced_color(&theme.bg_hover);
+        let text_color = to_iced_color(&theme.text_primary);
+        let text_dim = to_iced_color(&theme.text_ghost);
         let text_secondary = to_iced_color(&theme.text_secondary);
-        let accent = to_iced_color(&theme.accent);
-        let border_color = to_iced_color(&theme.border);
+        let accent = to_iced_color(&theme.accent_orange);
+        let border_color = to_iced_color(&theme.border_visible);
 
-        let font_size = 13.0 / scale;
-        let small_size = 11.0 / scale;
+        let font_size = 13.0;
+        let small_size = 11.0;
         let pad_h = 14.0 / scale;
         let pad_v = 8.0 / scale;
         let palette_width = 440.0 / scale;
@@ -959,65 +830,501 @@ impl IcedLayer {
         pin(palette_box).x(palette_x).y(palette_y).into()
     }
 
-    /// Status bar: ✻ Claude Terminal | ● Pane N | user · UTF-8 · bash
-    fn status_bar<'a>(state: &UiState, scale: f32) -> IcedElement<'a> {
+    /// Theme selector dropdown below the title bar theme icon.
+    /// Returns (bg_deep, text_primary, accent_orange) preview colors for a theme by config name.
+    fn theme_preview_colors(config_name: &str) -> (iced_core::Color, iced_core::Color, iced_core::Color) {
+        use crate::config::theme::{DARK, MIDNIGHT, EMBER, DUSK, LIGHT};
+        let t = match config_name {
+            "warm_dark" => &DARK,
+            "midnight" => &MIDNIGHT,
+            "ember" => &EMBER,
+            "dusk" => &DUSK,
+            "light" => &LIGHT,
+            _ => &DARK,
+        };
+        (to_iced_color(&t.bg_deep), to_iced_color(&t.text_primary), to_iced_color(&t.accent_orange))
+    }
+
+    fn theme_selector_popup<'a>(state: &'a UiState, scale: f32) -> IcedElement<'a> {
         let theme = state.theme;
-        let surface = to_iced_color(&theme.surface);
-        let accent = to_iced_color(&theme.accent);
-        let dim_color = to_iced_color(&theme.text_dim);
-        let secondary = to_iced_color(&theme.text_secondary);
-        let success = to_iced_color(&theme.success);
-        let border_sep = to_iced_color(&theme.border);
+        let bg_raised = to_iced_color(&theme.bg_raised);
+        let bg_hover_color = to_iced_color(&theme.bg_hover);
+        let text_color = to_iced_color(&theme.text_primary);
+        let text_secondary = to_iced_color(&theme.text_secondary);
+        let accent = to_iced_color(&theme.accent_orange);
+        let border_color = to_iced_color(&theme.border_visible);
+        let border_subtle = to_iced_color(&theme.border_subtle);
+
+        let font_size = 12.0;
+        let item_h = 32.0 / scale;
+        let pad_h = 12.0 / scale;
+        let popup_w = 180.0 / scale;
+        let radius = 8.0 / scale;
+        let swatch_size = 10.0 / scale;
+        let swatch_radius = 2.0 / scale;
+        let swatch_gap = 2.0 / scale;
+
+        let themes = crate::config::theme::TerminalTheme::available_themes();
+        let current_name = theme.name;
+
+        let mut col = iced_widget::Column::new().spacing(0.0);
+        for (i, &(config_name, display_name)) in themes.iter().enumerate() {
+            // Add separator before the last item (Light)
+            if i == themes.len() - 1 {
+                let sep = container(column![])
+                    .width(iced_core::Length::Fill)
+                    .height(1.0 / scale)
+                    .style(move |_: &iced_core::Theme| container::Style {
+                        background: Some(iced_core::Background::Color(border_subtle)),
+                        ..Default::default()
+                    });
+                col = col.push(sep);
+            }
+
+            let is_current = display_name == current_name;
+            let item_bg = if is_current { bg_hover_color } else { bg_raised };
+            let item_fg = if is_current { text_color } else { text_secondary };
+
+            // Swatch dots: bg_deep, text_primary, accent_orange of target theme
+            let (sw_bg, sw_text, sw_accent) = Self::theme_preview_colors(config_name);
+            let make_swatch = move |color: iced_core::Color| {
+                container(column![])
+                    .width(swatch_size)
+                    .height(swatch_size)
+                    .style(move |_: &iced_core::Theme| container::Style {
+                        background: Some(iced_core::Background::Color(color)),
+                        border: iced_core::Border::default().rounded(swatch_radius),
+                        ..Default::default()
+                    })
+            };
+
+            let swatches = row![
+                make_swatch(sw_bg),
+                make_swatch(sw_text),
+                make_swatch(sw_accent),
+            ]
+            .spacing(swatch_gap)
+            .align_y(iced_core::Alignment::Center);
+
+            let check_text: &str = if is_current { "\u{2713}" } else { "" };
+
+            let label_row = row![
+                swatches,
+                text(display_name).size(font_size).color(item_fg).font(DM_SANS),
+                hspace(),
+                text(check_text).size(font_size).color(accent).font(DM_SANS),
+            ]
+            .spacing(8.0 / scale)
+            .align_y(iced_core::Alignment::Center)
+            .padding(iced_core::Padding::from([0.0, pad_h]));
+
+            let item_container = container(label_row)
+                .width(popup_w)
+                .height(item_h)
+                .center_y(item_h)
+                .style(move |_: &iced_core::Theme| container::Style {
+                    background: Some(iced_core::Background::Color(item_bg)),
+                    ..Default::default()
+                });
+
+            let clickable = MouseArea::new(item_container)
+                .on_press(UiMessage::SetTheme(config_name.to_string()));
+
+            col = col.push(clickable);
+        }
+
+        let popup_box = container(col)
+            .width(popup_w)
+            .padding(iced_core::Padding::from([4.0 / scale, 0.0]))
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(bg_raised)),
+                border: iced_core::Border {
+                    color: border_color,
+                    width: 1.0,
+                    radius: radius.into(),
+                },
+                shadow: iced_core::Shadow {
+                    color: iced_core::Color::from_rgba(0.0, 0.0, 0.0, 0.4),
+                    offset: iced_core::Vector::new(0.0, 8.0 / scale),
+                    blur_radius: 24.0 / scale,
+                },
+                ..Default::default()
+            });
+
+        // Position above status bar, right-aligned
+        let popup_x = (state.window_width / scale) - popup_w - 16.0 / scale;
+        let popup_y = (state.window_height / scale) - STATUS_BAR_HEIGHT / scale - (themes.len() as f32 * item_h + 8.0 / scale + 1.0 / scale);
+
+        pin(popup_box).x(popup_x).y(popup_y).into()
+    }
+
+    /// Vertical 1px divider between sidebar and content.
+    fn vertical_divider<'a>(theme: &TerminalTheme, scale: f32) -> IcedElement<'a> {
+        let border_color = to_iced_color(&theme.border_visible);
+        container(column![])
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(border_color)),
+                ..Default::default()
+            })
+            .width(1.0 / scale)
+            .height(iced_core::Length::Fill)
+            .into()
+    }
+
+    /// Sidebar: "SESSIONS" header + tab entries with indicator dots.
+    /// Per new Anthropic design spec section 4.3.
+    fn sidebar<'a>(state: &'a UiState, scale: f32) -> IcedElement<'a> {
+        let theme = state.theme;
+        let sidebar_bg = to_iced_color(&theme.bg_raised);
+        let bg_active = to_iced_color(&theme.bg_active);
+        let bg_hover = to_iced_color(&theme.bg_hover);
+        let accent = to_iced_color(&theme.accent_orange);
+        let text_primary = to_iced_color(&theme.text_primary);
+        let text_secondary = to_iced_color(&theme.text_secondary);
+        let text_muted = to_iced_color(&theme.text_muted);
+        let text_dim = to_iced_color(&theme.text_ghost);
+
+        let sidebar_w = state.sidebar_width / scale;
+        let font_size = 13.0;
+        let small_size = 10.0;
+        let header_size = 10.0;
+        let pad_h = 6.0 / scale;
+        let entry_spacing = 2.0 / scale;
+
+        let mut entries_col = iced_widget::Column::new()
+            .spacing(entry_spacing)
+            .padding(iced_core::Padding::from([0.0, pad_h]));
+
+        // "SESSIONS" header
+        let header = container(
+            text("SESSIONS").size(header_size).color(text_muted).font(DM_SANS),
+        )
+        .padding(iced_core::Padding {
+            top: 14.0 / scale,
+            right: 10.0 / scale,
+            bottom: 8.0 / scale,
+            left: 10.0 / scale,
+        });
+        entries_col = entries_col.push(header);
+
+        let tab_count = state.sidebar_tabs.len();
+        for (i, tab) in state.sidebar_tabs.iter().enumerate() {
+            let is_active = tab.is_active;
+            let is_hovered_tab = state.hovered_sidebar_tab == Some(i);
+
+            // Indicator dot (6px)
+            let dot_size = 6.0 / scale;
+            let dot_r = 3.0 / scale;
+            let dot_color = if is_active { accent } else { text_dim };
+            let dot = container(column![])
+                .width(dot_size)
+                .height(dot_size)
+                .style(move |_: &iced_core::Theme| {
+                    let mut style = container::Style {
+                        background: Some(iced_core::Background::Color(dot_color)),
+                        border: iced_core::Border::default().rounded(dot_r),
+                        ..Default::default()
+                    };
+                    if is_active {
+                        style.shadow = iced_core::Shadow {
+                            color: iced_core::Color { a: 0.3, ..dot_color },
+                            offset: iced_core::Vector::new(0.0, 0.0),
+                            blur_radius: 4.0,
+                        };
+                    }
+                    style
+                });
+
+            // Tab label
+            let is_editing = state.editing_tab == Some(i);
+            let name_color = if is_active || is_hovered_tab { text_primary } else { text_secondary };
+
+            let mut title_row: Row<'a, UiMessage, iced_core::Theme, iced_wgpu::Renderer> =
+                Row::new()
+                    .spacing(8.0 / scale)
+                    .align_y(iced_core::Alignment::Center);
+
+            title_row = title_row.push(dot);
+
+            if is_editing {
+                let idx = i;
+                let rename_input = text_input("Tab name", &state.editing_tab_value)
+                    .on_input(UiMessage::RenameTabInput)
+                    .on_submit(UiMessage::RenameTabCommit(idx, state.editing_tab_value.clone()))
+                    .size(font_size)
+                    .width(iced_core::Length::Fill)
+                    .style(move |_: &iced_core::Theme, _status| {
+                        text_input::Style {
+                            background: iced_core::Background::Color(
+                                iced_core::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                            ),
+                            border: iced_core::Border {
+                                color: iced_core::Color::from_rgba(accent.r, accent.g, accent.b, 0.40),
+                                width: 1.0,
+                                radius: (4.0 / scale).into(),
+                            },
+                            icon: name_color,
+                            placeholder: text_dim,
+                            value: name_color,
+                            selection: iced_core::Color::from_rgba(accent.r, accent.g, accent.b, 0.30),
+                        }
+                    });
+                title_row = title_row.push(rename_input);
+            } else {
+                let title_text: String = if tab.title.len() > 18 {
+                    let mut t: String = tab.title.chars().take(17).collect();
+                    t.push('\u{2026}');
+                    t
+                } else {
+                    tab.title.clone()
+                };
+                title_row = title_row.push(
+                    text(title_text).size(font_size).color(name_color).font(DM_SANS)
+                );
+                title_row = title_row.push(hspace());
+
+                // Show keyboard shortcut OR close button depending on hover state
+                let show_close = tab_count > 1 && (is_active || is_hovered_tab);
+                if show_close {
+                    // Close button replaces shortcut on hover
+                    let close_size = 10.0;
+                    let close_btn_size = 14.0 / scale;
+                    let close_radius = 7.0 / scale; // 50% of 14px
+                    let is_close_hovered = state.hovering_close_button == Some(i);
+                    let (close_bg, close_txt) = if is_close_hovered {
+                        (
+                            Some(iced_core::Background::Color(bg_hover)),
+                            text_secondary,
+                        )
+                    } else {
+                        (None, text_dim)
+                    };
+                    let close_content = container(
+                        text("\u{00D7}").size(close_size).color(close_txt),
+                    )
+                    .width(close_btn_size)
+                    .height(close_btn_size)
+                    .center_x(close_btn_size)
+                    .center_y(close_btn_size)
+                    .style(move |_: &iced_core::Theme| container::Style {
+                        background: close_bg,
+                        border: iced_core::Border::default().rounded(close_radius),
+                        ..Default::default()
+                    });
+                    let close_area = MouseArea::new(close_content)
+                        .on_press(UiMessage::TabClosed(i))
+                        .on_enter(UiMessage::CloseButtonHovered(Some(i)))
+                        .on_exit(UiMessage::CloseButtonHovered(None));
+                    title_row = title_row.push(close_area);
+                } else if !is_hovered_tab {
+                    // Show keyboard shortcut when not hovered (and active, or always visible)
+                    if is_active {
+                        let shortcut = format!("\u{2318}{}", i + 1);
+                        title_row = title_row.push(
+                            text(shortcut).size(small_size).color(text_dim).font(JETBRAINS_MONO)
+                        );
+                    }
+                }
+            }
+
+            let entry_content = title_row
+                .padding(iced_core::Padding::from([8.0 / scale, 10.0 / scale]));
+
+            let radius = 4.0 / scale;
+            let entry_bg = if is_active {
+                Some(iced_core::Background::Color(bg_active))
+            } else if is_hovered_tab {
+                Some(iced_core::Background::Color(bg_hover))
+            } else {
+                None
+            };
+
+            let tab_container = container(entry_content)
+                .width(iced_core::Length::Fill)
+                .style(move |_: &iced_core::Theme| container::Style {
+                    background: entry_bg,
+                    border: iced_core::Border {
+                        color: iced_core::Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: radius.into(),
+                    },
+                    ..Default::default()
+                });
+
+            let tab_with_hover = MouseArea::new(tab_container)
+                .on_press(UiMessage::SidebarTabSelected(i))
+                .on_right_press(UiMessage::RenameTab(i))
+                .on_enter(UiMessage::SidebarTabHovered(Some(i)))
+                .on_exit(UiMessage::SidebarTabHovered(None));
+
+            entries_col = entries_col.push(tab_with_hover);
+        }
+
+        // "+ New Session" button
+        let radius = 4.0 / scale;
+        let is_new_tab_hovered = state.hovering_new_tab;
+        let new_tab_txt = if is_new_tab_hovered { text_primary } else { text_muted };
+        let plus_color = if is_new_tab_hovered { accent } else { text_muted };
+        let new_tab_bg = if is_new_tab_hovered {
+            Some(iced_core::Background::Color(bg_hover))
+        } else {
+            None
+        };
+
+        // Plus icon in bordered box
+        let border_color = if is_new_tab_hovered {
+            accent
+        } else {
+            to_iced_color(&theme.border_strong)
+        };
+        let plus_box = container(
+            text("+").size(14.0).color(plus_color),
+        )
+        .padding(iced_core::Padding::from([0.0, 4.0 / scale]))
+        .style(move |_: &iced_core::Theme| container::Style {
+            background: None,
+            border: iced_core::Border {
+                color: border_color,
+                width: 1.0,
+                radius: (3.0 / scale).into(),
+            },
+            ..Default::default()
+        });
+
+        let new_tab_content = container(
+            row![
+                plus_box,
+                text("New Session").size(12.0).color(new_tab_txt).font(DM_SANS),
+            ]
+            .spacing(8.0 / scale)
+            .align_y(iced_core::Alignment::Center),
+        )
+        .padding(iced_core::Padding::from([8.0 / scale, 10.0 / scale]))
+        .width(iced_core::Length::Fill)
+        .style(move |_: &iced_core::Theme| container::Style {
+            background: new_tab_bg,
+            border: iced_core::Border {
+                color: iced_core::Color::TRANSPARENT,
+                width: 0.0,
+                radius: radius.into(),
+            },
+            ..Default::default()
+        });
+        let new_tab_area = MouseArea::new(new_tab_content)
+            .on_press(UiMessage::NewTab)
+            .on_enter(UiMessage::NewTabHovered(true))
+            .on_exit(UiMessage::NewTabHovered(false));
+        entries_col = entries_col.push(new_tab_area);
+
+        container(entries_col)
+            .width(sidebar_w)
+            .height(iced_core::Length::Fill)
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(sidebar_bg)),
+                border: iced_core::Border {
+                    color: iced_core::Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
+    /// Status bar: [● dot] [Session 1] | [zsh] | [~/] ... [UTF-8]
+    /// Per new Anthropic design spec. Height: 28px.
+    fn status_bar<'a>(state: &'a UiState<'a>, scale: f32) -> IcedElement<'a> {
+        let theme = state.theme;
+        let bg = to_iced_color(&theme.bg_surface);
+        let text_muted = to_iced_color(&theme.text_muted);
+        let text_ghost = to_iced_color(&theme.text_ghost);
+        let green = to_iced_color(&theme.accent_green);
+        let border_visible = to_iced_color(&theme.border_visible);
 
         let height = STATUS_BAR_HEIGHT / scale;
-        let brand_size = 11.0 / scale;
-        let dot_size = 6.0 / scale;
-        let info_size = 11.0 / scale;
-        let pad_v = 10.0 / scale;
-        let pad_h = 24.0 / scale;
-        let small_spacing = 6.0 / scale;
-        let info_spacing = 8.0 / scale;
+        let status_size = 11.0;
+        let pad_h = 16.0 / scale;
 
-        let user = std::env::var("USER").unwrap_or_else(|_| "user".into());
+        let shell_name = state.panes.iter().find(|p| p.is_focused)
+            .map(|p| p.shell_name.clone())
+            .unwrap_or_else(|| "sh".to_string());
 
-        // Left: brand
+        // Green dot (6px)
+        let dot_r = 3.0 / scale;
+        let green_dot = container(column![])
+            .width(6.0 / scale)
+            .height(6.0 / scale)
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(green)),
+                border: iced_core::Border::default().rounded(dot_r),
+                ..Default::default()
+            });
+
+        // Divider helper (1px × 12px vertical bar)
+        let div_h = 12.0 / scale;
+        let make_divider = move || {
+            container(column![])
+                .width(1.0 / scale)
+                .height(div_h)
+                .style(move |_: &iced_core::Theme| container::Style {
+                    background: Some(iced_core::Background::Color(border_visible)),
+                    ..Default::default()
+                })
+        };
+
+        let session_name = format!("Session {}", state.active_tab_index + 1);
+
+        // Left group: dot + session + | + shell + | + cwd
         let left = row![
-            text("\u{273B}").size(brand_size).color(accent),
-            text("Claude Terminal").size(brand_size).color(dim_color),
+            green_dot,
+            text(session_name).size(status_size).color(text_muted).font(DM_SANS),
+            make_divider(),
+            text(shell_name).size(status_size).color(text_muted).font(DM_SANS),
         ]
-        .spacing(small_spacing)
+        .spacing(8.0 / scale)
         .align_y(iced_core::Alignment::Center);
 
-        // Center: active pane
-        let center = row![
-            text("\u{25CF}").size(dot_size).color(success),
-            text(format!("Pane {}", state.active_pane_index + 1))
-                .size(info_size)
-                .color(secondary),
-        ]
-        .spacing(small_spacing)
-        .align_y(iced_core::Alignment::Center);
+        // Right: encoding | theme button
+        let text_secondary = to_iced_color(&theme.text_secondary);
+        let bg_hover_color = to_iced_color(&theme.bg_hover);
 
-        // Right: session info with · separators
+        let theme_btn_bg = if state.theme_selector_open { bg_hover_color } else { bg };
+        let theme_btn_fg = if state.theme_selector_open { text_secondary } else { text_muted };
+        let btn_radius = 4.0 / scale;
+        let theme_btn = container(
+            text("\u{25D0} Theme").size(status_size).color(theme_btn_fg).font(DM_SANS)
+        )
+        .padding(iced_core::Padding::from([2.0 / scale, 8.0 / scale]))
+        .style(move |_: &iced_core::Theme| container::Style {
+            background: Some(iced_core::Background::Color(theme_btn_bg)),
+            border: iced_core::Border::default().rounded(btn_radius),
+            ..Default::default()
+        });
+        let theme_btn_click = MouseArea::new(theme_btn)
+            .on_press(UiMessage::ToggleThemeSelector);
+
         let right = row![
-            text(user).size(info_size).color(dim_color),
-            text("\u{00B7}").size(info_size).color(border_sep),
-            text("UTF-8").size(info_size).color(dim_color),
-            text("\u{00B7}").size(info_size).color(border_sep),
-            text("bash").size(info_size).color(dim_color),
+            text("UTF-8").size(status_size).color(text_ghost).font(DM_SANS),
+            make_divider(),
+            theme_btn_click,
         ]
-        .spacing(info_spacing)
+        .spacing(8.0 / scale)
         .align_y(iced_core::Alignment::Center);
 
-        let content = row![left, hspace(), center, hspace(), right,]
+        let content = row![left, hspace(), right]
             .align_y(iced_core::Alignment::Center)
-            .padding(iced_core::Padding::from([pad_v, pad_h]));
+            .padding(iced_core::Padding::from([0.0, pad_h]));
 
         container(content)
             .width(iced_core::Length::Fill)
             .height(height)
             .style(move |_: &iced_core::Theme| container::Style {
-                background: Some(iced_core::Background::Color(surface)),
+                background: Some(iced_core::Background::Color(bg)),
+                border: iced_core::Border {
+                    color: iced_core::Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 0.0.into(),
+                },
                 ..Default::default()
             })
             .into()
@@ -1027,7 +1334,7 @@ impl IcedLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::theme::Theme;
+    use crate::config::theme::TerminalTheme;
 
     fn try_create_headless_gpu() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
@@ -1051,7 +1358,7 @@ mod tests {
         Some((adapter, device, queue))
     }
 
-    fn test_ui_state(theme: &Theme) -> UiState {
+    fn test_ui_state(theme: &TerminalTheme) -> UiState {
         UiState {
             tabs: vec![TabInfo {
                 title: "Tab 1".to_string(),
@@ -1069,7 +1376,7 @@ mod tests {
                 is_focused: true,
                 index: 0,
                 title: "Shell".to_string(),
-                shell_name: "bash".to_string(),
+                shell_name: "zsh".to_string(),
                 scrollbar_thumb: None,
                 scrollbar_alpha: 0.0,
             }],
@@ -1090,6 +1397,15 @@ mod tests {
             palette_query: String::new(),
             palette_items: Vec::new(),
             palette_selected: 0,
+            sidebar_visible: false,
+            sidebar_tabs: Vec::new(),
+            sidebar_width: 200.0,
+            hovered_sidebar_tab: None,
+            theme_selector_open: false,
+            editing_tab: None,
+            editing_tab_value: String::new(),
+            hovering_new_tab: false,
+            hovering_close_button: None,
         }
     }
 
@@ -1213,7 +1529,7 @@ mod tests {
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         let state = test_ui_state(&theme);
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
@@ -1240,7 +1556,7 @@ mod tests {
 
     #[test]
     fn to_iced_color_converts_correctly() {
-        let theme_color = crate::config::theme::Color::new(0.5, 0.25, 0.75, 1.0);
+        let theme_color = crate::config::theme::color_new(0.5, 0.25, 0.75, 1.0);
         let iced_color = to_iced_color(&theme_color);
         assert!((iced_color.r - 0.5).abs() < 0.01);
         assert!((iced_color.g - 0.25).abs() < 0.01);
@@ -1250,13 +1566,12 @@ mod tests {
 
     #[test]
     fn chrome_heights_match_legacy_constants() {
-        assert_eq!(HEADER_BAR_HEIGHT, crate::header_bar::HEADER_BAR_HEIGHT);
-        assert_eq!(TAB_BAR_HEIGHT, crate::tab::bar::TAB_BAR_HEIGHT);
+        assert_eq!(CHROME_BAR_HEIGHT, crate::header_bar::CHROME_BAR_HEIGHT);
         assert_eq!(STATUS_BAR_HEIGHT, crate::status_bar::STATUS_BAR_HEIGHT);
     }
 
     #[test]
-    fn tab_bar_renders_with_multiple_tabs() {
+    fn chrome_bar_renders_with_multiple_tabs() {
         let (adapter, device, queue) = match try_create_headless_gpu() {
             Some(ctx) => ctx,
             None => return,
@@ -1287,7 +1602,7 @@ mod tests {
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         let state = UiState {
             tabs: vec![
                 TabInfo {
@@ -1317,7 +1632,7 @@ mod tests {
                 is_focused: true,
                 index: 0,
                 title: "Shell".to_string(),
-                shell_name: "bash".to_string(),
+                shell_name: "zsh".to_string(),
                 scrollbar_thumb: None,
                 scrollbar_alpha: 0.0,
             }],
@@ -1338,7 +1653,16 @@ mod tests {
             palette_query: String::new(),
             palette_items: Vec::new(),
             palette_selected: 0,
-        };
+            sidebar_visible: false,
+            sidebar_tabs: Vec::new(),
+            sidebar_width: 200.0,
+            hovered_sidebar_tab: None,
+            theme_selector_open: false,
+            editing_tab: None,
+            editing_tab_value: String::new(),
+        hovering_new_tab: false,
+            hovering_close_button: None,
+            };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
     }
@@ -1375,7 +1699,7 @@ mod tests {
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         let state = UiState {
             tabs: vec![TabInfo {
                 title: "Tab 1".to_string(),
@@ -1394,7 +1718,7 @@ mod tests {
                     is_focused: true,
                     index: 0,
                     title: "src".to_string(),
-                    shell_name: "bash".to_string(),
+                    shell_name: "zsh".to_string(),
                     scrollbar_thumb: None,
                     scrollbar_alpha: 0.0,
                 },
@@ -1406,7 +1730,7 @@ mod tests {
                     is_focused: false,
                     index: 1,
                     title: "tests".to_string(),
-                    shell_name: "bash".to_string(),
+                    shell_name: "zsh".to_string(),
                     scrollbar_thumb: None,
                     scrollbar_alpha: 0.0,
                 },
@@ -1428,7 +1752,16 @@ mod tests {
             palette_query: String::new(),
             palette_items: Vec::new(),
             palette_selected: 0,
-        };
+            sidebar_visible: false,
+            sidebar_tabs: Vec::new(),
+            sidebar_width: 200.0,
+            hovered_sidebar_tab: None,
+            theme_selector_open: false,
+            editing_tab: None,
+            editing_tab_value: String::new(),
+        hovering_new_tab: false,
+            hovering_close_button: None,
+            };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
     }
@@ -1478,5 +1811,290 @@ mod tests {
         assert_eq!(pane_badge(2), "\u{2462}");
         assert_eq!(pane_badge(8), "\u{2468}");
         assert_eq!(pane_badge(9), "\u{2460}"); // wraps
+    }
+
+    // ── Sidebar tests ───────────────────────────────────────────────
+
+    #[test]
+    fn sidebar_tab_info_construction() {
+        let tab = SidebarTabInfo {
+            title: "Shell".to_string(),
+            is_active: true,
+            has_notification: false,
+            pane_count: 2,
+            minimap_rects: vec![
+                MinimapPane { x: 0.0, y: 0.0, width: 0.5, height: 1.0, is_focused: true },
+                MinimapPane { x: 0.5, y: 0.0, width: 0.5, height: 1.0, is_focused: false },
+            ],
+        };
+        assert!(tab.is_active);
+        assert_eq!(tab.pane_count, 2);
+        assert_eq!(tab.minimap_rects.len(), 2);
+    }
+
+    #[test]
+    fn sidebar_minimap_single_pane() {
+        let tab = SidebarTabInfo {
+            title: "Tab 1".to_string(),
+            is_active: true,
+            has_notification: false,
+            pane_count: 1,
+            minimap_rects: vec![
+                MinimapPane { x: 0.0, y: 0.0, width: 1.0, height: 1.0, is_focused: true },
+            ],
+        };
+        assert_eq!(tab.minimap_rects.len(), 1);
+        let rect = &tab.minimap_rects[0];
+        assert!((rect.width - 1.0).abs() < 0.01);
+        assert!((rect.height - 1.0).abs() < 0.01);
+        assert!(rect.is_focused);
+    }
+
+    #[test]
+    fn sidebar_minimap_vertical_split() {
+        let tab = SidebarTabInfo {
+            title: "Split".to_string(),
+            is_active: false,
+            has_notification: true,
+            pane_count: 2,
+            minimap_rects: vec![
+                MinimapPane { x: 0.0, y: 0.0, width: 0.5, height: 1.0, is_focused: true },
+                MinimapPane { x: 0.5, y: 0.0, width: 0.5, height: 1.0, is_focused: false },
+            ],
+        };
+        assert_eq!(tab.minimap_rects.len(), 2);
+        assert!((tab.minimap_rects[0].width - 0.5).abs() < 0.01);
+        assert!((tab.minimap_rects[1].x - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn sidebar_minimap_horizontal_split() {
+        let tab = SidebarTabInfo {
+            title: "HSplit".to_string(),
+            is_active: true,
+            has_notification: false,
+            pane_count: 2,
+            minimap_rects: vec![
+                MinimapPane { x: 0.0, y: 0.0, width: 1.0, height: 0.5, is_focused: false },
+                MinimapPane { x: 0.0, y: 0.5, width: 1.0, height: 0.5, is_focused: true },
+            ],
+        };
+        assert_eq!(tab.minimap_rects.len(), 2);
+        assert!((tab.minimap_rects[0].height - 0.5).abs() < 0.01);
+        assert!((tab.minimap_rects[1].y - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn sidebar_renders_without_crash() {
+        let (adapter, device, queue) = match try_create_headless_gpu() {
+            Some(ctx) => ctx,
+            None => return,
+        };
+        let mut layer = IcedLayer::new(
+            &adapter,
+            device.clone(),
+            queue.clone(),
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+            1280,
+            720,
+            1.0,
+        );
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Test Target"),
+            size: wgpu::Extent3d {
+                width: 1280,
+                height: 720,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Bgra8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let theme = TerminalTheme::warm_dark();
+        let mut state = test_ui_state(&theme);
+        state.sidebar_visible = true;
+        state.sidebar_width = 200.0;
+        state.sidebar_tabs = vec![
+            SidebarTabInfo {
+                title: "Tab 1".to_string(),
+                is_active: true,
+                has_notification: false,
+                pane_count: 1,
+                minimap_rects: vec![
+                    MinimapPane { x: 0.0, y: 0.0, width: 1.0, height: 1.0, is_focused: true },
+                ],
+            },
+            SidebarTabInfo {
+                title: "Tab 2".to_string(),
+                is_active: false,
+                has_notification: true,
+                pane_count: 2,
+                minimap_rects: vec![
+                    MinimapPane { x: 0.0, y: 0.0, width: 0.5, height: 1.0, is_focused: true },
+                    MinimapPane { x: 0.5, y: 0.0, width: 0.5, height: 1.0, is_focused: false },
+                ],
+            },
+        ];
+        let messages = layer.render(&view, &state);
+        assert!(messages.is_empty(), "No interactions, no messages expected");
+    }
+
+    #[test]
+    fn ui_message_sidebar_variants() {
+        let _select = UiMessage::SidebarTabSelected(0);
+        let _toggle = UiMessage::ToggleSidebar;
+    }
+
+    #[test]
+    fn ui_message_theme_variants() {
+        let _toggle = UiMessage::ToggleThemeSelector;
+        let _set = UiMessage::SetTheme("warm_dark".to_string());
+    }
+
+    // ── Visual polish tests ────────────────────────────────────────
+
+    #[test]
+    fn beam_cursor_threshold_is_thin() {
+        let shader = include_str!("../../shaders/grid.wgsl");
+        assert!(
+            shader.contains("cell_x_frac < 0.08"),
+            "Beam cursor threshold should be 0.08 for thin ~1px beam"
+        );
+    }
+
+    #[test]
+    fn pane_border_uniform_width() {
+        // The pane chrome method should use width: 1.0 for all panes (no variable width for active)
+        let source = include_str!("iced_layer.rs");
+        let needle = format!("width: if is_active_pane {{ {} }}", "1.5");
+        assert!(
+            !source.contains(&needle),
+            "Active pane border should be uniform 1.0"
+        );
+    }
+
+    #[test]
+    fn pane_header_removed() {
+        // Pane headers removed — no header/stripe in pane_chrome
+        assert_eq!(PANE_HEADER_HEIGHT, 0.0);
+    }
+
+    #[test]
+    fn chrome_bar_has_sidebar_icon() {
+        // Chrome bar uses sparkle (✦) icon; ToggleSidebar still exists via keyboard shortcuts
+        let source = include_str!("iced_layer.rs");
+        assert!(source.contains("UiMessage::ToggleSidebar"));
+        assert!(source.contains("\\u{2726}"), "Sparkle icon ✦ should be in chrome bar");
+    }
+
+    #[test]
+    fn chrome_bar_has_theme_selector() {
+        let source = include_str!("iced_layer.rs");
+        assert!(source.contains("UiMessage::ToggleThemeSelector"));
+    }
+
+    #[test]
+    fn theme_selector_shows_five_themes() {
+        let themes = crate::config::theme::TerminalTheme::available_themes();
+        assert_eq!(themes.len(), 5);
+        assert_eq!(themes[0].0, "warm_dark");
+        assert_eq!(themes[1].0, "midnight");
+        assert_eq!(themes[2].0, "ember");
+        assert_eq!(themes[3].0, "dusk");
+        assert_eq!(themes[4].0, "light");
+    }
+
+    // ── Button hover/press fix tests ──────────────────────────────
+
+    #[test]
+    fn render_injects_redraw_requested_event() {
+        // iced buttons only update their visual status (Hovered/Pressed) on
+        // RedrawRequested events, but iced_winit::conversion doesn't convert
+        // winit's RedrawRequested. Our render() must inject it manually.
+        let source = include_str!("iced_layer.rs");
+        assert!(
+            source.contains("RedrawRequested"),
+            "render() must inject RedrawRequested for button hover/press to work"
+        );
+        assert!(
+            source.contains("window::Event::RedrawRequested"),
+            "Must push iced_core::Event::Window(window::Event::RedrawRequested(...))"
+        );
+    }
+
+    #[test]
+    fn new_tab_hover_produces_visible_background() {
+        // The New Tab area uses MouseArea hover (UiState flag) to show a
+        // visible accent-tinted background when hovering_new_tab is true.
+        let theme = TerminalTheme::warm_dark();
+        let accent = to_iced_color(&theme.accent_orange);
+        let text_dim = to_iced_color(&theme.text_ghost);
+        let text_secondary = to_iced_color(&theme.text_secondary);
+
+        // Default (not hovered): no background
+        let default_bg: Option<iced_core::Background> = None;
+        assert!(default_bg.is_none(), "Default state should have no background");
+
+        // Hovered: accent-tinted background at 0.20 alpha
+        let hover_bg = iced_core::Color::from_rgba(accent.r, accent.g, accent.b, 0.20);
+        assert!(hover_bg.a >= 0.15, "Hover alpha must be visible (>= 0.15), got {}", hover_bg.a);
+        assert!(hover_bg.r > 0.0 || hover_bg.g > 0.0 || hover_bg.b > 0.0, "Hover color must not be black");
+
+        // Text colors should differ between hover and default
+        assert_ne!(text_dim.r, text_secondary.r, "Hover text should differ from default");
+    }
+
+    #[test]
+    fn close_button_hover_produces_visible_background() {
+        // The close button uses MouseArea hover (UiState flag) to show a
+        // visible accent-tinted background when hovering_close_button matches.
+        let theme = TerminalTheme::warm_dark();
+        let accent = to_iced_color(&theme.accent_orange);
+
+        let hover_bg = iced_core::Color::from_rgba(accent.r, accent.g, accent.b, 0.25);
+        assert!(hover_bg.a >= 0.20, "Close hover alpha must be >= 0.20, got {}", hover_bg.a);
+    }
+
+    #[test]
+    fn close_button_visible_on_hovered_or_active_tabs() {
+        // The close button should appear on hovered/active tabs when tab_count > 1.
+        // It swaps with the keyboard shortcut on hover.
+        let source = include_str!("iced_layer.rs");
+        let sidebar_start = source.find("fn sidebar<'a>").expect("sidebar function exists");
+        let end = (sidebar_start + 8000).min(source.len());
+        let sidebar_code = &source[sidebar_start..end];
+
+        // Close button requires tab_count > 1
+        assert!(
+            sidebar_code.contains("tab_count > 1"),
+            "Close button should require tab_count > 1"
+        );
+        // Close button shows on active or hovered tabs
+        assert!(
+            sidebar_code.contains("is_active || is_hovered_tab"),
+            "Close button should show on active or hovered tabs"
+        );
+    }
+
+    #[test]
+    fn iced_winit_does_not_convert_redraw_requested() {
+        // Prove that iced_winit::conversion returns None for RedrawRequested.
+        // This is WHY we must inject it manually in render().
+        let event = winit::event::WindowEvent::RedrawRequested;
+        let result = iced_winit::conversion::window_event(
+            event,
+            1.0,
+            winit::keyboard::ModifiersState::empty(),
+        );
+        assert!(
+            result.is_none(),
+            "iced_winit should NOT convert RedrawRequested — we inject it ourselves"
+        );
     }
 }

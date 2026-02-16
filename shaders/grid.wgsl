@@ -7,7 +7,7 @@ struct Uniforms {
     cell_size: vec2<f32>,    // width, height in NDC
     grid_size: vec2<f32>,    // columns, rows
     atlas_size: vec2<f32>,   // atlas texture dimensions in pixels
-    _padding: vec2<f32>,
+    flags: vec2<f32>,        // x: 1.0 = RGBA atlas (per-channel subpixel), 0.0 = R8 (grayscale alpha)
 };
 
 @group(0) @binding(0)
@@ -67,8 +67,15 @@ fn vs_main(
     let x = -1.0 + (cell.position.x + corner.x) * uniforms.cell_size.x;
     let y = 1.0 - (cell.position.y + corner.y) * uniforms.cell_size.y;
 
-    // Calculate UV coordinates within the glyph atlas
-    let uv = cell.atlas_uv.xy + corner * cell.atlas_uv.zw;
+    // Calculate UV coordinates within the glyph atlas.
+    // Flip V within the glyph slot: the atlas stores glyphs top-down in data,
+    // but the GPU texture has V increasing downward from the top. On Metal,
+    // the viewport Y-flip means corner.y=0 (screen top) needs to sample the
+    // bottom of the glyph slot to produce correctly oriented text.
+    let uv = vec2<f32>(
+        cell.atlas_uv.x + corner.x * cell.atlas_uv.z,
+        cell.atlas_uv.y + (1.0 - corner.y) * cell.atlas_uv.w
+    );
 
     var out: VertexOutput;
     out.position = vec4<f32>(x, y, 0.0, 1.0);
@@ -110,8 +117,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             // Block cursor: fill entire cell
             return vec4<f32>(cursor_color, 1.0);
         } else if shape == 1u {
-            // Beam cursor: thin vertical line on left (~10% of cell width)
-            if in.cell_x_frac < 0.12 {
+            // Beam cursor: ~1px vertical line on left edge
+            if in.cell_x_frac < 0.08 {
                 return vec4<f32>(cursor_color, 1.0);
             }
             discard;
@@ -133,12 +140,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     // Convert sRGB input colors to linear for correct output on sRGB surface
-    // Selection: swap fg and bg colors
     var fg = srgb3_to_linear(in.fg_color.rgb);
     var bg = srgb3_to_linear(in.bg_color.rgb);
+    // Selection: translucent accent overlay instead of harsh inverse video
     if in.is_selected > 0.5 {
-        fg = srgb3_to_linear(in.bg_color.rgb);
-        bg = srgb3_to_linear(in.fg_color.rgb);
+        let selection_color = srgb3_to_linear(vec3<f32>(0.851, 0.467, 0.341));
+        bg = mix(bg, selection_color, 0.15);
     }
 
     var color: vec3<f32>;
@@ -147,10 +154,18 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         // No glyph — start with background color
         color = bg;
     } else {
-        // Sample glyph alpha from atlas
-        let glyph_alpha = textureSample(atlas_texture, atlas_sampler, in.uv).r;
-        // Blend in linear space: background behind, foreground glyph on top
-        color = mix(bg, fg, glyph_alpha);
+        let sample = textureSampleLevel(atlas_texture, atlas_sampler, in.uv, 0.0);
+        if uniforms.flags.x > 0.5 {
+            // RGBA atlas (CoreText subpixel AA): per-channel blending
+            color = vec3<f32>(
+                mix(bg.r, fg.r, sample.r),
+                mix(bg.g, fg.g, sample.g),
+                mix(bg.b, fg.b, sample.b),
+            );
+        } else {
+            // R8 atlas (swash grayscale): single alpha blend
+            color = mix(bg, fg, sample.r);
+        }
     }
 
     // Underline: draw a line at the bottom ~7% of the cell (roughly 1-2px at typical sizes)

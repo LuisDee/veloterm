@@ -1,11 +1,13 @@
 pub mod cursor;
+#[cfg(target_os = "macos")]
+pub mod coretext_rasterizer;
 pub mod damage;
 pub mod glyph_atlas;
 pub mod gpu;
 pub mod grid_renderer;
 pub mod iced_layer;
 
-use crate::config::theme::Theme;
+use crate::config::theme::TerminalTheme;
 use crate::pane::{PaneId, Rect as PaneRect};
 use damage::{DamageState, PaneDamageMap};
 use glyph_atlas::GlyphAtlas;
@@ -49,7 +51,7 @@ pub struct Renderer {
     instance_count: u32,
     grid: GridDimensions,
     atlas: GlyphAtlas,
-    theme: Theme,
+    theme: TerminalTheme,
     damage_state: DamageState,
     pane_damage: PaneDamageMap,
     _bind_group_layout: wgpu::BindGroupLayout,
@@ -59,6 +61,8 @@ pub struct Renderer {
     padding: [f32; 4],
     /// DPI scale factor used for atlas creation.
     scale_factor: f32,
+    /// Minimum uniform buffer offset alignment (from device limits).
+    uniform_align: u64,
     /// iced UI layer for widget rendering (composited on top of custom pipeline).
     iced: iced_layer::IcedLayer,
 }
@@ -68,7 +72,7 @@ impl Renderer {
     /// Creates GPU context, glyph atlas, grid, and all render resources.
     pub async fn new(
         window: Arc<Window>,
-        theme: Theme,
+        theme: TerminalTheme,
         font_size: f32,
         font_family: &str,
         line_height_multiplier: f32,
@@ -162,6 +166,7 @@ impl Renderer {
             atlas.atlas_width,
             atlas.atlas_height,
             &atlas.atlas_data,
+            atlas.bytes_per_pixel,
         );
         let atlas_view = atlas_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = create_atlas_sampler(&device);
@@ -176,16 +181,22 @@ impl Renderer {
         let instances = generate_instances(&grid, &cells, &atlas);
         let instance_count = instances.len() as u32;
 
-        // Uniforms
+        // Uniforms — allocate space for multiple panes using dynamic offsets
+        let uniform_align = device.limits().min_uniform_buffer_offset_alignment as u64;
+        let max_panes: u64 = 16;
+        let uniform_buffer_size = max_panes * uniform_align.max(std::mem::size_of::<GridUniforms>() as u64);
+        let atlas_rgba = if atlas.bytes_per_pixel == 4 { 1.0 } else { 0.0 };
         let uniforms = GridUniforms {
             cell_size: grid.cell_size_ndc(),
             grid_size: grid.grid_size(),
             atlas_size: [atlas.atlas_width as f32, atlas.atlas_height as f32],
-            _padding: [0.0; 2],
+            flags: [atlas_rgba, 0.0],
         };
+        let mut uniform_data = vec![0u8; uniform_buffer_size as usize];
+        uniform_data[..std::mem::size_of::<GridUniforms>()].copy_from_slice(bytemuck::bytes_of(&uniforms));
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Grid Uniforms"),
-            contents: bytemuck::bytes_of(&uniforms),
+            contents: &uniform_data,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -243,6 +254,7 @@ impl Renderer {
             _sampler: sampler,
             padding: [0.0; 4],
             scale_factor,
+            uniform_align,
             iced,
         })
     }
@@ -255,6 +267,11 @@ impl Renderer {
     /// Get the current padding [top, bottom, left, right] in physical pixels.
     pub fn padding(&self) -> [f32; 4] {
         self.padding
+    }
+
+    /// Get the detected DPI scale factor (may differ from winit on macOS Retina).
+    pub fn scale_factor(&self) -> f32 {
+        self.scale_factor
     }
 
     /// Rebuild the glyph atlas with new font parameters and update all dependent GPU resources.
@@ -276,6 +293,7 @@ impl Renderer {
             atlas.atlas_width,
             atlas.atlas_height,
             &atlas.atlas_data,
+            atlas.bytes_per_pixel,
         );
         let atlas_view = atlas_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = create_atlas_sampler(&self.device);
@@ -298,11 +316,12 @@ impl Renderer {
         );
 
         // Update uniform buffer
+        let atlas_rgba = if atlas.bytes_per_pixel == 4 { 1.0 } else { 0.0 };
         let uniforms = GridUniforms {
             cell_size: grid.cell_size_ndc(),
             grid_size: grid.grid_size(),
             atlas_size: [atlas.atlas_width as f32, atlas.atlas_height as f32],
-            _padding: [0.0; 2],
+            flags: [atlas_rgba, 0.0],
         };
         self.queue
             .write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
@@ -335,7 +354,7 @@ impl Renderer {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(clear_color()),
+                        load: wgpu::LoadOp::Clear(clear_color(&self.theme)),
                         store: wgpu::StoreOp::Store,
                     },
                     depth_slice: None,
@@ -346,7 +365,7 @@ impl Renderer {
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.bind_group, &[]);
+            render_pass.set_bind_group(0, &self.bind_group, &[0]);
             render_pass.set_vertex_buffer(0, self.instance_buffer.slice(..));
             render_pass.draw(0..6, 0..self.instance_count);
         }
@@ -390,6 +409,7 @@ impl Renderer {
         self.instance_count = instances.len() as u32;
 
         // Update uniforms
+        let atlas_rgba = if self.atlas.bytes_per_pixel == 4 { 1.0 } else { 0.0 };
         let uniforms = GridUniforms {
             cell_size: self.grid.cell_size_ndc(),
             grid_size: self.grid.grid_size(),
@@ -397,7 +417,7 @@ impl Renderer {
                 self.atlas.atlas_width as f32,
                 self.atlas.atlas_height as f32,
             ],
-            _padding: [0.0; 2],
+            flags: [atlas_rgba, 0.0],
         };
         self.queue
             .write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
@@ -475,8 +495,13 @@ impl Renderer {
     }
 
     /// Get a reference to the active theme.
-    pub fn theme(&self) -> &Theme {
+    pub fn theme(&self) -> &TerminalTheme {
         &self.theme
+    }
+
+    /// Replace the active theme.
+    pub fn set_theme(&mut self, theme: TerminalTheme) {
+        self.theme = theme;
     }
 
     /// Get a mutable reference to the per-pane damage map.
@@ -487,6 +512,16 @@ impl Renderer {
     /// Remove a pane's damage state when the pane is closed.
     pub fn remove_pane_damage(&mut self, pane_id: PaneId) {
         self.pane_damage.remove(pane_id);
+    }
+
+    /// Update the DPI scale factor (e.g. when window moves between displays).
+    pub fn update_scale_factor(&mut self, scale: f32) {
+        if (self.scale_factor - scale).abs() < 0.01 {
+            return;
+        }
+        log::info!("Scale factor updated: {:.2} → {:.2}", self.scale_factor, scale);
+        self.scale_factor = scale;
+        self.iced.update_scale(scale);
     }
 
     /// Get a mutable reference to the iced UI layer for event routing.
@@ -513,6 +548,9 @@ impl Renderer {
         let mut draw_data: Vec<PaneDrawData> = Vec::with_capacity(panes.len());
 
         let [pad_top, pad_bottom, pad_left, pad_right] = self.padding;
+        let _multi_pane = panes.len() > 1;
+        let cw = self.cell_width();
+        let ch = self.cell_height();
 
         for pane in panes.iter_mut() {
             // Compute content area: pane rect inset by padding
@@ -524,10 +562,24 @@ impl Renderer {
             };
             let pane_grid = GridDimensions::from_pane_rect(
                 &content_rect,
-                self.cell_width(),
-                self.cell_height(),
+                cw,
+                ch,
             );
             let cols = pane_grid.columns as usize;
+
+            // Diagnostic: log pane dimensions and cell count mismatches
+            let expected = pane_grid.columns as usize * pane_grid.rows as usize;
+            if pane.cells.len() != expected {
+                log::warn!(
+                    "CELL MISMATCH {:?}: cells={} expected={} (grid={}x{}, \
+                     content=({:.1},{:.1}), cell=({:.2},{:.2}), scale={:.2})",
+                    pane.pane_id,
+                    pane.cells.len(), expected,
+                    pane_grid.columns, pane_grid.rows,
+                    content_rect.width, content_rect.height,
+                    cw, ch, self.scale_factor,
+                );
+            }
 
             // Get or create damage state for this pane
             let damage_state = self.pane_damage.get_or_create(pane.pane_id, cols);
@@ -584,7 +636,7 @@ impl Renderer {
                         view: &view,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(clear_color()),
+                            load: wgpu::LoadOp::Clear(clear_color(&self.theme)),
                             store: wgpu::StoreOp::Store,
                         },
                         depth_slice: None,
@@ -641,6 +693,27 @@ impl Renderer {
             self.instance_count = all_instances.len() as u32;
         }
 
+        // Upload all pane uniforms to the dynamic uniform buffer BEFORE encoding
+        // the render pass. Each pane's uniforms go at a different aligned offset.
+        // This prevents the old bug where queue.write_buffer inside the render pass
+        // loop would overwrite earlier panes' data (GPU only saw the last write).
+        let align = self.uniform_align;
+        let atlas_rgba = if self.atlas.bytes_per_pixel == 4 { 1.0 } else { 0.0 };
+        for (i, (_rect, grid, _start, _count)) in pane_ranges.iter().enumerate() {
+            let uniforms = GridUniforms {
+                cell_size: grid.cell_size_ndc(),
+                grid_size: grid.grid_size(),
+                atlas_size: [
+                    self.atlas.atlas_width as f32,
+                    self.atlas.atlas_height as f32,
+                ],
+                flags: [atlas_rgba, 0.0],
+            };
+            let offset = i as u64 * align;
+            self.queue
+                .write_buffer(&self.uniform_buffer, offset, bytemuck::bytes_of(&uniforms));
+        }
+
         // Begin render pass (output already acquired above)
         let view = output
             .texture
@@ -659,7 +732,7 @@ impl Renderer {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(clear_color()),
+                        load: wgpu::LoadOp::Clear(clear_color(&self.theme)),
                         store: wgpu::StoreOp::Store,
                     },
                     depth_slice: None,
@@ -672,39 +745,39 @@ impl Renderer {
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_vertex_buffer(0, self.instance_buffer.slice(..));
 
-            for (rect, grid, start, count) in &pane_ranges {
+            for (i, (rect, grid, start, count)) in pane_ranges.iter().enumerate() {
                 if *count == 0 {
                     continue;
                 }
 
-                // Update uniforms for this pane's grid dimensions
-                let uniforms = GridUniforms {
-                    cell_size: grid.cell_size_ndc(),
-                    grid_size: grid.grid_size(),
-                    atlas_size: [
-                        self.atlas.atlas_width as f32,
-                        self.atlas.atlas_height as f32,
-                    ],
-                    _padding: [0.0; 2],
-                };
-                self.queue
-                    .write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
-
-                render_pass.set_bind_group(0, &self.bind_group, &[]);
+                // Use dynamic offset to select this pane's uniforms
+                let dynamic_offset = (i as u64 * align) as u32;
+                render_pass.set_bind_group(0, &self.bind_group, &[dynamic_offset]);
 
                 // Set viewport and scissor to the content area (inset by padding).
                 // The viewport maps NDC (-1..1) to the content rect, so cell (0,0)
                 // renders at the content origin, not the surface origin.
+                //
+                // CRITICAL: The viewport dimensions must match the grid's exact pixel
+                // dimensions (columns * cell_width, rows * cell_height), NOT the raw
+                // content_rect width/height. Otherwise NDC-to-pixel mapping is wrong
+                // and text appears stretched (especially visible in split panes where
+                // content_rect.width is fractional).
                 let cx = rect.x + pad_left;
                 let cy = rect.y + pad_top;
                 let content_w = (rect.width - pad_left - pad_right).max(1.0);
                 let content_h = (rect.height - pad_top - pad_bottom).max(1.0);
+                // Use exact grid pixel dimensions for viewport to prevent stretching
+                let grid_pixel_w = grid.columns as f32 * grid.cell_width;
+                let grid_pixel_h = grid.rows as f32 * grid.cell_height;
+                let vp_w = grid_pixel_w.min(content_w).max(1.0);
+                let vp_h = grid_pixel_h.min(content_h).max(1.0);
                 let sx = cx.max(0.0) as u32;
                 let sy = cy.max(0.0) as u32;
-                let sw = (content_w as u32).min(self.surface_config.width.saturating_sub(sx));
-                let sh = (content_h as u32).min(self.surface_config.height.saturating_sub(sy));
+                let sw = (vp_w as u32).min(self.surface_config.width.saturating_sub(sx));
+                let sh = (vp_h as u32).min(self.surface_config.height.saturating_sub(sy));
                 if sw > 0 && sh > 0 {
-                    render_pass.set_viewport(cx, cy, content_w, content_h, 0.0, 1.0);
+                    render_pass.set_viewport(cx, cy, vp_w, vp_h, 0.0, 1.0);
                     render_pass.set_scissor_rect(sx, sy, sw, sh);
                     render_pass.draw(0..6, *start..*start + *count);
                 }
@@ -848,7 +921,7 @@ mod tests {
         // Test that all component pieces work together without a window
         let atlas = GlyphAtlas::new(13.0, 2.0, "JetBrains Mono", 1.5);
         let grid = GridDimensions::new(1280, 720, atlas.cell_width, atlas.cell_height);
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         let cells = generate_test_pattern(&grid, &theme);
         let instances = generate_instances(&grid, &cells, &atlas);
 
@@ -866,7 +939,7 @@ mod tests {
             cell_size: grid.cell_size_ndc(),
             grid_size: grid.grid_size(),
             atlas_size: [atlas.atlas_width as f32, atlas.atlas_height as f32],
-            _padding: [0.0; 2],
+            flags: [0.0, 0.0],
         };
 
         assert_eq!(uniforms.grid_size[0], grid.columns as f32);
@@ -890,7 +963,7 @@ mod tests {
     fn renderer_instances_have_correct_count_after_resize() {
         let atlas = GlyphAtlas::new(13.0, 2.0, "JetBrains Mono", 1.5);
         let mut grid = GridDimensions::new(1280, 720, atlas.cell_width, atlas.cell_height);
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
 
         grid.resize(800, 600);
         let cells = generate_test_pattern(&grid, &theme);
@@ -914,12 +987,13 @@ mod tests {
             atlas.atlas_width,
             atlas.atlas_height,
             &atlas.atlas_data,
+            atlas.bytes_per_pixel,
         );
         let atlas_view = atlas_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = create_atlas_sampler(&ctx.device);
 
         let grid = GridDimensions::new(640, 480, atlas.cell_width, atlas.cell_height);
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         let cells = generate_test_pattern(&grid, &theme);
         let instances = generate_instances(&grid, &cells, &atlas);
 
@@ -927,7 +1001,7 @@ mod tests {
             cell_size: grid.cell_size_ndc(),
             grid_size: grid.grid_size(),
             atlas_size: [atlas.atlas_width as f32, atlas.atlas_height as f32],
-            _padding: [0.0; 2],
+            flags: [0.0, 0.0],
         };
         let uniform_buffer = ctx
             .device
@@ -997,8 +1071,8 @@ mod tests {
         let atlas = GlyphAtlas::new(13.0, 2.0, "JetBrains Mono", 1.5);
         let grid = GridDimensions::new(1280, 720, atlas.cell_width, atlas.cell_height);
 
-        for name in &["claude_dark", "claude_light", "claude_warm"] {
-            let theme = Theme::from_name(name).unwrap();
+        for name in &["warm_dark", "midnight", "ember", "dusk", "light", "claude_dark", "claude_light", "claude_warm"] {
+            let theme = TerminalTheme::from_name(name).unwrap();
             let cells = generate_test_pattern(&grid, &theme);
             let instances = generate_instances(&grid, &cells, &atlas);
             assert_eq!(instances.len(), grid.total_cells() as usize);
@@ -1010,8 +1084,8 @@ mod tests {
         let atlas = GlyphAtlas::new(13.0, 1.0, "JetBrains Mono", 1.5);
         let grid = GridDimensions::new(640, 480, atlas.cell_width, atlas.cell_height);
 
-        let dark = Theme::from_name("claude_dark").unwrap();
-        let light = Theme::from_name("claude_light").unwrap();
+        let dark = TerminalTheme::from_name("warm_dark").unwrap();
+        let light = TerminalTheme::from_name("light").unwrap();
 
         let dark_cells = generate_test_pattern(&grid, &dark);
         let light_cells = generate_test_pattern(&grid, &light);
@@ -1027,12 +1101,12 @@ mod tests {
     }
 
     #[test]
-    fn config_unknown_theme_falls_back_to_claude_dark() {
-        let fallback = Theme::from_name("nonexistent");
+    fn config_unknown_theme_falls_back_to_warm_dark() {
+        let fallback = TerminalTheme::from_name("nonexistent");
         assert!(fallback.is_none());
-        // Application code does: .unwrap_or_else(|| Theme::claude_dark())
-        let theme = fallback.unwrap_or_else(Theme::claude_dark);
-        assert_eq!(theme.name, "Claude Dark");
+        // Application code does: .unwrap_or_else(|| TerminalTheme::warm_dark())
+        let theme = fallback.unwrap_or_else(TerminalTheme::warm_dark);
+        assert_eq!(theme.name, "Warm Dark");
     }
 
     // ── Scissor rect / multi-pane tests ──────────────────────────────
@@ -1090,23 +1164,23 @@ mod tests {
 
     #[test]
     fn text_overlay_instances_generated_from_cells() {
-        use crate::config::theme::Color;
+        use crate::config::theme::color_new;
 
         let atlas = GlyphAtlas::new(13.0, 1.0, "JetBrains Mono", 1.5);
         let rect = PaneRect::new(100.0, 5.0, 200.0, atlas.cell_height);
         let grid = GridDimensions::from_pane_rect(&rect, atlas.cell_width, atlas.cell_height);
 
         let mut cells =
-            vec![GridCell::empty(Color::new(0.2, 0.2, 0.2, 1.0)); grid.total_cells() as usize];
+            vec![GridCell::empty(color_new(0.2, 0.2, 0.2, 1.0)); grid.total_cells() as usize];
         cells[0] = GridCell::new(
             'H',
-            Color::new(1.0, 1.0, 1.0, 1.0),
-            Color::new(0.2, 0.2, 0.2, 1.0),
+            color_new(1.0, 1.0, 1.0, 1.0),
+            color_new(0.2, 0.2, 0.2, 1.0),
         );
         cells[1] = GridCell::new(
             'i',
-            Color::new(1.0, 1.0, 1.0, 1.0),
-            Color::new(0.2, 0.2, 0.2, 1.0),
+            color_new(1.0, 1.0, 1.0, 1.0),
+            color_new(0.2, 0.2, 0.2, 1.0),
         );
 
         let instances = generate_instances(&grid, &cells, &atlas);

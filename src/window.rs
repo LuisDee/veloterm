@@ -10,10 +10,10 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{CursorIcon, Window, WindowAttributes, WindowId};
 
 use crate::command_palette::{self, PaletteAction, PaletteState};
-use crate::config::theme::Theme;
+use crate::config::theme::TerminalTheme;
 use crate::config::types::{Config, ConfigDelta};
 use crate::config::watcher::UserEvent;
-use crate::header_bar::HEADER_BAR_HEIGHT;
+use crate::header_bar::CHROME_BAR_HEIGHT;
 use crate::input::{
     match_app_command, match_pane_command, match_tab_command, match_search_command,
     should_open_search, AppCommand, InputMode, PaneCommand, SearchCommand, TabCommand,
@@ -24,10 +24,9 @@ use crate::search::SearchState;
 use crate::pane::header::PANE_HEADER_HEIGHT;
 use crate::pane::interaction::{CursorType, InteractionEffect, PaneInteraction};
 use crate::pane::{PaneId, Rect, SplitDirection};
-use crate::renderer::iced_layer::{DividerDisplay, PaneInfo, TabInfo, UiMessage, UiState};
+use crate::renderer::iced_layer::{DividerDisplay, MinimapPane, PaneInfo, SidebarTabInfo, TabInfo, UiMessage, UiState};
 use crate::renderer::PaneRenderDescriptor;
 use crate::status_bar::STATUS_BAR_HEIGHT;
-use crate::tab::bar::TAB_BAR_HEIGHT;
 use crate::tab::TabManager;
 
 /// Default window width in logical pixels.
@@ -35,7 +34,7 @@ pub const DEFAULT_WIDTH: f64 = 1280.0;
 /// Default window height in logical pixels.
 pub const DEFAULT_HEIGHT: f64 = 720.0;
 /// Default window title.
-pub const DEFAULT_TITLE: &str = "Claude Terminal \u{2014} Anthropic";
+pub const DEFAULT_TITLE: &str = "VeloTerm";
 
 /// Configuration for the VeloTerm window.
 #[derive(Debug, Clone)]
@@ -48,9 +47,14 @@ pub struct WindowConfig {
 
 impl Default for WindowConfig {
     fn default() -> Self {
+        let (width, height) = if std::env::var("VELOTERM_DEBUG_WINDOW").is_ok() {
+            (2560.0, 1440.0)
+        } else {
+            (DEFAULT_WIDTH, DEFAULT_HEIGHT)
+        };
         Self {
-            width: DEFAULT_WIDTH,
-            height: DEFAULT_HEIGHT,
+            width,
+            height,
             title: DEFAULT_TITLE.to_string(),
             resizable: true,
         }
@@ -94,6 +98,8 @@ pub struct PaneState {
     pub mouse_selection: crate::input::mouse::MouseSelectionState,
     /// Per-pane scroll state for smooth animation and auto-hide.
     pub scroll_state: crate::scroll::ScrollState,
+    /// Shell name (e.g. "zsh", "bash") for display in pane header/status.
+    pub shell_name: String,
 }
 
 /// Main application state implementing the winit event loop handler.
@@ -128,11 +134,26 @@ pub struct App {
     quick_terminal_hidden: bool,
     /// Command palette state (Some when palette is open).
     palette_state: Option<PaletteState>,
+    /// Whether the tab sidebar is visible.
+    sidebar_visible: bool,
+    /// Which sidebar tab is currently hovered (for close button reveal).
+    hovered_sidebar_tab: Option<usize>,
+    /// Whether the theme selector popup is open.
+    theme_selector_open: bool,
+    /// Tab being renamed inline (index into sidebar tabs).
+    editing_sidebar_tab: Option<usize>,
+    /// Current text value in the rename field.
+    editing_tab_value: String,
+    /// Whether the "New Tab" button is hovered.
+    hovering_new_tab: bool,
+    /// Which tab's close button is hovered.
+    hovering_close_button: Option<usize>,
 }
 
 impl App {
     pub fn new(config: WindowConfig, app_config: Config) -> Self {
         let font_size = app_config.font.size as f32;
+        let sidebar_default = app_config.sidebar.default_visible;
         Self {
             config,
             app_config,
@@ -159,6 +180,13 @@ impl App {
             bell_flash_until: None,
             quick_terminal_hidden: false,
             palette_state: None,
+            sidebar_visible: sidebar_default,
+            hovered_sidebar_tab: None,
+            theme_selector_open: false,
+            editing_sidebar_tab: None,
+            editing_tab_value: String::new(),
+            hovering_new_tab: false,
+            hovering_close_button: None,
         }
     }
 
@@ -192,18 +220,9 @@ impl App {
                     rows as usize,
                     scrollback,
                 );
-                let mut cursor = crate::renderer::cursor::CursorState::with_blink_rate(
-                    self.app_config.cursor.blink_rate,
-                );
-                if let Some(style) = crate::renderer::cursor::CursorStyle::from_config_str(
-                    &self.app_config.cursor.style,
-                ) {
-                    cursor.set_style(style);
-                }
-                if !self.app_config.cursor.blink {
-                    cursor.set_blink_rate(0);
-                }
-                self.pane_states.insert(pane_id, PaneState { terminal, pty, vi_state: None, cursor, mouse_selection: crate::input::mouse::MouseSelectionState::new(), scroll_state: crate::scroll::ScrollState::new() });
+                let cursor = crate::renderer::cursor::CursorState::new();
+                let shell_name = crate::pty::basename_from_path(&shell).to_string();
+                self.pane_states.insert(pane_id, PaneState { terminal, pty, vi_state: None, cursor, mouse_selection: crate::input::mouse::MouseSelectionState::new(), scroll_state: crate::scroll::ScrollState::new(), shell_name });
             }
             Err(e) => {
                 log::error!("Failed to spawn PTY for pane {:?}: {e}", pane_id);
@@ -227,18 +246,9 @@ impl App {
                     rows as usize,
                     scrollback,
                 );
-                let mut cursor = crate::renderer::cursor::CursorState::with_blink_rate(
-                    self.app_config.cursor.blink_rate,
-                );
-                if let Some(style) = crate::renderer::cursor::CursorStyle::from_config_str(
-                    &self.app_config.cursor.style,
-                ) {
-                    cursor.set_style(style);
-                }
-                if !self.app_config.cursor.blink {
-                    cursor.set_blink_rate(0);
-                }
-                self.pane_states.insert(pane_id, PaneState { terminal, pty, vi_state: None, cursor, mouse_selection: crate::input::mouse::MouseSelectionState::new(), scroll_state: crate::scroll::ScrollState::new() });
+                let cursor = crate::renderer::cursor::CursorState::new();
+                let shell_name = crate::pty::basename_from_path(&shell).to_string();
+                self.pane_states.insert(pane_id, PaneState { terminal, pty, vi_state: None, cursor, mouse_selection: crate::input::mouse::MouseSelectionState::new(), scroll_state: crate::scroll::ScrollState::new(), shell_name });
             }
             Err(e) => {
                 log::error!("Failed to spawn PTY for pane {:?}: {e}", pane_id);
@@ -246,9 +256,10 @@ impl App {
         }
     }
 
-    /// Total chrome height above the content area (header bar + tab bar).
-    fn chrome_top_height() -> f32 {
-        HEADER_BAR_HEIGHT + TAB_BAR_HEIGHT
+    /// Total chrome height above the content area (chrome bar + divider).
+    /// The native macOS title bar is outside the iced content area.
+    fn chrome_top_height(&self) -> f32 {
+        CHROME_BAR_HEIGHT + 1.0
     }
 
     /// Padding around the pane grid (between chrome and panes).
@@ -256,18 +267,28 @@ impl App {
 
     /// Compute the content bounds (below header bar + tab bar, above status bar).
     fn content_bounds(&self, width: f32, height: f32) -> Rect {
-        let top = Self::chrome_top_height();
+        let top = self.chrome_top_height();
+        let left = if self.sidebar_visible {
+            self.app_config.sidebar.width + 1.0 // +1 for divider
+        } else {
+            0.0
+        };
+        let content_w = (width - left).max(0.0);
         let content_h = (height - top - STATUS_BAR_HEIGHT).max(0.0);
-        Rect::new(0.0, top, width, content_h)
+        Rect::new(left, top, content_w, content_h)
     }
 
     /// Content bounds inset by PANE_GRID_PADDING on all sides for pane layout.
     fn pane_grid_bounds(&self, width: f32, height: f32) -> Rect {
-        let top = Self::chrome_top_height() + Self::PANE_GRID_PADDING;
-        let pad2 = Self::PANE_GRID_PADDING * 2.0;
-        let content_w = (width - pad2).max(0.0);
+        let top = self.chrome_top_height() + Self::PANE_GRID_PADDING;
+        let left = if self.sidebar_visible {
+            Self::PANE_GRID_PADDING + self.app_config.sidebar.width + 1.0 // +1 for divider
+        } else {
+            Self::PANE_GRID_PADDING
+        };
+        let content_w = (width - left - Self::PANE_GRID_PADDING).max(0.0);
         let content_h = (height - top - STATUS_BAR_HEIGHT - Self::PANE_GRID_PADDING).max(0.0);
-        Rect::new(Self::PANE_GRID_PADDING, top, content_w, content_h)
+        Rect::new(left, top, content_w, content_h)
     }
 
     /// Handle a pane command (split, close, focus, zoom).
@@ -424,9 +445,10 @@ impl App {
         match action {
             ContextMenuAction::Copy => {
                 let focused_id = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                let theme = self.renderer.as_ref().map(|r| r.theme()).unwrap_or(&crate::config::theme::DARK);
                 if let Some(state) = self.pane_states.get_mut(&focused_id) {
                     if let Some(ref sel) = state.mouse_selection.active_selection {
-                        let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal);
+                        let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal, theme);
                         let cols = state.terminal.columns();
                         let text = match sel.selection_type {
                             crate::input::selection::SelectionType::VisualBlock => {
@@ -545,8 +567,8 @@ impl App {
 
         if delta.colors_changed {
             if let Some(renderer) = &mut self.renderer {
-                let _theme = Theme::from_name(&self.app_config.colors.theme)
-                    .unwrap_or_else(Theme::claude_dark);
+                let _theme = TerminalTheme::from_name(&self.app_config.colors.theme)
+                    .unwrap_or_else(TerminalTheme::warm_dark);
                 renderer.pane_damage_mut().force_full_damage_all();
             }
             if let Some(window) = &self.window {
@@ -556,16 +578,8 @@ impl App {
 
         if delta.cursor_changed {
             for state in self.pane_states.values_mut() {
-                if let Some(style) = crate::renderer::cursor::CursorStyle::from_config_str(
-                    &self.app_config.cursor.style,
-                ) {
-                    state.cursor.set_style(style);
-                }
-                if self.app_config.cursor.blink {
-                    state.cursor.set_blink_rate(self.app_config.cursor.blink_rate);
-                } else {
-                    state.cursor.set_blink_rate(0);
-                }
+                state.cursor.set_style(crate::renderer::cursor::CursorStyle::Block);
+                state.cursor.set_blink_rate(0);
             }
             if let Some(window) = &self.window {
                 window.request_redraw();
@@ -897,13 +911,15 @@ impl App {
     }
 
     /// Compute grid columns and rows for a pane rect, accounting for padding.
+    /// Uses the renderer's physical-pixel padding to match what generate_instances() uses,
+    /// ensuring PTY column count matches the renderer's content area exactly.
     fn grid_dims_for_rect(&self, rect: &Rect) -> (u16, u16) {
         if let Some(renderer) = &self.renderer {
             let cw = renderer.cell_width();
             let ch = renderer.cell_height();
-            let pad = &self.app_config.padding;
-            let usable_w = (rect.width - pad.left as f32 - pad.right as f32).max(0.0);
-            let usable_h = (rect.height - PANE_HEADER_HEIGHT - pad.top as f32 - pad.bottom as f32).max(0.0);
+            let [pad_top, pad_bottom, pad_left, pad_right] = renderer.padding();
+            let usable_w = (rect.width - pad_left - pad_right).max(0.0);
+            let usable_h = (rect.height - PANE_HEADER_HEIGHT - pad_top - pad_bottom).max(0.0);
             let cols = (usable_w / cw).floor().max(1.0) as u16;
             let rows = (usable_h / ch).floor().max(1.0) as u16;
             (cols, rows)
@@ -1226,9 +1242,10 @@ impl App {
             }
             PaletteAction::Copy => {
                 let focused_id = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                let theme = self.renderer.as_ref().map(|r| r.theme()).unwrap_or(&crate::config::theme::DARK);
                 if let Some(state) = self.pane_states.get_mut(&focused_id) {
                     if let Some(ref sel) = state.mouse_selection.active_selection {
-                        let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal);
+                        let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal, theme);
                         let cols = state.terminal.columns();
                         let text_str = crate::input::selection::selected_text(&cells, sel, cols);
                         if !text_str.is_empty() {
@@ -1288,6 +1305,25 @@ impl App {
             }
             PaletteAction::NewWindow => {
                 self.handle_app_command(AppCommand::NewWindow);
+            }
+            PaletteAction::ToggleSidebar => {
+                self.sidebar_visible = !self.sidebar_visible;
+                let (w, h) = self.window_size();
+                self.resize_all_panes(w, h);
+            }
+            PaletteAction::CycleTheme => {
+                let themes = TerminalTheme::available_themes();
+                let current_name = self.renderer.as_ref().map(|r| r.theme().name).unwrap_or("Warm Dark");
+                let current_idx = themes.iter().position(|(_, name)| *name == current_name).unwrap_or(0);
+                let next_idx = (current_idx + 1) % themes.len();
+                let (config_name, _) = themes[next_idx];
+                if let Some(new_theme) = TerminalTheme::from_name(config_name) {
+                    if let Some(r) = &mut self.renderer {
+                        r.set_theme(new_theme);
+                        r.pane_damage_mut().force_full_damage_all();
+                    }
+                    self.app_config.colors.theme = config_name.to_string();
+                }
             }
         }
         if let Some(window) = &self.window {
@@ -1359,11 +1395,12 @@ impl App {
                 }
             }
             ViAction::Yank => {
+                let theme = self.renderer.as_ref().map(|r| r.theme()).unwrap_or(&crate::config::theme::DARK);
                 if let Some(state) = self.pane_states.get_mut(&pane_id) {
                     if let Some(ref vi) = state.vi_state {
                         let cols = state.terminal.cols();
                         let cells = crate::terminal::grid_bridge::extract_grid_cells(
-                            &state.terminal,
+                            &state.terminal, theme,
                         );
                         if let Some(text) = vi.yank_text(&cells, cols) {
                             if let Ok(mut clipboard) = arboard::Clipboard::new() {
@@ -1599,21 +1636,21 @@ impl ApplicationHandler<UserEvent> for App {
                 let window = Arc::new(window);
 
                 // Resolve theme from config
-                let theme = Theme::from_name(&self.app_config.colors.theme).unwrap_or_else(|| {
+                let theme = TerminalTheme::from_name(&self.app_config.colors.theme).unwrap_or_else(|| {
                     log::warn!(
-                        "Unknown theme '{}', falling back to claude_dark",
+                        "Unknown theme '{}', falling back to warm_dark",
                         self.app_config.colors.theme
                     );
-                    Theme::claude_dark()
+                    TerminalTheme::warm_dark()
                 });
 
                 // Set macOS title bar color to match tab bar surface
                 #[cfg(target_os = "macos")]
                 crate::platform::macos::set_titlebar_color(
                     &window,
-                    theme.surface.r as f64,
-                    theme.surface.g as f64,
-                    theme.surface.b as f64,
+                    theme.bg_surface.r as f64,
+                    theme.bg_surface.g as f64,
+                    theme.bg_surface.b as f64,
                 );
 
                 let font_size = self.app_config.font.size as f32;
@@ -1632,7 +1669,9 @@ impl ApplicationHandler<UserEvent> for App {
                         log::info!("Renderer initialized");
 
                         // Apply terminal padding from config (scaled to physical pixels)
-                        let scale = window.scale_factor() as f32;
+                        // Use the renderer's detected scale (CoreGraphics on macOS)
+                        // rather than winit's, which may be wrong when not using `open`.
+                        let scale = renderer.scale_factor();
                         let pad = &self.app_config.padding;
                         renderer.set_padding(
                             pad.top as f32 * scale,
@@ -1732,6 +1771,20 @@ impl ApplicationHandler<UserEvent> for App {
                             self.input_mode = InputMode::CommandPalette;
                             self.palette_state = Some(PaletteState::new());
                         }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+
+                    // Check for sidebar toggle (Ctrl+Shift+B)
+                    if matches!(event.logical_key, Key::Character(ref s) if s.as_str() == "b" || s.as_str() == "B")
+                        && self.modifiers.control_key()
+                        && self.modifiers.shift_key()
+                    {
+                        self.sidebar_visible = !self.sidebar_visible;
+                        let (w, h) = self.window_size();
+                        self.resize_all_panes(w, h);
                         if let Some(window) = &self.window {
                             window.request_redraw();
                         }
@@ -1868,9 +1921,10 @@ impl ApplicationHandler<UserEvent> for App {
 
                     // Check for clipboard commands (Cmd+C, Cmd+V, Cmd+A)
                     if crate::input::clipboard::is_copy_keybinding(&event.logical_key, self.modifiers) {
+                        let theme = self.renderer.as_ref().map(|r| r.theme()).unwrap_or(&crate::config::theme::DARK);
                         if let Some(state) = self.pane_states.get_mut(&focused_id) {
                             if let Some(ref sel) = state.mouse_selection.active_selection {
-                                let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal);
+                                let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal, theme);
                                 let cols = state.terminal.columns();
                                 let text = match sel.selection_type {
                                     crate::input::selection::SelectionType::VisualBlock => {
@@ -1948,8 +2002,10 @@ impl ApplicationHandler<UserEvent> for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let y = position.y as f32;
-                let chrome_top = Self::chrome_top_height();
-                let tab_bar_top = HEADER_BAR_HEIGHT;
+                let chrome_top = self.chrome_top_height();
+                // No separate tab bar — chrome bar is fully iced-managed.
+                // Use empty range (tab_bar_top == tab_bar_bottom) to skip legacy tab hover.
+                let tab_bar_top = chrome_top;
                 let tab_bar_bottom = chrome_top;
                 if y >= tab_bar_top && y < tab_bar_bottom {
                     // In tab bar area — track hovered tab
@@ -2003,25 +2059,46 @@ impl ApplicationHandler<UserEvent> for App {
                             window.request_redraw();
                         }
                     }
-                    let content_y = y - chrome_top;
-                    // Check for link hover when modifier is held
-                    // Use focused pane's local coordinates
-                    let on_link = self.update_link_hover(position.x as f32, content_y);
 
-                    if on_link {
-                        if let Some(window) = &self.window {
-                            window.set_cursor(CursorIcon::Pointer);
+                    // Gate: if cursor is over sidebar, skip pane/terminal interaction
+                    let sidebar_w = if self.sidebar_visible {
+                        self.app_config.sidebar.width + 1.0
+                    } else {
+                        0.0
+                    };
+                    let in_sidebar = position.x as f32 <= sidebar_w;
+
+                    let content_y = y - chrome_top;
+
+                    if in_sidebar {
+                        // Cursor over sidebar — let iced handle it, clear link hover
+                        if self.link_hover_active {
+                            self.link_hover_active = false;
+                            if let Some(window) = &self.window {
+                                window.set_cursor(CursorIcon::Default);
+                            }
                         }
                     } else {
-                        // Below tab bar — offset y for pane interaction
-                        let effect = self
-                            .interaction
-                            .on_cursor_moved(position.x as f32, content_y);
-                        self.apply_interaction_effect(effect);
+                        // Check for link hover when modifier is held
+                        // Use focused pane's local coordinates
+                        let on_link = self.update_link_hover(position.x as f32, content_y);
+
+                        if on_link {
+                            if let Some(window) = &self.window {
+                                window.set_cursor(CursorIcon::Pointer);
+                            }
+                        } else {
+                            // Below tab bar — use window-space Y for pane interaction
+                            // (divider rects are in window space from content_bounds)
+                            let effect = self
+                                .interaction
+                                .on_cursor_moved(position.x as f32, y);
+                            self.apply_interaction_effect(effect);
+                        }
                     }
 
-                    // Update scrollbar drag or text selection drag on focused pane
-                    {
+                    // Update scrollbar drag or text selection drag on focused pane (skip if in sidebar)
+                    if !in_sidebar {
                         let focused_pane = self.tab_manager.active_tab().pane_tree.focused_pane_id();
                         let padding = self.renderer.as_ref().map(|r| r.padding()).unwrap_or([0.0; 4]);
                         let (win_w, win_h) = self.window_size();
@@ -2054,11 +2131,13 @@ impl ApplicationHandler<UserEvent> for App {
                                 let padding = renderer.padding();
                                 if let Some(state) = self.pane_states.get_mut(&focused_pane) {
                                     if state.mouse_selection.is_dragging {
-                                        let local_x = position.x as f32 - padding[2];
-                                        let local_y = content_y - padding[0];
+                                        let pane_origin_x = pgrid_bounds.x + pane_rect.map_or(0.0, |r| r.x);
+                                        let pane_origin_y = Self::PANE_GRID_PADDING + pane_rect.map_or(0.0, |r| r.y) + PANE_HEADER_HEIGHT;
+                                        let local_x = position.x as f32 - pane_origin_x - padding[2];
+                                        let local_y = content_y - pane_origin_y - padding[0];
                                         let cols = state.terminal.columns();
                                         let rows = state.terminal.rows();
-                                        let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal);
+                                        let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal, renderer.theme());
                                         state.mouse_selection.on_mouse_drag(
                                             local_x, local_y, cell_width, cell_height, cols, rows, &cells,
                                         );
@@ -2086,8 +2165,6 @@ impl ApplicationHandler<UserEvent> for App {
                 ..
             } => {
                 let cursor_pos = self.interaction.cursor_pos();
-                let chrome_top = Self::chrome_top_height();
-                let raw_y = cursor_pos.1 + chrome_top; // reconstruct raw y
 
                 // End tab drag on any mouse release
                 if btn_state == ElementState::Released && self.tab_drag_index.is_some() {
@@ -2095,9 +2172,25 @@ impl ApplicationHandler<UserEvent> for App {
                     self.tab_drag_active = false;
                 }
 
-                if raw_y >= HEADER_BAR_HEIGHT && raw_y < chrome_top {
-                    // Tab bar clicks handled by iced UI layer (Phase 2 migration)
-                    // Drag-reorder tracking starts from iced TabSelected message
+                // Gate: if cursor is in sidebar area, skip all terminal click processing
+                // (iced handles sidebar clicks via push_event)
+                {
+                    let sidebar_w = if self.sidebar_visible {
+                        self.app_config.sidebar.width + 1.0
+                    } else {
+                        0.0
+                    };
+                    if cursor_pos.0 <= sidebar_w && sidebar_w > 0.0 {
+                        // In sidebar — don't process terminal interaction
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+                }
+
+                if false {
+                    // Legacy tab bar click zone — no longer exists (chrome bar is iced-managed)
                 } else {
                     // Check for modifier+click link activation first
                     if btn_state == ElementState::Pressed {
@@ -2164,15 +2257,21 @@ impl ApplicationHandler<UserEvent> for App {
                             let cell_height = renderer.cell_height();
                             let padding = renderer.padding();
                             let focused_pane = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                            let (sel_win_w, sel_win_h) = self.window_size();
+                            let sel_pgrid = self.pane_grid_bounds(sel_win_w as f32, sel_win_h as f32);
+                            let sel_layout = self.tab_manager.active_tab().pane_tree.calculate_layout(sel_pgrid.width, sel_pgrid.height);
+                            let sel_pane_rect = sel_layout.iter().find(|(id, _)| *id == focused_pane).map(|(_, r)| *r);
                             if let Some(state) = self.pane_states.get_mut(&focused_pane) {
                                 let cols = state.terminal.columns();
                                 let rows = state.terminal.rows();
-                                // Convert from content-space to pane-local coords (subtract padding)
-                                let local_x = cursor_pos.0 - padding[2]; // subtract left padding
-                                let local_y = cursor_pos.1 - padding[0]; // subtract top padding
+                                // Convert from content-space to pane-local terminal coords
+                                let pane_origin_x = sel_pgrid.x + sel_pane_rect.map_or(0.0, |r| r.x);
+                                let pane_origin_y = Self::PANE_GRID_PADDING + sel_pane_rect.map_or(0.0, |r| r.y) + PANE_HEADER_HEIGHT;
+                                let local_x = cursor_pos.0 - pane_origin_x - padding[2];
+                                let local_y = cursor_pos.1 - pane_origin_y - padding[0];
                                 match btn_state {
                                     ElementState::Pressed => {
-                                        let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal);
+                                        let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal, renderer.theme());
                                         if self.modifiers.shift_key() {
                                             let (crow, ccol) = state.terminal.cursor_position();
                                             state.mouse_selection.on_shift_click(
@@ -2213,11 +2312,11 @@ impl ApplicationHandler<UserEvent> for App {
                 ..
             } => {
                 let cursor_pos = self.interaction.cursor_pos();
-                let chrome_top = Self::chrome_top_height();
-                let raw_y = cursor_pos.1 + chrome_top;
+                let chrome_top = self.chrome_top_height();
+                let raw_y = cursor_pos.1; // cursor_pos.1 is already window-space
 
-                if raw_y < chrome_top && raw_y >= HEADER_BAR_HEIGHT {
-                    // Right-click on tab bar — show tab context menu
+                if false {
+                    // Legacy: right-click on tab bar — no longer exists (chrome bar is iced-managed)
                     if let Some(window) = &self.window {
                         if let Some(action) =
                             crate::context_menu::show_tab_context_menu(window)
@@ -2279,7 +2378,10 @@ impl ApplicationHandler<UserEvent> for App {
                 self.update_interaction_layout(size.width, size.height);
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                log::debug!("Scale factor changed to {scale_factor:.2}");
+                log::info!("Scale factor changed to {scale_factor:.2}");
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.update_scale_factor(scale_factor as f32);
+                }
             }
             WindowEvent::Focused(focused) => {
                 for state in self.pane_states.values_mut() {
@@ -2335,6 +2437,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let visible = pane_tree.visible_panes();
 
                 let focused_pane = pane_tree.focused_pane_id();
+                let render_theme = self.renderer.as_ref().unwrap().theme();
                 let mut pane_descs: Vec<PaneRenderDescriptor> = Vec::new();
                 for (pane_id, rect) in &layout {
                     if !visible.contains(pane_id) {
@@ -2342,11 +2445,13 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                     if let Some(state) = self.pane_states.get(pane_id) {
                         let mut cells =
-                            crate::terminal::grid_bridge::extract_grid_cells(&state.terminal);
+                            crate::terminal::grid_bridge::extract_grid_cells(
+                                &state.terminal, render_theme,
+                            );
 
                         // Apply search highlights to the focused pane
                         if self.search_state.is_active && *pane_id == focused_pane {
-                            let theme = self.renderer.as_ref().unwrap().theme();
+                            let theme = render_theme;
                             let cols = state.terminal.columns();
                             let viewport_rows = state.terminal.rows() as i32;
                             let offset = state.terminal.display_offset() as i32;
@@ -2422,6 +2527,32 @@ impl ApplicationHandler<UserEvent> for App {
                 let ui_active_tab = self.tab_manager.active_index();
                 let ui_hovered_tab = self.hovered_tab;
                 let ui_scale = self.window.as_ref().map(|w| w.scale_factor() as f32).unwrap_or(1.0);
+
+                // Build sidebar tab data (only when visible to avoid work)
+                let ui_sidebar_tabs: Vec<SidebarTabInfo> = if self.sidebar_visible {
+                    self.tab_manager.tabs().iter().enumerate().map(|(idx, tab)| {
+                        let focused_id = tab.pane_tree.focused_pane_id();
+                        let layout = tab.pane_tree.root().calculate_layout(
+                            Rect::new(0.0, 0.0, 100.0, 100.0), 1.0
+                        );
+                        let minimap_rects = layout.iter().map(|(pid, rect)| MinimapPane {
+                            x: rect.x / 100.0,
+                            y: rect.y / 100.0,
+                            width: rect.width / 100.0,
+                            height: rect.height / 100.0,
+                            is_focused: *pid == focused_id,
+                        }).collect();
+                        SidebarTabInfo {
+                            title: tab.title.clone(),
+                            is_active: idx == self.tab_manager.active_index(),
+                            has_notification: tab.has_notification,
+                            pane_count: tab.pane_tree.pane_count(),
+                            minimap_rects,
+                        }
+                    }).collect()
+                } else {
+                    Vec::new()
+                };
                 let pane_tree = &self.tab_manager.active_tab().pane_tree;
                 let ui_pane_count = pane_tree.pane_count();
                 let ui_is_zoomed = pane_tree.is_zoomed();
@@ -2431,7 +2562,7 @@ impl ApplicationHandler<UserEvent> for App {
                     let focused = pane_tree.focused_pane_id();
                     let active_idx = pane_ids.iter().position(|id| *id == focused).unwrap_or(0);
                     let pgrid = self.pane_grid_bounds(width as f32, height as f32);
-                    let chrome_top = Self::chrome_top_height();
+                    let chrome_top = self.chrome_top_height();
                     let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
                     let padding = self.renderer.as_ref().map(|r| r.padding()).unwrap_or([0.0; 4]);
                     let panes: Vec<PaneInfo> = layout.iter().enumerate().map(|(idx, (pane_id, rect))| {
@@ -2447,17 +2578,17 @@ impl ApplicationHandler<UserEvent> for App {
                                 let history_size = state.terminal.history_size();
                                 let visible_rows = state.terminal.rows();
                                 let display_offset = state.scroll_state.current_line_offset();
-                                let screen_rect = Rect::new(
-                                    rect.x + pgrid.x,
-                                    rect.y + pgrid.y,
-                                    rect.width,
-                                    rect.height,
+                                let content_rect = Rect::new(
+                                    rect.x + Self::PANE_GRID_PADDING,
+                                    rect.y + Self::PANE_GRID_PADDING,
+                                    rect.width - Self::PANE_GRID_PADDING * 2.0,
+                                    rect.height - Self::PANE_GRID_PADDING * 2.0,
                                 );
                                 let thumb = crate::scroll::scrollbar_thumb_rect(
-                                    screen_rect.x, screen_rect.y,
-                                    screen_rect.width, screen_rect.height,
+                                    content_rect.x, content_rect.y,
+                                    content_rect.width, content_rect.height,
                                     padding, visible_rows, history_size, display_offset,
-                                ).map(|t| (t.x, t.y - chrome_top, t.width, t.height));
+                                ).map(|t| (t.x, t.y, t.width, t.height));
                                 (thumb, alpha)
                             } else {
                                 (None, 0.0)
@@ -2467,15 +2598,16 @@ impl ApplicationHandler<UserEvent> for App {
                         };
 
                         PaneInfo {
-                            // Positions relative to content area (subtract chrome_top from screen y)
-                            x: rect.x + pgrid.x,
-                            y: rect.y + pgrid.y - chrome_top,
+                            // Positions relative to iced content area (which already accounts
+                            // for sidebar offset via row layout). Only add PANE_GRID_PADDING.
+                            x: rect.x + Self::PANE_GRID_PADDING,
+                            y: rect.y + Self::PANE_GRID_PADDING,
                             width: rect.width,
                             height: rect.height,
                             is_focused: *pane_id == focused,
                             index: idx,
                             title,
-                            shell_name: "bash".to_string(),
+                            shell_name: self.pane_states.get(pane_id).map(|s| s.shell_name.clone()).unwrap_or_else(|| "sh".to_string()),
                             scrollbar_thumb,
                             scrollbar_alpha,
                         }
@@ -2483,19 +2615,28 @@ impl ApplicationHandler<UserEvent> for App {
 
                     // Build divider display info
                     let dividers: Vec<DividerDisplay> = if pane_tree.pane_count() > 1 && !pane_tree.is_zoomed() {
-                        let hovered_index = match self.interaction.state() {
+                        let (hovered_index, dragging_index) = match self.interaction.state() {
                             crate::pane::interaction::InteractionState::Hovering { divider_index } => {
-                                Some(*divider_index)
+                                (Some(*divider_index), None)
                             }
-                            _ => None,
+                            crate::pane::interaction::InteractionState::Dragging { divider_index, .. } => {
+                                (None, Some(*divider_index))
+                            }
+                            _ => (None, None),
+                        };
+                        let sidebar_offset = if self.sidebar_visible {
+                            self.app_config.sidebar.width + 1.0
+                        } else {
+                            0.0
                         };
                         self.interaction.dividers().iter().enumerate().map(|(i, d)| {
                             DividerDisplay {
-                                x: d.rect.x,
+                                x: d.rect.x - sidebar_offset,
                                 y: d.rect.y - chrome_top,
                                 width: d.rect.width,
                                 height: d.rect.height,
                                 is_hovered: Some(i) == hovered_index,
+                                is_dragging: Some(i) == dragging_index,
                             }
                         }).collect()
                     } else {
@@ -2536,6 +2677,15 @@ impl ApplicationHandler<UserEvent> for App {
                             }).collect()
                         }).unwrap_or_default(),
                         palette_selected: self.palette_state.as_ref().map(|p| p.selected).unwrap_or(0),
+                        sidebar_visible: self.sidebar_visible,
+                        sidebar_tabs: ui_sidebar_tabs,
+                        sidebar_width: self.app_config.sidebar.width,
+                        hovered_sidebar_tab: self.hovered_sidebar_tab,
+                        theme_selector_open: self.theme_selector_open,
+                        editing_tab: self.editing_sidebar_tab,
+                        editing_tab_value: self.editing_tab_value.clone(),
+                        hovering_new_tab: self.hovering_new_tab,
+                        hovering_close_button: self.hovering_close_button,
                     };
 
                     let mut iced_msgs = Vec::new();
@@ -2608,6 +2758,64 @@ impl ApplicationHandler<UserEvent> for App {
                                     }
                                 }
                             }
+                            UiMessage::SidebarTabSelected(idx) => {
+                                self.handle_tab_command(TabCommand::SelectTab(idx), event_loop);
+                            }
+                            UiMessage::SidebarTabHovered(tab_idx) => {
+                                self.hovered_sidebar_tab = tab_idx;
+                                if let Some(window) = &self.window {
+                                    window.request_redraw();
+                                }
+                            }
+                            UiMessage::ToggleSidebar => {
+                                self.sidebar_visible = !self.sidebar_visible;
+                                let (w, h) = self.window_size();
+                                self.resize_all_panes(w, h);
+                            }
+                            UiMessage::ToggleThemeSelector => {
+                                self.theme_selector_open = !self.theme_selector_open;
+                                if let Some(window) = &self.window {
+                                    window.request_redraw();
+                                }
+                            }
+                            UiMessage::SetTheme(ref name) => {
+                                if let Some(new_theme) = TerminalTheme::from_name(name) {
+                                    if let Some(r) = &mut self.renderer {
+                                        r.set_theme(new_theme);
+                                        r.pane_damage_mut().force_full_damage_all();
+                                    }
+                                    self.app_config.colors.theme = name.clone();
+                                }
+                                self.theme_selector_open = false;
+                            }
+                            UiMessage::RenameTab(idx) => {
+                                let title = self.tab_manager.tabs().get(idx)
+                                    .map(|t| t.title.clone())
+                                    .unwrap_or_default();
+                                self.editing_sidebar_tab = Some(idx);
+                                self.editing_tab_value = title;
+                            }
+                            UiMessage::RenameTabInput(value) => {
+                                self.editing_tab_value = value;
+                            }
+                            UiMessage::RenameTabCommit(idx, title) => {
+                                let final_title = if title.trim().is_empty() {
+                                    self.tab_manager.tabs().get(idx)
+                                        .map(|t| t.title.clone())
+                                        .unwrap_or_else(|| "Shell".to_string())
+                                } else {
+                                    title
+                                };
+                                self.tab_manager.set_title(idx, &final_title);
+                                self.editing_sidebar_tab = None;
+                                self.editing_tab_value.clear();
+                            }
+                            UiMessage::NewTabHovered(hovered) => {
+                                self.hovering_new_tab = hovered;
+                            }
+                            UiMessage::CloseButtonHovered(tab_idx) => {
+                                self.hovering_close_button = tab_idx;
+                            }
                             UiMessage::Noop => {}
                         }
                     }
@@ -2639,7 +2847,7 @@ mod tests {
     #[test]
     fn default_config_title() {
         let cfg = WindowConfig::default();
-        assert_eq!(cfg.title, "Claude Terminal \u{2014} Anthropic");
+        assert_eq!(cfg.title, "VeloTerm");
     }
 
     #[test]
@@ -2662,7 +2870,7 @@ mod tests {
     fn window_attributes_has_correct_title() {
         let cfg = WindowConfig::default();
         let attrs = cfg.to_window_attributes();
-        assert_eq!(attrs.title, "Claude Terminal \u{2014} Anthropic");
+        assert_eq!(attrs.title, "VeloTerm");
     }
 
     #[test]
@@ -2781,8 +2989,8 @@ mod tests {
     #[test]
     fn app_config_defaults_match_expected_values() {
         let app = App::new(WindowConfig::default(), Config::default());
-        assert_eq!(app.app_config.colors.theme, "claude_dark");
-        assert_eq!(app.app_config.font.size, 18.0);
+        assert_eq!(app.app_config.colors.theme, "warm_dark");
+        assert_eq!(app.app_config.font.size, 16.0);
         assert_eq!(app.app_config.scrollback.lines, 10_000);
         assert_eq!(app.app_config.cursor.style, "block");
         assert!(app.app_config.cursor.blink);
@@ -2798,24 +3006,29 @@ mod tests {
 
     #[test]
     fn app_config_theme_resolution() {
-        use crate::config::theme::Theme;
+        use crate::config::theme::TerminalTheme;
         for (config_name, display_name) in [
-            ("claude_dark", "Claude Dark"),
-            ("claude_light", "Claude Light"),
-            ("claude_warm", "Claude Warm"),
+            ("warm_dark", "Warm Dark"),
+            ("light", "Light"),
+            ("midnight", "Midnight"),
+            ("ember", "Ember"),
+            ("dusk", "Dusk"),
         ] {
-            let theme = Theme::from_name(config_name).unwrap();
+            let theme = TerminalTheme::from_name(config_name).unwrap();
             assert_eq!(theme.name, display_name);
         }
+        // Legacy: claude_dark/claude_warm fall back to warm_dark
+        let warm = TerminalTheme::from_name("claude_warm").unwrap();
+        assert_eq!(warm.name, "Warm Dark");
     }
 
     #[test]
     fn app_config_unknown_theme_fallback() {
-        use crate::config::theme::Theme;
-        let result = Theme::from_name("nonexistent");
+        use crate::config::theme::TerminalTheme;
+        let result = TerminalTheme::from_name("nonexistent");
         assert!(result.is_none());
-        let fallback = result.unwrap_or_else(Theme::claude_dark);
-        assert_eq!(fallback.name, "Claude Dark");
+        let fallback = result.unwrap_or_else(TerminalTheme::warm_dark);
+        assert_eq!(fallback.name, "Warm Dark");
     }
 
     #[test]
@@ -3037,8 +3250,7 @@ blink = false
             .active_tab_mut()
             .pane_tree
             .split_focused(SplitDirection::Vertical);
-        // Content area is offset by chrome top, so divider is at x=640
-        // in content coordinates (0.0 to 1280.0 width, 0.0 to 692.0 height)
+        // Content area accounts for sidebar + chrome
         let content = app.content_bounds(1280.0, 720.0);
         app.interaction.update_layout(
             app.tab_manager.active_tab().pane_tree.root(),
@@ -3046,8 +3258,10 @@ blink = false
             20.0,
         );
 
-        // Move cursor to divider (x=640, content y=346)
-        let effect = app.interaction.on_cursor_moved(640.0, 346.0);
+        // Move cursor to divider (center of content area, window-space Y)
+        let divider_x = content.x + content.width / 2.0;
+        let divider_y = content.y + content.height / 2.0;
+        let effect = app.interaction.on_cursor_moved(divider_x, divider_y);
         assert!(matches!(
             effect,
             crate::pane::interaction::InteractionEffect::SetCursor(
@@ -3073,8 +3287,8 @@ blink = false
             20.0,
         );
 
-        // Move cursor to left pane in content coordinates
-        app.interaction.on_cursor_moved(100.0, 300.0);
+        // Move cursor to left pane in window-space coordinates
+        app.interaction.on_cursor_moved(content.x + 50.0, content.y + 100.0);
 
         let pane_tree = &app.tab_manager.active_tab().pane_tree;
         let layout = pane_tree.calculate_layout(content.width, content.height);
@@ -3096,12 +3310,14 @@ blink = false
             .split_focused(SplitDirection::Vertical);
         app.update_interaction_layout(1000, 500);
 
-        app.interaction.on_cursor_moved(500.0, 236.0); // hover on divider
         let content = app.content_bounds(1000.0, 500.0);
+        let divider_x = content.x + content.width / 2.0;
+        let divider_y = content.y + content.height / 2.0;
+        app.interaction.on_cursor_moved(divider_x, divider_y); // hover on divider
         let pane_tree = &app.tab_manager.active_tab().pane_tree;
         let layout = pane_tree.calculate_layout(content.width, content.height);
         app.interaction.on_mouse_press(&layout);
-        let effect = app.interaction.on_cursor_moved(300.0, 236.0);
+        let effect = app.interaction.on_cursor_moved(content.x + content.width * 0.3, divider_y);
 
         app.apply_interaction_effect(effect);
 
@@ -3183,9 +3399,11 @@ blink = false
     fn app_content_bounds_accounts_for_chrome() {
         let app = App::new(WindowConfig::default(), Config::default());
         let content = app.content_bounds(1280.0, 720.0);
-        let chrome_top = App::chrome_top_height();
+        let chrome_top = app.chrome_top_height();
         assert_eq!(content.y, chrome_top);
-        assert_eq!(content.width, 1280.0);
+        // Sidebar is visible by default, so content is narrower
+        let sidebar_offset = app.app_config.sidebar.width + 1.0; // width + divider
+        assert_eq!(content.width, 1280.0 - sidebar_offset);
         assert_eq!(content.height, 720.0 - chrome_top - STATUS_BAR_HEIGHT);
     }
 
@@ -3253,6 +3471,7 @@ blink = false
                 cursor: crate::renderer::cursor::CursorState::new(),
                 mouse_selection: crate::input::mouse::MouseSelectionState::new(),
                 scroll_state: crate::scroll::ScrollState::new(),
+                shell_name: "zsh".to_string(),
             },
         );
 
@@ -3283,6 +3502,7 @@ blink = false
                 cursor: crate::renderer::cursor::CursorState::new(),
                 mouse_selection: crate::input::mouse::MouseSelectionState::new(),
                 scroll_state: crate::scroll::ScrollState::new(),
+                shell_name: "zsh".to_string(),
             },
         );
 
@@ -3466,8 +3686,8 @@ blink = false
     #[test]
     fn font_size_tracks_in_app() {
         let app = App::new(WindowConfig::default(), Config::default());
-        assert_eq!(app.current_font_size, 18.0);
-        assert_eq!(app.default_font_size, 18.0);
+        assert_eq!(app.current_font_size, 16.0);
+        assert_eq!(app.default_font_size, 16.0);
     }
 
     // ── Config hot-reload ────────────────────────────────────────
@@ -3475,7 +3695,7 @@ blink = false
     #[test]
     fn config_reload_font_updates_app_state() {
         let mut app = App::new(WindowConfig::default(), Config::default());
-        assert_eq!(app.current_font_size, 18.0);
+        assert_eq!(app.current_font_size, 16.0);
 
         let mut new_config = Config::default();
         new_config.font.size = 20.0;
@@ -3494,18 +3714,18 @@ blink = false
         assert_eq!(app.app_config.padding.top, 16.0);
 
         let mut new_config = Config::default();
-        new_config.padding.top = 24.0;
+        new_config.padding.top = 32.0;
         new_config.padding.left = 20.0;
         let delta = app.app_config.diff(&new_config);
         assert!(delta.padding_changed);
 
         app.handle_config_reload(new_config, delta);
-        assert_eq!(app.app_config.padding.top, 24.0);
+        assert_eq!(app.app_config.padding.top, 32.0);
         assert_eq!(app.app_config.padding.left, 20.0);
     }
 
     #[test]
-    fn config_reload_cursor_blink_rate_updates_panes() {
+    fn config_reload_cursor_always_zero_blink_rate() {
         let mut app = App::new(WindowConfig::default(), Config::default());
         let pane_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
         let terminal = crate::terminal::Terminal::new(80, 24, 10_000);
@@ -3518,50 +3738,26 @@ blink = false
                 cursor: crate::renderer::cursor::CursorState::new(),
                 mouse_selection: crate::input::mouse::MouseSelectionState::new(),
                 scroll_state: crate::scroll::ScrollState::new(),
+                shell_name: "zsh".to_string(),
             },
         );
 
-        // Default blink rate is 500
-        assert_eq!(app.pane_states[&pane_id].cursor.blink_rate_ms, 500);
+        // Cursor always starts with blink disabled
+        assert_eq!(app.pane_states[&pane_id].cursor.blink_rate_ms, 0);
 
-        // Hot-reload with new blink rate
+        // Even after config reload requesting blink, rate stays 0
         let mut new_config = Config::default();
+        new_config.cursor.blink = true;
         new_config.cursor.blink_rate = 750;
         let delta = app.app_config.diff(&new_config);
         assert!(delta.cursor_changed);
-
-        app.handle_config_reload(new_config, delta);
-        assert_eq!(app.pane_states[&pane_id].cursor.blink_rate_ms, 750);
-    }
-
-    #[test]
-    fn config_reload_cursor_blink_disabled_sets_rate_zero() {
-        let mut app = App::new(WindowConfig::default(), Config::default());
-        let pane_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
-        let terminal = crate::terminal::Terminal::new(80, 24, 10_000);
-        app.pane_states.insert(
-            pane_id,
-            PaneState {
-                terminal,
-                pty: crate::pty::PtySession::new(&crate::pty::default_shell(), 80, 24).unwrap(),
-                vi_state: None,
-                cursor: crate::renderer::cursor::CursorState::new(),
-                mouse_selection: crate::input::mouse::MouseSelectionState::new(),
-                scroll_state: crate::scroll::ScrollState::new(),
-            },
-        );
-
-        // Disable blink via config
-        let mut new_config = Config::default();
-        new_config.cursor.blink = false;
-        let delta = app.app_config.diff(&new_config);
 
         app.handle_config_reload(new_config, delta);
         assert_eq!(app.pane_states[&pane_id].cursor.blink_rate_ms, 0);
     }
 
     #[test]
-    fn config_reload_cursor_style_updates_panes() {
+    fn config_reload_cursor_always_block_no_blink() {
         let mut app = App::new(WindowConfig::default(), Config::default());
         let pane_id = app.tab_manager.active_tab().pane_tree.focused_pane_id();
         let terminal = crate::terminal::Terminal::new(80, 24, 10_000);
@@ -3574,18 +3770,23 @@ blink = false
                 cursor: crate::renderer::cursor::CursorState::new(),
                 mouse_selection: crate::input::mouse::MouseSelectionState::new(),
                 scroll_state: crate::scroll::ScrollState::new(),
+                shell_name: "zsh".to_string(),
             },
         );
 
         let mut new_config = Config::default();
-        new_config.cursor.style = "beam".to_string();
+        new_config.cursor.style = "underline".to_string();
+        new_config.cursor.blink = true;
+        new_config.cursor.blink_rate = 500;
         let delta = app.app_config.diff(&new_config);
 
         app.handle_config_reload(new_config, delta);
+        // Cursor is always forced to Block with no blink regardless of config
         assert_eq!(
             app.pane_states[&pane_id].cursor.style,
-            crate::renderer::cursor::CursorStyle::Beam
+            crate::renderer::cursor::CursorStyle::Block
         );
+        assert_eq!(app.pane_states[&pane_id].cursor.blink_rate_ms, 0);
     }
 
     #[test]
@@ -3599,5 +3800,70 @@ blink = false
 
         app.handle_config_reload(new_config, delta);
         assert_eq!(app.current_font_size, original_size);
+    }
+
+    // ── Sidebar tests ───────────────────────────────────────────────
+
+    #[test]
+    fn sidebar_toggle_changes_flag() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+        assert!(app.sidebar_visible); // default is visible
+        app.sidebar_visible = false;
+        assert!(!app.sidebar_visible);
+        app.sidebar_visible = true;
+        assert!(app.sidebar_visible);
+    }
+
+    #[test]
+    fn pane_grid_bounds_with_sidebar() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+
+        app.sidebar_visible = false;
+        let bounds_without = app.pane_grid_bounds(1280.0, 720.0);
+        app.sidebar_visible = true;
+        let bounds_with = app.pane_grid_bounds(1280.0, 720.0);
+
+        // Sidebar pushes content right: left edge should be larger
+        assert!(bounds_with.x > bounds_without.x);
+        // Content width should be smaller
+        assert!(bounds_with.width < bounds_without.width);
+        // The difference should be ~sidebar width + divider
+        let expected_shift = app.app_config.sidebar.width + 1.0;
+        assert!((bounds_with.x - bounds_without.x - expected_shift).abs() < 1.0);
+    }
+
+    #[test]
+    fn chrome_top_height_is_chrome_bar_only() {
+        let app = App::new(WindowConfig::default(), Config::default());
+        // Chrome top = chrome bar + 1 divider (native macOS title bar is outside iced content)
+        assert_eq!(app.chrome_top_height(), CHROME_BAR_HEIGHT + 1.0);
+    }
+
+    #[test]
+    fn sidebar_default_from_config() {
+        // Default config has sidebar visible
+        let app = App::new(WindowConfig::default(), Config::default());
+        assert!(app.sidebar_visible);
+        // Can be disabled via config
+        let mut config = Config::default();
+        config.sidebar.default_visible = false;
+        let app2 = App::new(WindowConfig::default(), config);
+        assert!(!app2.sidebar_visible);
+    }
+
+    #[test]
+    fn content_bounds_with_sidebar() {
+        let mut app = App::new(WindowConfig::default(), Config::default());
+
+        // Default has sidebar visible; hide it to compare
+        app.sidebar_visible = false;
+        let bounds_without = app.content_bounds(1280.0, 720.0);
+        app.sidebar_visible = true;
+        let bounds_with = app.content_bounds(1280.0, 720.0);
+
+        // Sidebar pushes content left edge right
+        assert!(bounds_with.x > bounds_without.x);
+        // Content width shrinks
+        assert!(bounds_with.width < bounds_without.width);
     }
 }

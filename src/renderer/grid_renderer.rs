@@ -1,6 +1,6 @@
 // Terminal grid to instanced quad rendering.
 
-use crate::config::theme::Color;
+use crate::config::theme::{Color, color_new};
 use crate::renderer::glyph_atlas::GlyphAtlas;
 use crate::renderer::gpu::CellInstance;
 
@@ -9,6 +9,7 @@ pub const CELL_FLAG_UNDERLINE: u32 = 0x10; // bit 4
 pub const CELL_FLAG_STRIKETHROUGH: u32 = 0x20; // bit 5
 pub const CELL_FLAG_SELECTED: u32 = 0x40; // bit 6
 pub const CELL_FLAG_VI_CURSOR: u32 = 0x80; // bit 7
+pub const CELL_FLAG_BOLD: u32 = 0x100; // bit 8
 
 /// A single cell in the terminal grid.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -38,7 +39,7 @@ impl GridCell {
     pub fn empty(bg: Color) -> Self {
         Self {
             ch: ' ',
-            fg: Color::new(1.0, 1.0, 1.0, 1.0),
+            fg: color_new(1.0, 1.0, 1.0, 1.0),
             bg,
             flags: 0,
         }
@@ -82,13 +83,20 @@ impl GridDimensions {
     }
 
     /// Calculate grid dimensions from a pane rect (in physical pixels) and cell size.
+    ///
+    /// Uses float division (not u32 truncation) to match `grid_dims_for_rect`
+    /// in window.rs. This ensures the renderer and PTY agree on column/row counts.
     pub fn from_pane_rect(rect: &crate::pane::Rect, cell_width: f32, cell_height: f32) -> Self {
-        Self::new(
-            rect.width as u32,
-            rect.height as u32,
+        let columns = (rect.width / cell_width).floor().max(1.0) as u32;
+        let rows = (rect.height / cell_height).floor().max(1.0) as u32;
+        Self {
+            columns,
+            rows,
             cell_width,
             cell_height,
-        )
+            window_width: rect.width as u32,
+            window_height: rect.height as u32,
+        }
     }
 
     /// Recalculate grid dimensions for a new window size, keeping the same cell size.
@@ -141,10 +149,11 @@ pub fn generate_row_instances(
         let cell = cells
             .get(i)
             .copied()
-            .unwrap_or(GridCell::empty(Color::new(0.0, 0.0, 0.0, 1.0)));
+            .unwrap_or(GridCell::empty(color_new(0.0, 0.0, 0.0, 1.0)));
 
+        let is_bold = cell.flags & CELL_FLAG_BOLD != 0;
         let (atlas_uv, has_glyph) = if cell.ch != ' ' {
-            if let Some(info) = atlas.glyph_info(cell.ch) {
+            if let Some(info) = atlas.glyph_info(cell.ch, is_bold) {
                 (info.uv, true)
             } else {
                 ([0.0, 0.0, 0.0, 0.0], false)
@@ -185,10 +194,11 @@ pub fn generate_instances(
         let cell = cells
             .get(i)
             .copied()
-            .unwrap_or(GridCell::empty(Color::new(0.0, 0.0, 0.0, 1.0)));
+            .unwrap_or(GridCell::empty(color_new(0.0, 0.0, 0.0, 1.0)));
 
+        let is_bold = cell.flags & CELL_FLAG_BOLD != 0;
         let (atlas_uv, has_glyph) = if cell.ch != ' ' {
-            if let Some(info) = atlas.glyph_info(cell.ch) {
+            if let Some(info) = atlas.glyph_info(cell.ch, is_bold) {
                 (info.uv, true)
             } else {
                 ([0.0, 0.0, 0.0, 0.0], false)
@@ -220,17 +230,17 @@ pub fn generate_instances(
 /// - Remaining: Alternating characters for cell alignment validation
 pub fn generate_test_pattern(
     grid: &GridDimensions,
-    theme: &crate::config::theme::Theme,
+    theme: &crate::config::theme::TerminalTheme,
 ) -> Vec<GridCell> {
     let total = grid.total_cells() as usize;
     let cols = grid.columns as usize;
-    let mut cells = vec![GridCell::empty(theme.background); total];
+    let mut cells = vec![GridCell::empty(theme.bg_deep); total];
 
     // Row 0: VeloTerm header in accent color
     let header = "VeloTerm v0.1.0";
     for (i, ch) in header.chars().enumerate() {
         if i < cols {
-            cells[i] = GridCell::new(ch, theme.accent, theme.background);
+            cells[i] = GridCell::new(ch, theme.accent_orange, theme.bg_deep);
         }
     }
 
@@ -242,7 +252,7 @@ pub fn generate_test_pattern(
         for (i, byte) in (0x20u8..=0x7Eu8).enumerate() {
             if i < cols {
                 cells[row_start + i] =
-                    GridCell::new(byte as char, theme.text, theme.background);
+                    GridCell::new(byte as char, theme.text_primary, theme.bg_deep);
             }
         }
     }
@@ -253,7 +263,7 @@ pub fn generate_test_pattern(
         let prompt = "claude@anthropic ~ $";
         for (i, ch) in prompt.chars().enumerate() {
             if i < cols {
-                cells[row_start + i] = GridCell::new(ch, theme.prompt, theme.background);
+                cells[row_start + i] = GridCell::new(ch, theme.accent_orange, theme.bg_deep);
             }
         }
     }
@@ -263,7 +273,7 @@ pub fn generate_test_pattern(
         let row_start = row * cols;
         for col in 0..cols {
             let ch = if (row + col) % 2 == 0 { '#' } else { '.' };
-            cells[row_start + col] = GridCell::new(ch, theme.text_secondary, theme.background);
+            cells[row_start + col] = GridCell::new(ch, theme.text_secondary, theme.bg_deep);
         }
     }
 
@@ -280,11 +290,11 @@ mod tests {
     }
 
     fn test_fg() -> Color {
-        Color::from_hex("#E8E5DF")
+        crate::config::theme::from_hex("#E8E5DF")
     }
 
     fn test_bg() -> Color {
-        Color::from_hex("#1A1816")
+        crate::config::theme::from_hex("#1A1816")
     }
 
     // ── Grid dimension calculation ──────────────────────────────────
@@ -463,7 +473,7 @@ mod tests {
         let grid = test_grid(1, 1);
         let cells = vec![GridCell::new('A', test_fg(), test_bg())];
         let instances = generate_instances(&grid, &cells, &atlas);
-        let expected_uv = atlas.glyph_info('A').unwrap().uv;
+        let expected_uv = atlas.glyph_info('A', false).unwrap().uv;
         assert_eq!(instances[0].atlas_uv, expected_uv);
     }
 
@@ -479,7 +489,7 @@ mod tests {
     #[test]
     fn generate_instances_fg_color_from_cell() {
         let atlas = test_atlas();
-        let fg = Color::from_hex("#FF0000");
+        let fg = crate::config::theme::from_hex("#FF0000");
         let grid = test_grid(1, 1);
         let cells = vec![GridCell::new('X', fg, test_bg())];
         let instances = generate_instances(&grid, &cells, &atlas);
@@ -489,7 +499,7 @@ mod tests {
     #[test]
     fn generate_instances_bg_color_from_cell() {
         let atlas = test_atlas();
-        let bg = Color::from_hex("#00FF00");
+        let bg = crate::config::theme::from_hex("#00FF00");
         let grid = test_grid(1, 1);
         let cells = vec![GridCell::new('X', test_fg(), bg)];
         let instances = generate_instances(&grid, &cells, &atlas);
@@ -520,6 +530,32 @@ mod tests {
     }
 
     #[test]
+    fn generate_instances_propagates_bold_flag() {
+        let atlas = test_atlas();
+        let grid = test_grid(1, 1);
+        let mut cell = GridCell::new('X', test_fg(), test_bg());
+        cell.flags = CELL_FLAG_BOLD;
+        let instances = generate_instances(&grid, &[cell], &atlas);
+        assert_ne!(instances[0].flags & CELL_FLAG_BOLD, 0);
+    }
+
+    #[test]
+    fn generate_instances_bold_uses_different_uv() {
+        let atlas = test_atlas();
+        let grid = test_grid(2, 1);
+        let mut regular = GridCell::new('A', test_fg(), test_bg());
+        regular.flags = 0;
+        let mut bold = GridCell::new('A', test_fg(), test_bg());
+        bold.flags = CELL_FLAG_BOLD;
+        let instances = generate_instances(&grid, &[regular, bold], &atlas);
+        // Bold 'A' should use a different atlas UV than regular 'A'
+        assert_ne!(
+            instances[0].atlas_uv, instances[1].atlas_uv,
+            "bold 'A' should have different atlas UV than regular 'A'"
+        );
+    }
+
+    #[test]
     fn generate_instances_propagates_strikethrough_flag() {
         let atlas = test_atlas();
         let grid = test_grid(1, 1);
@@ -531,8 +567,8 @@ mod tests {
 
     // ── Test pattern generation ─────────────────────────────────────
 
-    fn test_theme() -> crate::config::theme::Theme {
-        crate::config::theme::Theme::claude_dark()
+    fn test_theme() -> crate::config::theme::TerminalTheme {
+        crate::config::theme::TerminalTheme::warm_dark()
     }
 
     #[test]
@@ -558,7 +594,7 @@ mod tests {
         let theme = test_theme();
         let cells = generate_test_pattern(&grid, &theme);
         // 'V' in row 0 should use accent color
-        assert_eq!(cells[0].fg, theme.accent);
+        assert_eq!(cells[0].fg, theme.accent_orange);
     }
 
     #[test]
@@ -590,7 +626,7 @@ mod tests {
         let theme = test_theme();
         let cells = generate_test_pattern(&grid, &theme);
         let row2_start = 2 * 80;
-        assert_eq!(cells[row2_start + 1].fg, theme.text);
+        assert_eq!(cells[row2_start + 1].fg, theme.text_primary);
     }
 
     #[test]
@@ -612,7 +648,7 @@ mod tests {
         let theme = test_theme();
         let cells = generate_test_pattern(&grid, &theme);
         let row3_start = 3 * 80;
-        assert_eq!(cells[row3_start].fg, theme.prompt);
+        assert_eq!(cells[row3_start].fg, theme.accent_orange);
     }
 
     #[test]
@@ -735,6 +771,88 @@ mod tests {
         assert_eq!(instances[1].position, [1.0, 0.0]);
         assert_eq!(instances[2].position, [2.0, 0.0]);
         assert_eq!(instances[3].position, [0.0, 1.0]);
+    }
+
+    #[test]
+    fn generate_instances_coordinates_within_bounds() {
+        let atlas = test_atlas();
+        let grid = test_grid(80, 24);
+        let theme = crate::config::theme::TerminalTheme::warm_dark();
+        let cells = generate_test_pattern(&grid, &theme);
+        let instances = generate_instances(&grid, &cells, &atlas);
+
+        for (i, inst) in instances.iter().enumerate() {
+            let col = inst.position[0];
+            let row = inst.position[1];
+
+            assert!(
+                col >= 0.0 && col < grid.columns as f32,
+                "cell {} col {} out of bounds (max {})",
+                i,
+                col,
+                grid.columns
+            );
+            assert!(
+                row >= 0.0 && row < grid.rows as f32,
+                "cell {} row {} out of bounds (max {})",
+                i,
+                row,
+                grid.rows
+            );
+
+            // UV within [0, 1] if glyph present
+            if inst.flags & 1 != 0 {
+                let [u, v, w, h] = inst.atlas_uv;
+                assert!(
+                    u >= 0.0 && u + w <= 1.0 + 1e-6,
+                    "cell {} UV u={} w={} out of bounds",
+                    i,
+                    u,
+                    w
+                );
+                assert!(
+                    v >= 0.0 && v + h <= 1.0 + 1e-6,
+                    "cell {} UV v={} h={} out of bounds",
+                    i,
+                    v,
+                    h
+                );
+            }
+        }
+
+        // No duplicate positions
+        let mut positions: Vec<(u32, u32)> = instances
+            .iter()
+            .map(|inst| (inst.position[0] as u32, inst.position[1] as u32))
+            .collect();
+        let before = positions.len();
+        positions.sort();
+        positions.dedup();
+        assert_eq!(before, positions.len(), "duplicate cell positions found");
+    }
+
+    #[test]
+    fn cell_size_ndc_fills_viewport_exactly() {
+        let grid = test_grid(80, 24);
+        let [ndc_w, ndc_h] = grid.cell_size_ndc();
+
+        let total_w = ndc_w * grid.columns as f32;
+        let total_h = ndc_h * grid.rows as f32;
+
+        assert!(
+            (total_w - 2.0).abs() < 1e-5,
+            "NDC width {} * {} cols = {} (expected 2.0)",
+            ndc_w,
+            grid.columns,
+            total_w
+        );
+        assert!(
+            (total_h - 2.0).abs() < 1e-5,
+            "NDC height {} * {} rows = {} (expected 2.0)",
+            ndc_h,
+            grid.rows,
+            total_h
+        );
     }
 
     #[test]

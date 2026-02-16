@@ -1,6 +1,6 @@
 // Tab bar rendering: quad generation and hit testing for the tab bar UI.
 
-use crate::config::theme::{Color, Theme};
+use crate::config::theme::{TerminalTheme, color_new};
 use crate::pane::divider::OverlayQuad;
 use crate::pane::Rect;
 use crate::renderer::grid_renderer::GridCell;
@@ -47,7 +47,7 @@ pub fn tab_width(window_width: f32, tab_count: usize) -> f32 {
 pub fn generate_tab_bar_quads(
     tab_manager: &TabManager,
     window_width: f32,
-    theme: &Theme,
+    theme: &TerminalTheme,
 ) -> Vec<OverlayQuad> {
     let mut quads = Vec::new();
     let count = tab_manager.tab_count();
@@ -58,9 +58,9 @@ pub fn generate_tab_bar_quads(
     quads.push(OverlayQuad {
         rect: Rect::new(0.0, 0.0, window_width, TAB_BAR_HEIGHT),
         color: [
-            theme.surface.r,
-            theme.surface.g,
-            theme.surface.b,
+            theme.bg_surface.r,
+            theme.bg_surface.g,
+            theme.bg_surface.b,
             1.0,
         ],
         border_radius: 0.0,
@@ -70,12 +70,12 @@ pub fn generate_tab_bar_quads(
     for i in 0..count {
         let x = i as f32 * tw;
         let (bg_r, bg_g, bg_b) = if i == active {
-            (theme.surface_raised.r, theme.surface_raised.g, theme.surface_raised.b)
+            (theme.bg_hover.r, theme.bg_hover.g, theme.bg_hover.b)
         } else {
             (
-                theme.surface.r,
-                theme.surface.g,
-                theme.surface.b,
+                theme.bg_surface.r,
+                theme.bg_surface.g,
+                theme.bg_surface.b,
             )
         };
         quads.push(OverlayQuad {
@@ -90,7 +90,7 @@ pub fn generate_tab_bar_quads(
         let x = active as f32 * tw;
         quads.push(OverlayQuad {
             rect: Rect::new(x, TAB_BAR_HEIGHT - 2.0, tw, 2.0),
-            color: [theme.accent.r, theme.accent.g, theme.accent.b, 1.0],
+            color: [theme.accent_orange.r, theme.accent_orange.g, theme.accent_orange.b, 1.0],
             border_radius: 0.0,
         });
     }
@@ -100,7 +100,7 @@ pub fn generate_tab_bar_quads(
         let x = i as f32 * tw - TAB_SEPARATOR_WIDTH / 2.0;
         quads.push(OverlayQuad {
             rect: Rect::new(x, 2.0, TAB_SEPARATOR_WIDTH, TAB_BAR_HEIGHT - 4.0),
-            color: [theme.border.r, theme.border.g, theme.border.b, 0.5],
+            color: [theme.border_visible.r, theme.border_visible.g, theme.border_visible.b, 0.5],
             border_radius: 0.0,
         });
     }
@@ -111,7 +111,7 @@ pub fn generate_tab_bar_quads(
             let x = i as f32 * tw + tw - 10.0;
             quads.push(OverlayQuad {
                 rect: Rect::new(x, 4.0, 6.0, 6.0),
-                color: [theme.accent.r, theme.accent.g, theme.accent.b, 1.0],
+                color: [theme.accent_orange.r, theme.accent_orange.g, theme.accent_orange.b, 1.0],
                 border_radius: 0.0,
                 });
         }
@@ -122,9 +122,9 @@ pub fn generate_tab_bar_quads(
     quads.push(OverlayQuad {
         rect: Rect::new(plus_x, 0.0, NEW_TAB_BUTTON_WIDTH, TAB_BAR_HEIGHT),
         color: [
-            theme.surface.r,
-            theme.surface.g,
-            theme.surface.b,
+            theme.bg_surface.r,
+            theme.bg_surface.g,
+            theme.bg_surface.b,
             1.0,
         ],
         border_radius: 0.0,
@@ -144,7 +144,7 @@ pub fn generate_tab_label_text_cells(
     window_width: f32,
     cell_width: f32,
     cell_height: f32,
-    theme: &Theme,
+    theme: &TerminalTheme,
     hovered_tab: Option<usize>,
 ) -> Vec<(Rect, Vec<GridCell>)> {
     let mut result = Vec::new();
@@ -169,21 +169,21 @@ pub fn generate_tab_label_text_cells(
 
         let (fg, bg) = if i == active {
             (
-                Color::new(theme.text.r, theme.text.g, theme.text.b, 1.0),
-                Color::new(theme.surface_raised.r, theme.surface_raised.g, theme.surface_raised.b, 1.0),
+                color_new(theme.text_primary.r, theme.text_primary.g, theme.text_primary.b, 1.0),
+                color_new(theme.bg_hover.r, theme.bg_hover.g, theme.bg_hover.b, 1.0),
             )
         } else {
             (
-                Color::new(
+                color_new(
                     theme.text_secondary.r,
                     theme.text_secondary.g,
                     theme.text_secondary.b,
                     1.0,
                 ),
-                Color::new(
-                    theme.surface.r,
-                    theme.surface.g,
-                    theme.surface.b,
+                color_new(
+                    theme.bg_surface.r,
+                    theme.bg_surface.g,
+                    theme.bg_surface.b,
                     1.0,
                 ),
             )
@@ -196,9 +196,9 @@ pub fn generate_tab_label_text_cells(
         if show_close && columns >= 3 {
             let close_col = columns - 1;
             let close_fg = if i == active {
-                Color::new(theme.text.r, theme.text.g, theme.text.b, 0.7)
+                color_new(theme.text_primary.r, theme.text_primary.g, theme.text_primary.b, 0.7)
             } else {
-                Color::new(theme.text_secondary.r, theme.text_secondary.g, theme.text_secondary.b, 0.7)
+                color_new(theme.text_secondary.r, theme.text_secondary.g, theme.text_secondary.b, 0.7)
             };
             cells[close_col] = GridCell::new('\u{00D7}', close_fg, bg); // × character
         }
@@ -235,13 +235,13 @@ pub fn generate_tab_label_text_cells(
     let plus_cols = (NEW_TAB_BUTTON_WIDTH / cell_width).floor() as usize;
     if plus_cols > 0 {
         let plus_rect = Rect::new(plus_x, text_y.max(0.0), NEW_TAB_BUTTON_WIDTH, cell_height);
-        let bg = Color::new(
-            theme.surface.r,
-            theme.surface.g,
-            theme.surface.b,
+        let bg = color_new(
+            theme.bg_surface.r,
+            theme.bg_surface.g,
+            theme.bg_surface.b,
             1.0,
         );
-        let fg = Color::new(
+        let fg = color_new(
             theme.text_secondary.r,
             theme.text_secondary.g,
             theme.text_secondary.b,
@@ -304,7 +304,7 @@ pub fn hit_test_tab_bar(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::theme::Theme;
+    use crate::config::theme::TerminalTheme;
     use crate::pane::PaneId;
     use crate::tab::TabId;
 
@@ -347,7 +347,7 @@ mod tests {
     fn quads_single_tab() {
         setup();
         let mgr = TabManager::new();
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         let quads = generate_tab_bar_quads(&mgr, 1280.0, &theme);
         // Background + 1 tab + accent stripe + "+" button = 4 quads
         assert_eq!(quads.len(), 4);
@@ -360,25 +360,25 @@ mod tests {
     fn quads_active_tab_uses_surface_raised() {
         setup();
         let mgr = TabManager::new();
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         let quads = generate_tab_bar_quads(&mgr, 1280.0, &theme);
         // Second quad is the active tab — should use surface_raised
         let tab_quad = &quads[1];
-        assert_eq!(tab_quad.color[0], theme.surface_raised.r);
-        assert_eq!(tab_quad.color[1], theme.surface_raised.g);
-        assert_eq!(tab_quad.color[2], theme.surface_raised.b);
+        assert_eq!(tab_quad.color[0], theme.bg_hover.r);
+        assert_eq!(tab_quad.color[1], theme.bg_hover.g);
+        assert_eq!(tab_quad.color[2], theme.bg_hover.b);
     }
 
     #[test]
     fn quads_active_tab_has_accent_stripe() {
         setup();
         let mgr = TabManager::new();
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         let quads = generate_tab_bar_quads(&mgr, 1280.0, &theme);
         // Accent stripe quad (after tab bg, before separators)
         let stripe = &quads[2];
-        assert_eq!(stripe.color[0], theme.accent.r);
-        assert_eq!(stripe.color[1], theme.accent.g);
+        assert_eq!(stripe.color[0], theme.accent_orange.r);
+        assert_eq!(stripe.color[1], theme.accent_orange.g);
         assert_eq!(stripe.rect.height, 2.0);
         assert!((stripe.rect.y - (TAB_BAR_HEIGHT - 2.0)).abs() < 0.01);
     }
@@ -389,7 +389,7 @@ mod tests {
         let mut mgr = TabManager::new();
         mgr.new_tab();
         mgr.new_tab();
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         let quads = generate_tab_bar_quads(&mgr, 1280.0, &theme);
         // Background + 3 tabs + accent stripe + 2 separators + "+" button = 8 quads
         assert_eq!(quads.len(), 8);
@@ -400,11 +400,11 @@ mod tests {
         setup();
         let mut mgr = TabManager::new();
         mgr.new_tab(); // active is now tab 1
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         let quads = generate_tab_bar_quads(&mgr, 1280.0, &theme);
         // quads[1] is tab 0 (inactive)
-        assert_eq!(quads[1].color[0], theme.surface.r);
-        assert_eq!(quads[1].color[1], theme.surface.g);
+        assert_eq!(quads[1].color[0], theme.bg_surface.r);
+        assert_eq!(quads[1].color[1], theme.bg_surface.g);
     }
 
     // ── generate_tab_label_text_cells ─────────────────────────────
@@ -413,7 +413,7 @@ mod tests {
     fn label_single_tab_generates_title() {
         setup();
         let mgr = TabManager::new();
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme, None);
         assert_eq!(labels.len(), 2); // 1 tab + "+" button
         // Default title is "Shell"
@@ -424,12 +424,12 @@ mod tests {
     fn label_active_tab_uses_surface_raised_bg() {
         setup();
         let mgr = TabManager::new();
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme, None);
         let tab_cell = labels[0].1.iter().find(|c| c.ch == 'S').unwrap();
-        assert!((tab_cell.bg.r - theme.surface_raised.r).abs() < 0.01);
-        assert!((tab_cell.bg.g - theme.surface_raised.g).abs() < 0.01);
-        assert!((tab_cell.bg.b - theme.surface_raised.b).abs() < 0.01);
+        assert!((tab_cell.bg.r - theme.bg_hover.r).abs() < 0.01);
+        assert!((tab_cell.bg.g - theme.bg_hover.g).abs() < 0.01);
+        assert!((tab_cell.bg.b - theme.bg_hover.b).abs() < 0.01);
     }
 
     #[test]
@@ -437,10 +437,10 @@ mod tests {
         setup();
         let mut mgr = TabManager::new();
         mgr.new_tab();
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme, None);
         let tab0_cell = labels[0].1.iter().find(|c| c.ch == 'S').unwrap();
-        assert!((tab0_cell.bg.r - theme.surface.r).abs() < 0.01);
+        assert!((tab0_cell.bg.r - theme.bg_surface.r).abs() < 0.01);
     }
 
     #[test]
@@ -449,7 +449,7 @@ mod tests {
         let mut mgr = TabManager::new();
         mgr.new_tab();
         mgr.new_tab();
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme, None);
         assert_eq!(labels.len(), 4); // 3 tabs + "+" button
         // All tabs have default "Shell" title
@@ -465,7 +465,7 @@ mod tests {
     fn close_button_always_on_active_tab() {
         setup();
         let mgr = TabManager::new();
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme, None);
         // Active tab (0) should have × close button
         assert!(labels[0].1.iter().any(|c| c.ch == '\u{00D7}'));
@@ -476,7 +476,7 @@ mod tests {
         setup();
         let mut mgr = TabManager::new();
         mgr.new_tab(); // active is now 1
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         // Hover over tab 0 (inactive)
         let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme, Some(0));
         // Tab 0 (inactive, hovered) should have × close button
@@ -488,7 +488,7 @@ mod tests {
         setup();
         let mut mgr = TabManager::new();
         mgr.new_tab(); // active is now 1
-        let theme = Theme::claude_dark();
+        let theme = TerminalTheme::warm_dark();
         // No hover
         let labels = generate_tab_label_text_cells(&mgr, 1280.0, 10.0, 20.0, &theme, None);
         // Tab 0 (inactive, not hovered) should NOT have × close button

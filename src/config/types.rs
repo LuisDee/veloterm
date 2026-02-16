@@ -2,7 +2,11 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 
-const VALID_THEMES: &[&str] = &["claude_dark", "claude_light", "claude_warm"];
+const VALID_THEMES: &[&str] = &[
+    "warm_dark", "midnight", "ember", "dusk", "light",
+    // Legacy aliases (backward compat)
+    "claude_dark", "claude_light", "claude_warm",
+];
 const VALID_CURSOR_STYLES: &[&str] = &["block", "beam", "underline"];
 
 /// Top-level application configuration.
@@ -20,6 +24,7 @@ pub struct Config {
     pub vi_mode: ViModeConfig,
     pub quick_terminal: QuickTerminalConfig,
     pub session: SessionConfig,
+    pub sidebar: SidebarConfig,
 }
 
 /// Font configuration.
@@ -161,6 +166,24 @@ impl Default for SessionConfig {
     }
 }
 
+/// Sidebar configuration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SidebarConfig {
+    /// Whether the sidebar is visible by default on startup.
+    pub default_visible: bool,
+    /// Sidebar width in logical pixels.
+    pub width: f32,
+}
+
+impl Default for SidebarConfig {
+    fn default() -> Self {
+        Self {
+            default_visible: true,
+            width: 200.0,
+        }
+    }
+}
+
 /// Errors that can occur during config loading and validation.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -189,6 +212,7 @@ struct RawConfig {
     vi_mode: RawViModeConfig,
     quick_terminal: RawQuickTerminalConfig,
     session: RawSessionConfig,
+    sidebar: RawSidebarConfig,
 }
 
 #[derive(Deserialize)]
@@ -205,8 +229,8 @@ impl Default for RawFontConfig {
     fn default() -> Self {
         Self {
             family: "JetBrains Mono".to_string(),
-            size: 18.0,
-            line_height: 1.5,
+            size: 16.0,
+            line_height: 1.6,
             ui_family: "Inter".to_string(),
             display_family: "Georgia".to_string(),
         }
@@ -227,8 +251,8 @@ impl Default for RawPaddingConfig {
         Self {
             top: 16.0,
             bottom: 16.0,
-            left: 16.0,
-            right: 16.0,
+            left: 22.0,
+            right: 22.0,
         }
     }
 }
@@ -242,7 +266,7 @@ struct RawColorsConfig {
 impl Default for RawColorsConfig {
     fn default() -> Self {
         Self {
-            theme: "claude_dark".to_string(),
+            theme: "warm_dark".to_string(),
         }
     }
 }
@@ -372,14 +396,30 @@ impl Default for RawSessionConfig {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(default)]
+struct RawSidebarConfig {
+    default_visible: bool,
+    width: f32,
+}
+
+impl Default for RawSidebarConfig {
+    fn default() -> Self {
+        Self {
+            default_visible: true,
+            width: 200.0,
+        }
+    }
+}
+
 // ── Default impls ───────────────────────────────────────────────────────
 
 impl Default for FontConfig {
     fn default() -> Self {
         Self {
             family: "JetBrains Mono".to_string(),
-            size: 18.0,
-            line_height: 1.5,
+            size: 16.0,
+            line_height: 1.6,
             ui_family: "Inter".to_string(),
             display_family: "Georgia".to_string(),
         }
@@ -391,8 +431,8 @@ impl Default for PaddingConfig {
         Self {
             top: 16.0,
             bottom: 16.0,
-            left: 16.0,
-            right: 16.0,
+            left: 22.0,
+            right: 22.0,
         }
     }
 }
@@ -400,7 +440,7 @@ impl Default for PaddingConfig {
 impl Default for ColorsConfig {
     fn default() -> Self {
         Self {
-            theme: "claude_dark".to_string(),
+            theme: "warm_dark".to_string(),
         }
     }
 }
@@ -497,6 +537,10 @@ impl Config {
             session: SessionConfig {
                 auto_restore: raw.session.auto_restore,
             },
+            sidebar: SidebarConfig {
+                default_visible: raw.sidebar.default_visible,
+                width: raw.sidebar.width,
+            },
         };
 
         config.validate()?;
@@ -579,6 +623,7 @@ impl Config {
             vi_mode_changed: self.vi_mode != other.vi_mode,
             quick_terminal_changed: self.quick_terminal != other.quick_terminal,
             session_changed: self.session != other.session,
+            sidebar_changed: self.sidebar != other.sidebar,
         }
     }
 
@@ -591,9 +636,9 @@ impl Config {
 # Terminal content font family (with fallback: JetBrains Mono -> SF Mono -> Menlo -> system)
 family = "JetBrains Mono"
 # Font size in points
-size = 18.0
-# Line-height multiplier (1.5 = 150% of font size)
-line_height = 1.5
+size = 16.0
+# Line-height multiplier (1.6 = 160% of font size)
+line_height = 1.6
 # UI chrome font (tab bar, menus, status)
 ui_family = "Inter"
 # Display/header font (welcome screen, about)
@@ -603,12 +648,12 @@ display_family = "Georgia"
 # Terminal content padding in pixels
 top = 16.0
 bottom = 16.0
-left = 16.0
-right = 16.0
+left = 22.0
+right = 22.0
 
 [colors]
-# Theme: "claude_dark", "claude_light", or "claude_warm"
-theme = "claude_dark"
+# Theme: "warm_dark", "midnight", "ember", "dusk", or "light"
+theme = "warm_dark"
 
 [cursor]
 # Cursor style: "block", "beam", or "underline"
@@ -650,6 +695,12 @@ hotkey = "Control+`"
 # Automatically restore the previous session on startup
 auto_restore = false
 
+[sidebar]
+# Show sidebar by default on startup
+default_visible = true
+# Sidebar width in logical pixels
+width = 200.0
+
 # [keys]
 # Keybindings as "key_combo" = "action" pairs
 # Example:
@@ -675,6 +726,7 @@ pub struct ConfigDelta {
     pub vi_mode_changed: bool,
     pub quick_terminal_changed: bool,
     pub session_changed: bool,
+    pub sidebar_changed: bool,
 }
 
 impl ConfigDelta {
@@ -692,6 +744,7 @@ impl ConfigDelta {
             && !self.vi_mode_changed
             && !self.quick_terminal_changed
             && !self.session_changed
+            && !self.sidebar_changed
     }
 }
 
@@ -705,7 +758,7 @@ mod tests {
     #[test]
     fn default_font_size() {
         let config = Config::default();
-        assert_eq!(config.font.size, 18.0);
+        assert_eq!(config.font.size, 16.0);
     }
 
     #[test]
@@ -717,7 +770,7 @@ mod tests {
     #[test]
     fn default_font_line_height() {
         let config = Config::default();
-        assert_eq!(config.font.line_height, 1.5);
+        assert_eq!(config.font.line_height, 1.6);
     }
 
     #[test]
@@ -737,14 +790,14 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.padding.top, 16.0);
         assert_eq!(config.padding.bottom, 16.0);
-        assert_eq!(config.padding.left, 16.0);
-        assert_eq!(config.padding.right, 16.0);
+        assert_eq!(config.padding.left, 22.0);
+        assert_eq!(config.padding.right, 22.0);
     }
 
     #[test]
     fn default_theme() {
         let config = Config::default();
-        assert_eq!(config.colors.theme, "claude_dark");
+        assert_eq!(config.colors.theme, "warm_dark");
     }
 
     #[test]
@@ -790,7 +843,7 @@ mod tests {
         let toml = r#"
 [font]
 family = "JetBrains Mono"
-size = 18.0
+size = 14.0
 
 [colors]
 theme = "claude_light"
@@ -811,7 +864,7 @@ fps_limit = 120
 "#;
         let config = Config::from_toml(toml).unwrap();
         assert_eq!(config.font.family, "JetBrains Mono");
-        assert_eq!(config.font.size, 18.0);
+        assert_eq!(config.font.size, 14.0);
         assert_eq!(config.colors.theme, "claude_light");
         assert_eq!(config.cursor.style, "beam");
         assert!(!config.cursor.blink);
@@ -825,13 +878,13 @@ fps_limit = 120
     fn parse_partial_toml_uses_defaults() {
         let toml = r#"
 [font]
-size = 18.0
+size = 14.0
 "#;
         let config = Config::from_toml(toml).unwrap();
-        assert_eq!(config.font.size, 18.0);
+        assert_eq!(config.font.size, 14.0);
         assert_eq!(config.font.family, "JetBrains Mono");
-        assert_eq!(config.font.line_height, 1.5);
-        assert_eq!(config.colors.theme, "claude_dark");
+        assert_eq!(config.font.line_height, 1.6);
+        assert_eq!(config.colors.theme, "warm_dark");
         assert_eq!(config.cursor.style, "block");
         assert!(config.cursor.blink);
         assert_eq!(config.scrollback.lines, 10_000);
@@ -842,10 +895,10 @@ size = 18.0
     #[test]
     fn parse_empty_toml_uses_all_defaults() {
         let config = Config::from_toml("").unwrap();
-        assert_eq!(config.font.size, 18.0);
+        assert_eq!(config.font.size, 16.0);
         assert_eq!(config.font.family, "JetBrains Mono");
-        assert_eq!(config.font.line_height, 1.5);
-        assert_eq!(config.colors.theme, "claude_dark");
+        assert_eq!(config.font.line_height, 1.6);
+        assert_eq!(config.colors.theme, "warm_dark");
         assert_eq!(config.padding.top, 16.0);
     }
 
@@ -971,16 +1024,16 @@ entry_key = "ctrl+space"
     fn parse_padding_config() {
         let toml = r#"
 [padding]
-top = 16.0
-bottom = 16.0
-left = 20.0
-right = 20.0
+top = 20.0
+bottom = 12.0
+left = 24.0
+right = 24.0
 "#;
         let config = Config::from_toml(toml).unwrap();
-        assert_eq!(config.padding.top, 16.0);
-        assert_eq!(config.padding.bottom, 16.0);
-        assert_eq!(config.padding.left, 20.0);
-        assert_eq!(config.padding.right, 20.0);
+        assert_eq!(config.padding.top, 20.0);
+        assert_eq!(config.padding.bottom, 12.0);
+        assert_eq!(config.padding.left, 24.0);
+        assert_eq!(config.padding.right, 24.0);
     }
 
     #[test]
@@ -1019,7 +1072,7 @@ display_family = "Galaxie Copernicus"
     fn diff_detects_line_height_change() {
         let a = Config::default();
         let mut b = Config::default();
-        b.font.line_height = 1.8;
+        b.font.line_height = 2.0;
         let delta = a.diff(&b);
         assert!(delta.font_changed);
     }
@@ -1175,15 +1228,15 @@ fps_limit = 0
         }
         let config = Config::load(&path).unwrap();
         assert_eq!(config.font.size, 20.0);
-        assert_eq!(config.colors.theme, "claude_dark");
+        assert_eq!(config.colors.theme, "warm_dark");
     }
 
     #[test]
     fn load_missing_file_returns_defaults() {
         let path = Path::new("/tmp/nonexistent_veloterm_config_test.toml");
         let config = Config::load(path).unwrap();
-        assert_eq!(config.font.size, 18.0);
-        assert_eq!(config.colors.theme, "claude_dark");
+        assert_eq!(config.font.size, 16.0);
+        assert_eq!(config.colors.theme, "warm_dark");
     }
 
     // ── ConfigError display test ────────────────────────────────────
@@ -1219,7 +1272,7 @@ fps_limit = 0
     fn diff_detects_theme_change() {
         let a = Config::default();
         let mut b = Config::default();
-        b.colors.theme = "claude_light".to_string();
+        b.colors.theme = "light".to_string();
         let delta = a.diff(&b);
         assert!(delta.colors_changed);
         assert!(!delta.font_changed);
@@ -1448,5 +1501,51 @@ auto_restore = true
         b.session.auto_restore = true;
         let delta = a.diff(&b);
         assert!(delta.session_changed);
+    }
+
+    // ── Sidebar config tests ─────────────────────────────────────
+
+    #[test]
+    fn default_sidebar_config() {
+        let config = Config::default();
+        assert!(config.sidebar.default_visible);
+        assert_eq!(config.sidebar.width, 200.0);
+    }
+
+    #[test]
+    fn parse_sidebar_config_from_toml() {
+        let toml = r#"
+[sidebar]
+default_visible = true
+width = 250.0
+"#;
+        let config = Config::from_toml(toml).unwrap();
+        assert!(config.sidebar.default_visible);
+        assert_eq!(config.sidebar.width, 250.0);
+    }
+
+    #[test]
+    fn parse_sidebar_config_defaults() {
+        let config = Config::from_toml("").unwrap();
+        assert!(config.sidebar.default_visible);
+        assert_eq!(config.sidebar.width, 200.0);
+    }
+
+    #[test]
+    fn diff_detects_sidebar_width_change() {
+        let a = Config::default();
+        let mut b = Config::default();
+        b.sidebar.width = 250.0;
+        let delta = a.diff(&b);
+        assert!(delta.sidebar_changed);
+    }
+
+    #[test]
+    fn diff_detects_sidebar_visible_change() {
+        let a = Config::default();
+        let mut b = Config::default();
+        b.sidebar.default_visible = false;
+        let delta = a.diff(&b);
+        assert!(delta.sidebar_changed);
     }
 }
