@@ -17,6 +17,7 @@ pub enum ContextMenuAction {
 }
 
 impl ContextMenuAction {
+    #[allow(dead_code)]
     fn from_tag(tag: isize) -> Option<Self> {
         match tag {
             1 => Some(Self::Copy),

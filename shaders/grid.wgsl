@@ -8,6 +8,7 @@ struct Uniforms {
     grid_size: vec2<f32>,    // columns, rows
     atlas_size: vec2<f32>,   // atlas texture dimensions in pixels
     flags: vec2<f32>,        // x: 1.0 = RGBA atlas (per-channel subpixel), 0.0 = R8 (grayscale alpha)
+                             // y: reserved (always 0.0)
 };
 
 @group(0) @binding(0)
@@ -68,13 +69,14 @@ fn vs_main(
     let y = 1.0 - (cell.position.y + corner.y) * uniforms.cell_size.y;
 
     // Calculate UV coordinates within the glyph atlas.
-    // Flip V within the glyph slot: the atlas stores glyphs top-down in data,
-    // but the GPU texture has V increasing downward from the top. On Metal,
-    // the viewport Y-flip means corner.y=0 (screen top) needs to sample the
-    // bottom of the glyph slot to produce correctly oriented text.
+    // The atlas stores glyphs top-down: row 0 = top of glyph, UV v=0 = top.
+    // corner.y=0 (top of quad) should sample the top of the glyph (v=0),
+    // corner.y=1 (bottom of quad) should sample the bottom (v=slot_height).
+    // This mapping is the same on all backends — the viewport Y-flip on Metal
+    // affects NDC→screen mapping but not vertex→fragment UV interpolation.
     let uv = vec2<f32>(
         cell.atlas_uv.x + corner.x * cell.atlas_uv.z,
-        cell.atlas_uv.y + (1.0 - corner.y) * cell.atlas_uv.w
+        cell.atlas_uv.y + corner.y * cell.atlas_uv.w
     );
 
     var out: VertexOutput;
