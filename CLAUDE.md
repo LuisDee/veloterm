@@ -63,6 +63,18 @@ verbose output.
 - **Config**: TOML at `~/.config/veloterm/config.toml`, hot-reloads on change
 - **PTY**: alacritty_terminal for VT parsing, portable-pty for shell spawning
 
+## Commit Hygiene (CRITICAL)
+
+**See `COMMIT_HYGIENE.md` for full rules.** Summary:
+
+- **Commit after every logical unit of work.** Never accumulate changes.
+- **Push after every commit.** Local-only commits are not safe.
+- **Before editing files**, check `git status`. If uncommitted changes exist, commit them FIRST.
+- **After tests pass**, commit immediately before continuing.
+- **Never leave uncommitted work.** WIP commits are acceptable.
+
+This exists because uncommitted work across ~20 files was catastrophically lost.
+
 ## Key Constraints
 
 - Atlas minimum size: 512px (smaller causes UV sampling issues)
