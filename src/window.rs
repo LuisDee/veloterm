@@ -1919,6 +1919,35 @@ impl ApplicationHandler<UserEvent> for App {
                         return;
                     }
 
+                    // In conductor mode, intercept keys for dashboard navigation
+                    if self.input_mode == InputMode::Conductor {
+                        if let Some(cs) = &mut self.conductor_state {
+                            match &event.logical_key {
+                                Key::Named(NamedKey::Escape) => {
+                                    self.input_mode = InputMode::Normal;
+                                }
+                                Key::Named(NamedKey::ArrowDown) => cs.select_next(),
+                                Key::Character(ref s) if s.as_str() == "j" => cs.select_next(),
+                                Key::Named(NamedKey::ArrowUp) => cs.select_prev(),
+                                Key::Character(ref s) if s.as_str() == "k" => cs.select_prev(),
+                                Key::Named(NamedKey::PageDown) => cs.scroll_detail_down(),
+                                Key::Character(ref s) if s.as_str() == "d" => cs.scroll_detail_down(),
+                                Key::Named(NamedKey::PageUp) => cs.scroll_detail_up(),
+                                Key::Character(ref s) if s.as_str() == "u" => cs.scroll_detail_up(),
+                                Key::Character(ref s) if s.as_str() == "f" => cs.cycle_filter(),
+                                Key::Character(ref s) if s.as_str() == "s" => cs.cycle_sort(),
+                                _ => {} // Consume all other keys
+                            }
+                        } else {
+                            // No conductor state, exit mode
+                            self.input_mode = InputMode::Normal;
+                        }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+
                     // In command palette mode, intercept keys for palette interaction
                     if self.input_mode == InputMode::CommandPalette {
                         self.handle_palette_key(&event.logical_key, event.text.as_ref().map(|s| s.as_ref()), event_loop);
