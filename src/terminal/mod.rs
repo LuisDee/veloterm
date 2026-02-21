@@ -8,7 +8,7 @@ use alacritty_terminal::term::Config;
 use alacritty_terminal::vte::ansi;
 
 use crate::shell_integration::listener::{
-    self, EventQueue, TerminalEvent, VeloTermListener,
+    self, EventQueue, QueryResponse, ResponseQueue, TerminalEvent, VeloTermListener,
 };
 use crate::shell_integration::{self, ShellEvent, ShellState};
 
@@ -35,6 +35,7 @@ pub struct Terminal {
     term: alacritty_terminal::term::Term<VeloTermListener>,
     processor: ansi::Processor,
     event_queue: EventQueue,
+    response_queue: ResponseQueue,
     shell_state: ShellState,
     /// Set to true when a BEL character is received; cleared after reading.
     bell_pending: bool,
@@ -51,13 +52,14 @@ impl Terminal {
             scrolling_history: scrollback,
             ..Config::default()
         };
-        let (veloterm_listener, event_queue) = listener::create_listener();
+        let (veloterm_listener, event_queue, response_queue) = listener::create_listener();
         let term = alacritty_terminal::term::Term::new(config, &size, veloterm_listener);
         let processor = ansi::Processor::new();
         Self {
             term,
             processor,
             event_queue,
+            response_queue,
             shell_state: ShellState::new(),
             bell_pending: false,
         }
@@ -228,6 +230,13 @@ impl Terminal {
     /// Access the shell state mutably.
     pub fn shell_state_mut(&mut self) -> &mut ShellState {
         &mut self.shell_state
+    }
+
+    /// Drain any pending query responses generated during feed().
+    /// These must be written back to the PTY for applications waiting on answers
+    /// (DA1, DA2, DSR, OSC 10/11 color queries, XTWINOPS, etc.)
+    pub fn drain_query_responses(&mut self) -> Vec<QueryResponse> {
+        listener::drain_responses(&self.response_queue)
     }
 
     /// Jump viewport to the previous prompt position.
@@ -634,5 +643,58 @@ mod tests {
         term.feed(b"\x07");
         assert!(term.take_bell());
         assert!(!term.take_bell());
+    }
+
+    // ── Query response draining ────────────────────────────────
+
+    #[test]
+    fn da1_query_produces_drainable_response() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        // Send DA1: ESC [ c
+        term.feed(b"\x1b[c");
+        let responses = term.drain_query_responses();
+        assert!(!responses.is_empty(), "DA1 should produce a query response");
+    }
+
+    #[test]
+    fn dsr_status_produces_drainable_response() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        // Send DSR 5n (operating status)
+        term.feed(b"\x1b[5n");
+        let responses = term.drain_query_responses();
+        assert!(!responses.is_empty(), "DSR 5n should produce a query response");
+    }
+
+    #[test]
+    fn osc11_produces_color_query_response() {
+        use crate::shell_integration::listener::QueryResponse;
+        let mut term = Terminal::new(80, 24, 10_000);
+        // Send OSC 11 query (background color)
+        term.feed(b"\x1b]11;?\x07");
+        let responses = term.drain_query_responses();
+        assert!(!responses.is_empty(), "OSC 11 should produce a query response");
+        // alacritty_terminal maps OSC 11 to internal index 257
+        assert!(
+            matches!(&responses[0], QueryResponse::Color(257, _)),
+            "OSC 11 should produce a Color(257, _) response"
+        );
+    }
+
+    #[test]
+    fn drain_responses_clears_queue() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        term.feed(b"\x1b[c"); // DA1
+        let responses = term.drain_query_responses();
+        assert!(!responses.is_empty());
+        let responses2 = term.drain_query_responses();
+        assert!(responses2.is_empty(), "Second drain should be empty");
+    }
+
+    #[test]
+    fn normal_text_produces_no_query_responses() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        term.feed(b"Hello world\r\n");
+        let responses = term.drain_query_responses();
+        assert!(responses.is_empty(), "Normal text should not produce query responses");
     }
 }

@@ -2426,9 +2426,56 @@ impl ApplicationHandler<UserEvent> for App {
                     .unwrap_or((1280, 720));
 
                 // Drain PTY output into terminals for all panes, update cursor positions
+                let theme_for_queries = self.renderer.as_ref().map(|r| r.theme().clone());
+                let cell_dims = self.renderer.as_ref().map(|r| (r.cell_width(), r.cell_height()));
                 for state in self.pane_states.values_mut() {
                     while let Ok(bytes) = state.pty.reader_rx.try_recv() {
                         state.terminal.feed(&bytes);
+                    }
+                    // Process query responses (DA1, DA2, DSR, OSC 10/11, etc.)
+                    let responses = state.terminal.drain_query_responses();
+                    for resp in responses {
+                        use crate::shell_integration::listener::QueryResponse;
+                        let write_back: Option<String> = match resp {
+                            QueryResponse::Direct(s) => Some(s),
+                            QueryResponse::Color(index, formatter) => {
+                                if let Some(theme) = &theme_for_queries {
+                                    // alacritty_terminal uses internal indices:
+                                    // 256 = foreground (OSC 10), 257 = background (OSC 11)
+                                    let color = match index {
+                                        256 | 10 => theme.text_primary,
+                                        257 | 11 => theme.bg_deep,
+                                        _ => theme.text_primary,
+                                    };
+                                    let rgb = alacritty_terminal::vte::ansi::Rgb {
+                                        r: (color.r * 255.0) as u8,
+                                        g: (color.g * 255.0) as u8,
+                                        b: (color.b * 255.0) as u8,
+                                    };
+                                    Some(formatter(rgb))
+                                } else {
+                                    None
+                                }
+                            }
+                            QueryResponse::TextAreaSize(formatter) => {
+                                if let Some((cw, ch)) = cell_dims {
+                                    let ws = alacritty_terminal::event::WindowSize {
+                                        num_lines: state.terminal.rows() as u16,
+                                        num_cols: state.terminal.columns() as u16,
+                                        cell_width: cw as u16,
+                                        cell_height: ch as u16,
+                                    };
+                                    Some(formatter(ws))
+                                } else {
+                                    None
+                                }
+                            }
+                        };
+                        if let Some(response) = write_back {
+                            if let Err(e) = state.pty.write(response.as_bytes()) {
+                                log::warn!("Failed to write query response to PTY: {}", e);
+                            }
+                        }
                     }
                     // Check for bell events
                     if state.terminal.take_bell() && self.app_config.shell.bell_enabled {
