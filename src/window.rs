@@ -2686,6 +2686,7 @@ impl ApplicationHandler<UserEvent> for App {
                         editing_tab_value: self.editing_tab_value.clone(),
                         hovering_new_tab: self.hovering_new_tab,
                         hovering_close_button: self.hovering_close_button,
+                        conductor: None,
                     };
 
                     let mut iced_msgs = Vec::new();
@@ -2815,6 +2816,15 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                             UiMessage::CloseButtonHovered(tab_idx) => {
                                 self.hovering_close_button = tab_idx;
+                            }
+                            UiMessage::ConductorTrackClicked(_idx) => {
+                                // TODO: wire conductor track selection
+                            }
+                            UiMessage::ConductorFilterCycled => {
+                                // TODO: wire conductor filter cycling
+                            }
+                            UiMessage::ConductorSortCycled => {
+                                // TODO: wire conductor sort cycling
                             }
                             UiMessage::Noop => {}
                         }

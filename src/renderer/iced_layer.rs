@@ -49,6 +49,10 @@ pub enum UiMessage {
     RenameTabCommit(usize, String),
     NewTabHovered(bool),
     CloseButtonHovered(Option<usize>),
+    // Conductor dashboard
+    ConductorTrackClicked(usize),
+    ConductorFilterCycled,
+    ConductorSortCycled,
     Noop,
 }
 
@@ -154,6 +158,8 @@ pub struct UiState<'a> {
     pub hovering_new_tab: bool,
     /// Which tab's close button is hovered (if any).
     pub hovering_close_button: Option<usize>,
+    /// Conductor dashboard state (if loaded).
+    pub conductor: Option<crate::conductor::ConductorSnapshot>,
 }
 
 /// Holds iced rendering state: renderer, viewport, event queue, and UI cache.
@@ -407,7 +413,7 @@ impl IcedLayer {
         };
 
         // Command palette overlay (modal, centered at top)
-        if state.palette_active {
+        let with_palette: IcedElement<'a> = if state.palette_active {
             let palette_overlay = Self::command_palette(state, scale);
             let scrim = container(column![])
                 .width(iced_core::Length::Fill)
@@ -425,6 +431,17 @@ impl IcedLayer {
                 .into()
         } else {
             with_theme_popup
+        };
+
+        // Conductor dashboard overlay (full-screen when active)
+        if state.conductor.is_some() {
+            let conductor = Self::conductor_dashboard(state, scale);
+            stack![with_palette, conductor]
+                .width(iced_core::Length::Fill)
+                .height(iced_core::Length::Fill)
+                .into()
+        } else {
+            with_palette
         }
     }
 
@@ -1329,6 +1346,365 @@ impl IcedLayer {
             })
             .into()
     }
+
+    /// Conductor dashboard overlay — track progress viewer.
+    fn conductor_dashboard<'a>(state: &'a UiState, scale: f32) -> IcedElement<'a> {
+        let theme = state.theme;
+        let bg = to_iced_color(&theme.bg_deep);
+        let bg_raised = to_iced_color(&theme.bg_raised);
+        let text_primary = to_iced_color(&theme.text_primary);
+        let text_secondary = to_iced_color(&theme.text_secondary);
+        let text_muted = to_iced_color(&theme.text_muted);
+        let accent = to_iced_color(&theme.accent_orange);
+        let green = to_iced_color(&theme.accent_green);
+        let red = to_iced_color(&theme.accent_red);
+        let border_color = to_iced_color(&theme.border_visible);
+
+        let snap = match &state.conductor {
+            Some(s) => s,
+            None => {
+                return container(text("No conductor data").color(text_primary))
+                    .width(iced_core::Length::Fill)
+                    .height(iced_core::Length::Fill)
+                    .into();
+            }
+        };
+
+        // ── Header ──
+        let title = text("Current Tracks").size(16.0).color(text_primary).font(DM_SANS);
+
+        let sort_label = snap.sort.label();
+        let sort_badge = container(
+            text(sort_label).size(10.0).color(text_secondary).font(DM_SANS),
+        )
+        .padding(iced_core::Padding::from([2.0 / scale, 6.0 / scale]))
+        .style(move |_: &iced_core::Theme| container::Style {
+            background: Some(iced_core::Background::Color(bg_raised)),
+            border: iced_core::Border {
+                color: iced_core::Color::TRANSPARENT,
+                width: 0.0,
+                radius: (3.0 / scale).into(),
+            },
+            ..Default::default()
+        });
+
+        let header = row![title, hspace(), sort_badge]
+            .spacing(10.0 / scale)
+            .align_y(iced_core::Alignment::Center);
+
+        // ── Stats row ──
+        let (total, active, blocked, complete, new) = snap.stats();
+        use crate::conductor::model::FilterMode;
+        let total_label_color = if snap.filter == FilterMode::All { text_primary } else { text_muted };
+        let active_label_color = if snap.filter == FilterMode::Active { text_primary } else { text_muted };
+        let blocked_label_color = if snap.filter == FilterMode::Blocked { text_primary } else { text_muted };
+        let complete_label_color = if snap.filter == FilterMode::Complete { text_primary } else { text_muted };
+        let new_label_color = if snap.filter == FilterMode::New { text_primary } else { text_muted };
+        let stats_row = row![
+            text(format!("{}", total)).size(11.0).color(text_primary).font(DM_SANS),
+            text("Total").size(11.0).color(total_label_color).font(DM_SANS),
+            text("\u{00B7}").size(11.0).color(text_muted),
+            text(format!("{}", active)).size(11.0).color(accent).font(DM_SANS),
+            text("Active").size(11.0).color(active_label_color).font(DM_SANS),
+            text("\u{00B7}").size(11.0).color(text_muted),
+            text(format!("{}", blocked)).size(11.0).color(red).font(DM_SANS),
+            text("Blocked").size(11.0).color(blocked_label_color).font(DM_SANS),
+            text("\u{00B7}").size(11.0).color(text_muted),
+            text(format!("{}", complete)).size(11.0).color(green).font(DM_SANS),
+            text("Complete").size(11.0).color(complete_label_color).font(DM_SANS),
+            text("\u{00B7}").size(11.0).color(text_muted),
+            text(format!("{}", new)).size(11.0).color(text_secondary).font(DM_SANS),
+            text("New").size(11.0).color(new_label_color).font(DM_SANS),
+        ]
+        .spacing(4.0 / scale)
+        .align_y(iced_core::Alignment::Center);
+
+        // ── Divider helper ──
+        let make_hdiv = move || -> IcedElement<'a> {
+            container(column![])
+                .width(iced_core::Length::Fill)
+                .height(1.0 / scale)
+                .style(move |_: &iced_core::Theme| container::Style {
+                    background: Some(iced_core::Background::Color(border_color)),
+                    ..Default::default()
+                })
+                .into()
+        };
+
+        // ── Track list (left pane) ──
+        let mut track_col = iced_widget::Column::new().spacing(2.0 / scale);
+
+        for (i, track) in snap.tracks.iter().enumerate() {
+            let is_selected = i == snap.selected;
+            let row_bg = if is_selected { bg_raised } else { bg };
+            let status_color = match track.status {
+                crate::conductor::model::Status::Complete => green,
+                crate::conductor::model::Status::InProgress => accent,
+                crate::conductor::model::Status::Blocked => red,
+                _ => text_secondary,
+            };
+
+            let mut track_row_items = Row::new().spacing(6.0 / scale)
+                .align_y(iced_core::Alignment::Center);
+
+            // Status dot
+            track_row_items = track_row_items.push(
+                text("\u{25CF}").size(8.0).color(status_color).font(JETBRAINS_MONO)
+                    .width(12.0 / scale),
+            );
+
+            // Title
+            let title_color = if is_selected { text_primary } else { text_secondary };
+            track_row_items = track_row_items.push(
+                text(&track.title).size(11.0).color(title_color).font(DM_SANS)
+                    .width(iced_core::Length::Fill),
+            );
+
+            // COMPLETE tag
+            if track.status == crate::conductor::model::Status::Complete {
+                track_row_items = track_row_items.push(
+                    text("COMPLETE").size(8.0).color(green).font(JETBRAINS_MONO),
+                );
+            }
+
+            let track_row = container(track_row_items)
+                .padding(iced_core::Padding::from([4.0 / scale, 8.0 / scale]))
+                .width(iced_core::Length::Fill)
+                .style(move |_: &iced_core::Theme| container::Style {
+                    background: Some(iced_core::Background::Color(row_bg)),
+                    border: iced_core::Border::default().rounded(3.0 / scale),
+                    ..Default::default()
+                });
+
+            let track_area = MouseArea::new(track_row)
+                .on_press(UiMessage::ConductorTrackClicked(i));
+            track_col = track_col.push(track_area);
+        }
+
+        // Scrollbar style for both panes
+        let scrollbar_style = move |_: &iced_core::Theme, status: iced_widget::scrollable::Status| {
+            let scroller_bg = match status {
+                iced_widget::scrollable::Status::Active { .. } => iced_core::Color::TRANSPARENT,
+                iced_widget::scrollable::Status::Hovered { .. } => iced_core::Color { a: 0.4, ..text_muted },
+                iced_widget::scrollable::Status::Dragged { .. } => iced_core::Color { a: 0.6, ..text_muted },
+            };
+            let transparent_rail = iced_widget::scrollable::Rail {
+                background: None,
+                border: iced_core::Border::default(),
+                scroller: iced_widget::scrollable::Scroller {
+                    background: iced_core::Background::Color(iced_core::Color::TRANSPARENT),
+                    border: iced_core::Border::default(),
+                },
+            };
+            iced_widget::scrollable::Style {
+                container: container::Style::default(),
+                vertical_rail: iced_widget::scrollable::Rail {
+                    background: None,
+                    border: iced_core::Border::default(),
+                    scroller: iced_widget::scrollable::Scroller {
+                        background: iced_core::Background::Color(scroller_bg),
+                        border: iced_core::Border::default().rounded(3.0 / scale),
+                    },
+                },
+                horizontal_rail: transparent_rail,
+                gap: None,
+                auto_scroll: iced_widget::scrollable::AutoScroll {
+                    background: iced_core::Background::Color(iced_core::Color::TRANSPARENT),
+                    border: iced_core::Border::default(),
+                    shadow: iced_core::Shadow::default(),
+                    icon: iced_core::Color::TRANSPARENT,
+                },
+            }
+        };
+
+        let left_pane = iced_widget::scrollable(track_col)
+            .width(iced_core::Length::Fill)
+            .height(iced_core::Length::Fill)
+            .style(scrollbar_style);
+
+        // ── Detail panel (right pane) ──
+        let right_pane: IcedElement<'a> = if let Some(track) = snap.selected_track() {
+            let mut detail_col = iced_widget::Column::new().spacing(8.0 / scale);
+
+            // Track title + status
+            let detail_status_color = match track.status {
+                crate::conductor::model::Status::Complete => green,
+                crate::conductor::model::Status::InProgress => accent,
+                crate::conductor::model::Status::Blocked => red,
+                _ => text_secondary,
+            };
+            detail_col = detail_col.push(
+                text(&track.title).size(14.0).color(text_primary).font(DM_SANS),
+            );
+            detail_col = detail_col.push(
+                row![
+                    text(track.status.label()).size(11.0).color(detail_status_color).font(DM_SANS),
+                    text("\u{00B7}").size(11.0).color(text_muted),
+                    text(format!("{}%", track.progress_percent() as u32))
+                        .size(11.0).color(text_secondary).font(JETBRAINS_MONO),
+                    text(format!("{}/{} tasks", track.tasks_completed, track.tasks_total))
+                        .size(11.0).color(text_muted).font(DM_SANS),
+                ]
+                .spacing(6.0 / scale)
+                .align_y(iced_core::Alignment::Center),
+            );
+
+            // Progress bar
+            let bar_width = 200.0 / scale;
+            let bar_height = 4.0 / scale;
+            let filled_width = bar_width * (track.progress_percent() / 100.0);
+            let filled = container(column![])
+                .width(filled_width)
+                .height(bar_height)
+                .style(move |_: &iced_core::Theme| container::Style {
+                    background: Some(iced_core::Background::Color(green)),
+                    border: iced_core::Border::default().rounded(2.0 / scale),
+                    ..Default::default()
+                });
+            let bar_bg = container(filled)
+                .width(bar_width)
+                .height(bar_height)
+                .style(move |_: &iced_core::Theme| container::Style {
+                    background: Some(iced_core::Background::Color(bg_raised)),
+                    border: iced_core::Border::default().rounded(2.0 / scale),
+                    ..Default::default()
+                });
+            detail_col = detail_col.push(bar_bg);
+
+            // Description
+            if let Some(desc) = &track.description {
+                detail_col = detail_col.push(
+                    text(desc).size(11.0).color(text_secondary).font(DM_SANS),
+                );
+            }
+
+            // Dependencies
+            if !track.dependencies.is_empty() {
+                let deps_str = track.dependencies.iter()
+                    .map(|d| d.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                detail_col = detail_col.push(
+                    row![
+                        text("Deps:").size(10.0).color(text_muted).font(DM_SANS),
+                        text(deps_str).size(10.0).color(text_secondary).font(DM_SANS),
+                    ]
+                    .spacing(4.0 / scale),
+                );
+            }
+
+            // Plan phases
+            if !track.plan_phases.is_empty() {
+                detail_col = detail_col.push(make_hdiv());
+                detail_col = detail_col.push(
+                    text("Plan Phases").size(12.0).color(text_primary).font(DM_SANS),
+                );
+
+                for phase in &track.plan_phases {
+                    let phase_icon = match phase.status {
+                        crate::conductor::model::PhaseStatus::Complete => "\u{25CF}",
+                        crate::conductor::model::PhaseStatus::Active => "\u{25D0}",
+                        crate::conductor::model::PhaseStatus::Pending => "\u{25CB}",
+                        crate::conductor::model::PhaseStatus::Blocked => "\u{2717}",
+                    };
+                    let phase_color = match phase.status {
+                        crate::conductor::model::PhaseStatus::Complete => green,
+                        crate::conductor::model::PhaseStatus::Active => accent,
+                        crate::conductor::model::PhaseStatus::Pending => text_muted,
+                        crate::conductor::model::PhaseStatus::Blocked => red,
+                    };
+                    let phase_completed = phase.tasks_completed();
+                    let phase_total = phase.tasks.len();
+                    detail_col = detail_col.push(
+                        row![
+                            text(phase_icon).size(11.0).color(phase_color).font(JETBRAINS_MONO).width(16.0 / scale),
+                            text(&phase.name).size(11.0).color(text_primary).font(DM_SANS).width(iced_core::Length::Fill),
+                            text(format!("{}/{}", phase_completed, phase_total))
+                                .size(10.0).color(text_muted).font(JETBRAINS_MONO),
+                        ]
+                        .spacing(4.0 / scale)
+                        .align_y(iced_core::Alignment::Center),
+                    );
+
+                    // Tasks within each phase
+                    for task in &phase.tasks {
+                        let (task_icon, task_color) = if task.done {
+                            ("\u{2713}", text_muted)
+                        } else {
+                            ("\u{25CB}", text_secondary)
+                        };
+                        let task_text_color = if task.done { text_muted } else { text_secondary };
+                        detail_col = detail_col.push(
+                            row![
+                                iced_widget::Space::new().width(16.0 / scale),
+                                text(task_icon).size(10.0).color(task_color).font(JETBRAINS_MONO).width(14.0 / scale),
+                                text(&task.text).size(10.5).color(task_text_color).font(DM_SANS),
+                            ]
+                            .spacing(4.0 / scale)
+                            .align_y(iced_core::Alignment::Center),
+                        );
+                    }
+                }
+            }
+
+            iced_widget::scrollable(
+                container(detail_col)
+                    .padding(iced_core::Padding::from([0.0, 8.0 / scale]))
+                    .width(iced_core::Length::Fill),
+            )
+            .width(iced_core::Length::Fill)
+            .height(iced_core::Length::Fill)
+            .style(scrollbar_style)
+            .into()
+        } else {
+            container(
+                text("Select a track").size(12.0).color(text_muted).font(DM_SANS),
+            )
+            .width(iced_core::Length::Fill)
+            .height(iced_core::Length::Fill)
+            .align_x(iced_core::Alignment::Center)
+            .align_y(iced_core::Alignment::Center)
+            .into()
+        };
+
+        // ── Vertical divider between panes ──
+        let vdiv: IcedElement<'a> = container(column![])
+            .width(1.0 / scale)
+            .height(iced_core::Length::Fill)
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(border_color)),
+                ..Default::default()
+            })
+            .into();
+
+        // ── Assemble layout ──
+        let split = snap.split_percent.max(20).min(80) as f32;
+        let body = row![
+            container(left_pane).width(iced_core::Length::FillPortion(split as u16)),
+            vdiv,
+            container(right_pane).width(iced_core::Length::FillPortion((100.0 - split) as u16)),
+        ]
+        .width(iced_core::Length::Fill)
+        .height(iced_core::Length::Fill);
+
+        let dashboard = column![
+            container(header).padding(iced_core::Padding::from([8.0 / scale, 12.0 / scale])),
+            container(stats_row).padding(iced_core::Padding::from([0.0, 12.0 / scale])),
+            make_hdiv(),
+            body,
+        ]
+        .width(iced_core::Length::Fill)
+        .height(iced_core::Length::Fill);
+
+        container(dashboard)
+            .width(iced_core::Length::Fill)
+            .height(iced_core::Length::Fill)
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(bg)),
+                ..Default::default()
+            })
+            .into()
+    }
 }
 
 #[cfg(test)]
@@ -1406,6 +1782,7 @@ mod tests {
             editing_tab_value: String::new(),
             hovering_new_tab: false,
             hovering_close_button: None,
+            conductor: None,
         }
     }
 
@@ -1662,6 +2039,7 @@ mod tests {
             editing_tab_value: String::new(),
         hovering_new_tab: false,
             hovering_close_button: None,
+            conductor: None,
             };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
@@ -1761,6 +2139,7 @@ mod tests {
             editing_tab_value: String::new(),
         hovering_new_tab: false,
             hovering_close_button: None,
+            conductor: None,
             };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
