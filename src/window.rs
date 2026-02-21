@@ -2154,7 +2154,7 @@ impl ApplicationHandler<UserEvent> for App {
                                 let cell_height = renderer.cell_height();
                                 let padding = renderer.padding();
                                 if let Some(state) = self.pane_states.get_mut(&focused_pane) {
-                                    if state.mouse_selection.is_dragging {
+                                    if state.mouse_selection.drag_phase != crate::input::mouse::DragPhase::Idle {
                                         let pane_origin_x = pgrid_bounds.x + pane_rect.map_or(0.0, |r| r.x);
                                         let pane_origin_y = Self::PANE_GRID_PADDING + pane_rect.map_or(0.0, |r| r.y) + PANE_HEADER_HEIGHT;
                                         let local_x = position.x as f32 - pane_origin_x - padding[2];

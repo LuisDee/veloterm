@@ -13,6 +13,20 @@ const MULTI_CLICK_THRESHOLD_MS: u64 = 300;
 /// Maximum pixel distance between clicks to count as multi-click.
 const MULTI_CLICK_DISTANCE: f32 = 5.0;
 
+/// Minimum pixel movement before a press becomes a drag selection.
+const DRAG_THRESHOLD: f32 = 3.0;
+
+/// Selection drag state machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DragPhase {
+    /// No mouse button held.
+    Idle,
+    /// Mouse pressed but not yet moved beyond threshold — not a selection yet.
+    Pending,
+    /// Mouse moved beyond threshold — active drag selection in progress.
+    Active,
+}
+
 /// Mouse selection state for a single pane.
 #[derive(Debug)]
 pub struct MouseSelectionState {
@@ -24,12 +38,24 @@ pub struct MouseSelectionState {
     last_click_pos: (f32, f32),
     /// Active text selection, if any.
     pub active_selection: Option<Selection>,
-    /// Whether the mouse is currently being dragged.
-    pub is_dragging: bool,
+    /// Drag state machine phase.
+    pub drag_phase: DragPhase,
+    /// Pixel position where the current press started (for threshold check).
+    press_origin_px: (f32, f32),
     /// Cell coordinates of the drag origin.
     drag_origin: (usize, usize),
     /// For word/line drag: the original word/line boundaries at the click origin.
     drag_anchor: Option<(usize, usize, usize, usize)>, // (start_row, start_col, end_row, end_col)
+    /// Set to true when the next click should be swallowed (focus change).
+    pub swallow_next_click: bool,
+}
+
+/// Backwards-compatible alias.
+impl MouseSelectionState {
+    /// Whether a drag is actively selecting (phase == Active).
+    pub fn is_dragging(&self) -> bool {
+        self.drag_phase == DragPhase::Active
+    }
 }
 
 impl MouseSelectionState {
@@ -39,10 +65,24 @@ impl MouseSelectionState {
             last_click_time: None,
             last_click_pos: (0.0, 0.0),
             active_selection: None,
-            is_dragging: false,
+            drag_phase: DragPhase::Idle,
+            press_origin_px: (0.0, 0.0),
             drag_origin: (0, 0),
             drag_anchor: None,
+            swallow_next_click: false,
         }
+    }
+
+    /// Mark that the next mouse press should be swallowed (e.g. focus change).
+    pub fn swallow_next(&mut self) {
+        self.swallow_next_click = true;
+    }
+
+    /// Reset all selection/drag state (e.g. on pane/window focus change).
+    pub fn reset_on_focus_change(&mut self) {
+        self.drag_phase = DragPhase::Idle;
+        self.drag_anchor = None;
+        self.swallow_next_click = true;
     }
 
     /// Handle a mouse press event. Returns the click count (1, 2, or 3).
@@ -81,6 +121,15 @@ impl MouseSelectionState {
 
         self.last_click_time = Some(now);
         self.last_click_pos = (pixel_x, pixel_y);
+        self.press_origin_px = (pixel_x, pixel_y);
+
+        // Swallow focus clicks
+        if self.swallow_next_click {
+            self.swallow_next_click = false;
+            self.drag_phase = DragPhase::Idle;
+            self.active_selection = None;
+            return self.click_count;
+        }
 
         let (row, col) = pixel_to_cell(
             pixel_x as f64,
@@ -92,20 +141,18 @@ impl MouseSelectionState {
         );
 
         self.drag_origin = (row, col);
-        self.is_dragging = true;
 
         match self.click_count {
             1 => {
-                // Single click: start new range selection
-                self.active_selection = Some(Selection {
-                    start: (row, col),
-                    end: (row, col),
-                    selection_type: SelectionType::Range,
-                });
+                // Single click: enter Pending — don't create selection yet.
+                // Selection is only created when drag threshold is exceeded.
+                self.drag_phase = DragPhase::Pending;
+                self.active_selection = None;
                 self.drag_anchor = None;
             }
             2 => {
-                // Double click: word selection
+                // Double click: immediate word selection (no threshold needed)
+                self.drag_phase = DragPhase::Active;
                 let (word_start, word_end) = find_word_boundaries(cells, row, col, cols);
                 self.active_selection = Some(Selection {
                     start: (row, word_start),
@@ -115,7 +162,8 @@ impl MouseSelectionState {
                 self.drag_anchor = Some((row, word_start, row, word_end));
             }
             3 => {
-                // Triple click: line selection
+                // Triple click: immediate line selection (no threshold needed)
+                self.drag_phase = DragPhase::Active;
                 self.active_selection = Some(Selection {
                     start: (row, 0),
                     end: (row, cols.saturating_sub(1)),
@@ -140,8 +188,25 @@ impl MouseSelectionState {
         rows: usize,
         cells: &[GridCell],
     ) {
-        if !self.is_dragging {
-            return;
+        match self.drag_phase {
+            DragPhase::Idle => return,
+            DragPhase::Pending => {
+                // Check if movement exceeds drag threshold
+                let dx = (pixel_x - self.press_origin_px.0).abs();
+                let dy = (pixel_y - self.press_origin_px.1).abs();
+                if dx < DRAG_THRESHOLD && dy < DRAG_THRESHOLD {
+                    return; // Not enough movement yet
+                }
+                // Threshold exceeded — transition to Active and create selection
+                self.drag_phase = DragPhase::Active;
+                let (origin_row, origin_col) = self.drag_origin;
+                self.active_selection = Some(Selection {
+                    start: (origin_row, origin_col),
+                    end: (origin_row, origin_col),
+                    selection_type: SelectionType::Range,
+                });
+            }
+            DragPhase::Active => {} // Continue below
         }
 
         let (row, col) = pixel_to_cell(
@@ -190,13 +255,12 @@ impl MouseSelectionState {
 
     /// Handle mouse release.
     pub fn on_mouse_release(&mut self) {
-        self.is_dragging = false;
-        // If single click with no movement, clear selection
-        if let Some(ref sel) = self.active_selection {
-            if sel.start == sel.end && self.click_count == 1 {
-                self.active_selection = None;
-            }
+        if self.drag_phase == DragPhase::Pending {
+            // Click-up while still Pending = just a click, not a drag.
+            // Clear any selection (it was just a click to place cursor/focus).
+            self.active_selection = None;
         }
+        self.drag_phase = DragPhase::Idle;
     }
 
     /// Handle shift+click to extend selection.
@@ -280,6 +344,14 @@ impl MouseSelectionState {
 
         self.last_click_time = Some(at);
         self.last_click_pos = (pixel_x, pixel_y);
+        self.press_origin_px = (pixel_x, pixel_y);
+
+        if self.swallow_next_click {
+            self.swallow_next_click = false;
+            self.drag_phase = DragPhase::Idle;
+            self.active_selection = None;
+            return self.click_count;
+        }
 
         let (row, col) = pixel_to_cell(
             pixel_x as f64,
@@ -291,18 +363,15 @@ impl MouseSelectionState {
         );
 
         self.drag_origin = (row, col);
-        self.is_dragging = true;
 
         match self.click_count {
             1 => {
-                self.active_selection = Some(Selection {
-                    start: (row, col),
-                    end: (row, col),
-                    selection_type: SelectionType::Range,
-                });
+                self.drag_phase = DragPhase::Pending;
+                self.active_selection = None;
                 self.drag_anchor = None;
             }
             2 => {
+                self.drag_phase = DragPhase::Active;
                 let (word_start, word_end) = find_word_boundaries(cells, row, col, cols);
                 self.active_selection = Some(Selection {
                     start: (row, word_start),
@@ -312,6 +381,7 @@ impl MouseSelectionState {
                 self.drag_anchor = Some((row, word_start, row, word_end));
             }
             3 => {
+                self.drag_phase = DragPhase::Active;
                 self.active_selection = Some(Selection {
                     start: (row, 0),
                     end: (row, cols.saturating_sub(1)),
@@ -421,25 +491,38 @@ mod tests {
         assert_eq!(count, 1);
     }
 
-    // ── Single click selection ────────────────────────────────────
+    // ── Single click selection (drag threshold) ──────────────────
 
     #[test]
-    fn single_click_starts_range_selection() {
+    fn single_click_enters_pending_no_selection() {
         let mut state = MouseSelectionState::new();
         let cells = make_cells("hello world", 20);
         state.on_mouse_press(15.0, 5.0, 10.0, 20.0, 20, 1, &cells);
-        let sel = state.active_selection.as_ref().unwrap();
-        assert_eq!(sel.selection_type, SelectionType::Range);
-        assert_eq!(sel.start, (0, 1)); // pixel 15 / cell_width 10 = col 1
+        assert_eq!(state.drag_phase, DragPhase::Pending);
+        assert!(state.active_selection.is_none(), "no selection until drag threshold");
     }
 
     #[test]
-    fn drag_updates_selection_end() {
+    fn drag_below_threshold_stays_pending() {
         let mut state = MouseSelectionState::new();
         let cells = make_cells("hello world", 20);
         state.on_mouse_press(15.0, 5.0, 10.0, 20.0, 20, 1, &cells);
+        // Move only 2px — below DRAG_THRESHOLD of 3px
+        state.on_mouse_drag(17.0, 5.0, 10.0, 20.0, 20, 1, &cells);
+        assert_eq!(state.drag_phase, DragPhase::Pending);
+        assert!(state.active_selection.is_none());
+    }
+
+    #[test]
+    fn drag_beyond_threshold_creates_selection() {
+        let mut state = MouseSelectionState::new();
+        let cells = make_cells("hello world", 20);
+        state.on_mouse_press(15.0, 5.0, 10.0, 20.0, 20, 1, &cells);
+        // Move 40px — well beyond threshold
         state.on_mouse_drag(55.0, 5.0, 10.0, 20.0, 20, 1, &cells);
+        assert_eq!(state.drag_phase, DragPhase::Active);
         let sel = state.active_selection.as_ref().unwrap();
+        assert_eq!(sel.selection_type, SelectionType::Range);
         assert_eq!(sel.end, (0, 5));
     }
 
@@ -449,6 +532,7 @@ mod tests {
         let cells = make_cells("hello world", 20);
         state.on_mouse_press(15.0, 5.0, 10.0, 20.0, 20, 1, &cells);
         state.on_mouse_release();
+        assert_eq!(state.drag_phase, DragPhase::Idle);
         assert!(state.active_selection.is_none());
     }
 
@@ -459,7 +543,35 @@ mod tests {
         state.on_mouse_press(15.0, 5.0, 10.0, 20.0, 20, 1, &cells);
         state.on_mouse_drag(55.0, 5.0, 10.0, 20.0, 20, 1, &cells);
         state.on_mouse_release();
+        assert_eq!(state.drag_phase, DragPhase::Idle);
         assert!(state.active_selection.is_some());
+    }
+
+    // ── Focus swallow ─────────────────────────────────────────────
+
+    #[test]
+    fn swallow_next_click_prevents_selection() {
+        let mut state = MouseSelectionState::new();
+        let cells = make_cells("hello world", 20);
+        state.swallow_next();
+        state.on_mouse_press(15.0, 5.0, 10.0, 20.0, 20, 1, &cells);
+        assert_eq!(state.drag_phase, DragPhase::Idle);
+        assert!(state.active_selection.is_none());
+        // Second click at different position to avoid multi-click detection
+        state.on_mouse_press(75.0, 5.0, 10.0, 20.0, 20, 1, &cells);
+        assert_eq!(state.drag_phase, DragPhase::Pending);
+    }
+
+    #[test]
+    fn reset_on_focus_change_clears_and_swallows() {
+        let mut state = MouseSelectionState::new();
+        let cells = make_cells("hello world", 20);
+        state.on_mouse_press(15.0, 5.0, 10.0, 20.0, 20, 1, &cells);
+        state.on_mouse_drag(55.0, 5.0, 10.0, 20.0, 20, 1, &cells);
+        assert!(state.is_dragging());
+        state.reset_on_focus_change();
+        assert_eq!(state.drag_phase, DragPhase::Idle);
+        assert!(state.swallow_next_click);
     }
 
     // ── Double-click word selection ───────────────────────────────
