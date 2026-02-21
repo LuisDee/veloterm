@@ -53,6 +53,8 @@ pub enum UiMessage {
     ConductorTrackClicked(usize),
     ConductorFilterCycled,
     ConductorSortCycled,
+    /// Markdown preview link clicked (Uri is an alias for String).
+    MarkdownLinkClicked(String),
     Noop,
 }
 
@@ -160,6 +162,10 @@ pub struct UiState<'a> {
     pub hovering_close_button: Option<usize>,
     /// Conductor dashboard state (if loaded).
     pub conductor: Option<crate::conductor::ConductorSnapshot>,
+    /// Markdown preview: parsed items for the active pane's overlay.
+    pub markdown_items: Option<Vec<iced_widget::markdown::Item>>,
+    /// Markdown preview: file name being previewed.
+    pub markdown_file_name: Option<String>,
 }
 
 /// Holds iced rendering state: renderer, viewport, event queue, and UI cache.
@@ -434,7 +440,7 @@ impl IcedLayer {
         };
 
         // Conductor dashboard overlay (full-screen when active)
-        if state.conductor.is_some() {
+        let with_conductor = if state.conductor.is_some() {
             let conductor = Self::conductor_dashboard(state, scale);
             stack![with_palette, conductor]
                 .width(iced_core::Length::Fill)
@@ -442,6 +448,17 @@ impl IcedLayer {
                 .into()
         } else {
             with_palette
+        };
+
+        // Markdown preview overlay
+        if state.markdown_items.is_some() {
+            let md_overlay = Self::markdown_overlay(state, scale);
+            stack![with_conductor, md_overlay]
+                .width(iced_core::Length::Fill)
+                .height(iced_core::Length::Fill)
+                .into()
+        } else {
+            with_conductor
         }
     }
 
@@ -1705,6 +1722,96 @@ impl IcedLayer {
             })
             .into()
     }
+
+    /// Markdown preview overlay — renders parsed markdown in a scrollable dark overlay.
+    fn markdown_overlay<'a>(state: &'a UiState, scale: f32) -> IcedElement<'a> {
+        let theme = state.theme;
+        let text_primary = to_iced_color(&theme.text_primary);
+        let text_muted = to_iced_color(&theme.text_muted);
+        let bg_overlay = iced_core::Color::from_rgba(0.0, 0.0, 0.0, 0.85);
+        let bg_content = to_iced_color(&theme.bg_surface);
+
+        let file_name = state.markdown_file_name.as_deref().unwrap_or("Markdown Preview");
+
+        // Header: file name + "Esc to close"
+        let title = iced_widget::text(file_name)
+            .size(16.0 / scale)
+            .color(text_primary);
+        let hint = iced_widget::text("Esc to close")
+            .size(12.0 / scale)
+            .color(text_muted);
+        let hspace = hspace();
+        let header: IcedElement<'a> = iced_widget::row![title, hspace, hint]
+            .spacing(8.0 / scale)
+            .padding(iced_core::Padding::from([12.0 / scale, 20.0 / scale]))
+            .align_y(iced_core::Alignment::Center)
+            .into();
+
+        // Markdown content
+        let md_content: IcedElement<'a> = if let Some(ref items) = state.markdown_items {
+            let iced_theme = iced_core::Theme::Dark;
+            let md_element: iced_core::Element<'a, String, iced_core::Theme, iced_wgpu::Renderer> =
+                iced_widget::markdown::view(items, &iced_theme).into();
+            md_element.map(UiMessage::MarkdownLinkClicked)
+        } else {
+            iced_widget::text("No content").color(text_muted).into()
+        };
+
+        let padded_md: IcedElement<'a> = iced_widget::container(md_content)
+            .padding(iced_core::Padding::from([12.0 / scale, 20.0 / scale]))
+            .width(iced_core::Length::Fill)
+            .into();
+
+        let scrollable_md: IcedElement<'a> = iced_widget::scrollable(padded_md)
+            .width(iced_core::Length::Fill)
+            .height(iced_core::Length::Fill)
+            .into();
+
+        // Content card: header + divider + scrollable markdown
+        let divider_line: IcedElement<'a> = iced_widget::container(iced_widget::text(""))
+            .width(iced_core::Length::Fill)
+            .height(1.0 / scale)
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(
+                    iced_core::Color { a: 0.3, ..text_muted },
+                )),
+                ..Default::default()
+            })
+            .into();
+
+        let card_content: IcedElement<'a> = iced_widget::column![header, divider_line, scrollable_md]
+            .width(iced_core::Length::Fill)
+            .height(iced_core::Length::Fill)
+            .into();
+
+        let card_width = (state.window_width * 0.75).min(900.0 / scale);
+        let card: IcedElement<'a> = iced_widget::container(card_content)
+            .width(card_width)
+            .height(iced_core::Length::FillPortion(9)) // 90% of vertical space
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(bg_content)),
+                border: iced_core::Border {
+                    color: iced_core::Color { a: 0.2, ..text_muted },
+                    width: 1.0 / scale,
+                    radius: (8.0 / scale).into(),
+                },
+                ..Default::default()
+            })
+            .into();
+
+        // Center the card with scrim background
+        iced_widget::container(card)
+            .width(iced_core::Length::Fill)
+            .height(iced_core::Length::Fill)
+            .align_x(iced_core::alignment::Horizontal::Center)
+            .align_y(iced_core::alignment::Vertical::Center)
+            .padding(iced_core::Padding::from([40.0 / scale, 0.0]))
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(bg_overlay)),
+                ..Default::default()
+            })
+            .into()
+    }
 }
 
 #[cfg(test)]
@@ -1783,6 +1890,8 @@ mod tests {
             hovering_new_tab: false,
             hovering_close_button: None,
             conductor: None,
+            markdown_items: None,
+            markdown_file_name: None,
         }
     }
 
@@ -2040,6 +2149,8 @@ mod tests {
         hovering_new_tab: false,
             hovering_close_button: None,
             conductor: None,
+            markdown_items: None,
+            markdown_file_name: None,
             };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
@@ -2140,6 +2251,8 @@ mod tests {
         hovering_new_tab: false,
             hovering_close_button: None,
             conductor: None,
+            markdown_items: None,
+            markdown_file_name: None,
             };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");

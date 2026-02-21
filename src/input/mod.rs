@@ -22,6 +22,8 @@ pub enum InputMode {
     CommandPalette,
     /// Conductor dashboard — viewing track progress.
     Conductor,
+    /// Markdown preview overlay — viewing rendered markdown.
+    MarkdownPreview,
 }
 
 /// A search-mode command resulting from a key event.

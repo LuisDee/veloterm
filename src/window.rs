@@ -100,6 +100,8 @@ pub struct PaneState {
     pub scroll_state: crate::scroll::ScrollState,
     /// Shell name (e.g. "zsh", "bash") for display in pane header/status.
     pub shell_name: String,
+    /// Per-pane markdown preview state. Some = overlay open.
+    pub markdown_preview: Option<crate::markdown_preview::MarkdownPreviewState>,
 }
 
 /// Main application state implementing the winit event loop handler.
@@ -229,7 +231,7 @@ impl App {
                 );
                 let cursor = crate::renderer::cursor::CursorState::new();
                 let shell_name = crate::pty::basename_from_path(&shell).to_string();
-                self.pane_states.insert(pane_id, PaneState { terminal, pty, vi_state: None, cursor, mouse_selection: crate::input::mouse::MouseSelectionState::new(), scroll_state: crate::scroll::ScrollState::new(), shell_name });
+                self.pane_states.insert(pane_id, PaneState { terminal, pty, vi_state: None, cursor, mouse_selection: crate::input::mouse::MouseSelectionState::new(), scroll_state: crate::scroll::ScrollState::new(), shell_name, markdown_preview: None });
             }
             Err(e) => {
                 log::error!("Failed to spawn PTY for pane {:?}: {e}", pane_id);
@@ -255,7 +257,7 @@ impl App {
                 );
                 let cursor = crate::renderer::cursor::CursorState::new();
                 let shell_name = crate::pty::basename_from_path(&shell).to_string();
-                self.pane_states.insert(pane_id, PaneState { terminal, pty, vi_state: None, cursor, mouse_selection: crate::input::mouse::MouseSelectionState::new(), scroll_state: crate::scroll::ScrollState::new(), shell_name });
+                self.pane_states.insert(pane_id, PaneState { terminal, pty, vi_state: None, cursor, mouse_selection: crate::input::mouse::MouseSelectionState::new(), scroll_state: crate::scroll::ScrollState::new(), shell_name, markdown_preview: None });
             }
             Err(e) => {
                 log::error!("Failed to spawn PTY for pane {:?}: {e}", pane_id);
@@ -1318,6 +1320,9 @@ impl App {
                 let (w, h) = self.window_size();
                 self.resize_all_panes(w, h);
             }
+            PaletteAction::PreviewMarkdown => {
+                self.open_markdown_preview(None);
+            }
             PaletteAction::CycleTheme => {
                 let themes = TerminalTheme::available_themes();
                 let current_name = self.renderer.as_ref().map(|r| r.theme().name).unwrap_or("Warm Dark");
@@ -1335,6 +1340,41 @@ impl App {
         }
         if let Some(window) = &self.window {
             window.request_redraw();
+        }
+    }
+
+    /// Open a markdown preview overlay for the focused pane.
+    /// If `path` is None, tries to find README.md in the pane's CWD.
+    fn open_markdown_preview(&mut self, path: Option<&str>) {
+        let focused_id = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+        let pane_cwd = self.pane_states.get(&focused_id)
+            .and_then(|s| s.terminal.shell_state().cwd.clone());
+
+        let resolved = if let Some(p) = path {
+            crate::markdown_preview::expand_path(p, pane_cwd.as_deref())
+        } else {
+            // Default: look for README.md in pane CWD, then project root
+            let cwd = pane_cwd.as_deref().unwrap_or(".");
+            let readme = std::path::Path::new(cwd).join("README.md");
+            if readme.exists() {
+                readme.to_string_lossy().into_owned()
+            } else {
+                log::info!("No README.md found in {}", cwd);
+                return;
+            }
+        };
+
+        match crate::markdown_preview::MarkdownPreviewState::open(&resolved) {
+            Ok(state) => {
+                if let Some(pane) = self.pane_states.get_mut(&focused_id) {
+                    pane.markdown_preview = Some(state);
+                    self.input_mode = InputMode::MarkdownPreview;
+                    log::info!("Opened markdown preview: {}", resolved);
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to open markdown preview {}: {}", resolved, e);
+            }
         }
     }
 
@@ -1815,6 +1855,26 @@ impl ApplicationHandler<UserEvent> for App {
                         return;
                     }
 
+                    // Check for markdown preview toggle (Ctrl+Shift+M)
+                    if matches!(event.logical_key, Key::Character(ref s) if s.as_str() == "m" || s.as_str() == "M")
+                        && self.modifiers.control_key()
+                        && self.modifiers.shift_key()
+                    {
+                        if self.input_mode == InputMode::MarkdownPreview {
+                            self.input_mode = InputMode::Normal;
+                            let focused = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                            if let Some(state) = self.pane_states.get_mut(&focused) {
+                                state.markdown_preview = None;
+                            }
+                        } else {
+                            self.open_markdown_preview(None);
+                        }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+
                     // Check for search toggle (Ctrl+Shift+F) — works in any mode
                     if should_open_search(&event.logical_key, self.modifiers) {
                         if self.input_mode == InputMode::Search {
@@ -1833,6 +1893,25 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                             self.input_mode = InputMode::Search;
                             self.search_state.is_active = true;
+                        }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+
+                    // In markdown preview mode, intercept keys
+                    if self.input_mode == InputMode::MarkdownPreview {
+                        match &event.logical_key {
+                            Key::Named(NamedKey::Escape) => {
+                                // Close preview and clear state
+                                self.input_mode = InputMode::Normal;
+                                let focused = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                                if let Some(state) = self.pane_states.get_mut(&focused) {
+                                    state.markdown_preview = None;
+                                }
+                            }
+                            _ => {} // Consume all other keys
                         }
                         if let Some(window) = &self.window {
                             window.request_redraw();
@@ -2762,6 +2841,22 @@ impl ApplicationHandler<UserEvent> for App {
                         } else {
                             None
                         },
+                        markdown_items: if self.input_mode == InputMode::MarkdownPreview {
+                            let focused = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                            self.pane_states.get(&focused)
+                                .and_then(|s| s.markdown_preview.as_ref())
+                                .map(|mp| mp.items().to_vec())
+                        } else {
+                            None
+                        },
+                        markdown_file_name: if self.input_mode == InputMode::MarkdownPreview {
+                            let focused = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                            self.pane_states.get(&focused)
+                                .and_then(|s| s.markdown_preview.as_ref())
+                                .map(|mp| mp.file_name().to_string())
+                        } else {
+                            None
+                        },
                     };
 
                     let mut iced_msgs = Vec::new();
@@ -2905,6 +3000,16 @@ impl ApplicationHandler<UserEvent> for App {
                             UiMessage::ConductorSortCycled => {
                                 if let Some(cs) = &mut self.conductor_state {
                                     cs.cycle_sort();
+                                }
+                            }
+                            UiMessage::MarkdownLinkClicked(url) => {
+                                log::info!("Markdown link clicked: {}", url);
+                                // Open URL in default browser
+                                #[cfg(target_os = "macos")]
+                                {
+                                    let _ = std::process::Command::new("open")
+                                        .arg(url.as_str())
+                                        .spawn();
                                 }
                             }
                             UiMessage::Noop => {}
@@ -3563,6 +3668,7 @@ blink = false
                 mouse_selection: crate::input::mouse::MouseSelectionState::new(),
                 scroll_state: crate::scroll::ScrollState::new(),
                 shell_name: "zsh".to_string(),
+                markdown_preview: None,
             },
         );
 
@@ -3594,6 +3700,7 @@ blink = false
                 mouse_selection: crate::input::mouse::MouseSelectionState::new(),
                 scroll_state: crate::scroll::ScrollState::new(),
                 shell_name: "zsh".to_string(),
+                markdown_preview: None,
             },
         );
 
@@ -3830,6 +3937,7 @@ blink = false
                 mouse_selection: crate::input::mouse::MouseSelectionState::new(),
                 scroll_state: crate::scroll::ScrollState::new(),
                 shell_name: "zsh".to_string(),
+                markdown_preview: None,
             },
         );
 
@@ -3862,6 +3970,7 @@ blink = false
                 mouse_selection: crate::input::mouse::MouseSelectionState::new(),
                 scroll_state: crate::scroll::ScrollState::new(),
                 shell_name: "zsh".to_string(),
+                markdown_preview: None,
             },
         );
 

@@ -33,6 +33,8 @@ pub enum PaletteAction {
     // UI toggles
     ToggleSidebar,
     CycleTheme,
+    // Markdown
+    PreviewMarkdown,
 }
 
 /// A single entry in the command palette.
@@ -172,6 +174,12 @@ pub fn command_registry() -> Vec<PaletteEntry> {
             description: "Switch to the next color theme",
             keybinding: "",
             action: PaletteAction::CycleTheme,
+        },
+        PaletteEntry {
+            name: "Preview Markdown",
+            description: "Preview a markdown file in the current pane",
+            keybinding: "Ctrl+Shift+M",
+            action: PaletteAction::PreviewMarkdown,
         },
     ]
 }
