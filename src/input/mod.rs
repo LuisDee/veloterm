@@ -20,6 +20,8 @@ pub enum InputMode {
     Search,
     /// Command palette mode — keys go to the palette.
     CommandPalette,
+    /// Conductor dashboard — viewing track progress.
+    Conductor,
 }
 
 /// A search-mode command resulting from a key event.

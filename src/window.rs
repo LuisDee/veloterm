@@ -148,6 +148,8 @@ pub struct App {
     hovering_new_tab: bool,
     /// Which tab's close button is hovered.
     hovering_close_button: Option<usize>,
+    /// Conductor dashboard state (loaded once at startup if conductor dir found).
+    conductor_state: Option<crate::conductor::ConductorState>,
 }
 
 impl App {
@@ -187,6 +189,11 @@ impl App {
             editing_tab_value: String::new(),
             hovering_new_tab: false,
             hovering_close_button: None,
+            conductor_state: {
+                let cwd = std::env::current_dir().unwrap_or_default();
+                crate::conductor::discover_conductor_dir(&cwd)
+                    .map(|d| crate::conductor::ConductorState::load(&d))
+            },
         }
     }
 
@@ -1791,6 +1798,23 @@ impl ApplicationHandler<UserEvent> for App {
                         return;
                     }
 
+                    // Check for conductor dashboard toggle (Ctrl+Shift+D)
+                    if matches!(event.logical_key, Key::Character(ref s) if s.as_str() == "d" || s.as_str() == "D")
+                        && self.modifiers.control_key()
+                        && self.modifiers.shift_key()
+                        && self.conductor_state.is_some()
+                    {
+                        if self.input_mode == InputMode::Conductor {
+                            self.input_mode = InputMode::Normal;
+                        } else {
+                            self.input_mode = InputMode::Conductor;
+                        }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+
                     // Check for search toggle (Ctrl+Shift+F) — works in any mode
                     if should_open_search(&event.logical_key, self.modifiers) {
                         if self.input_mode == InputMode::Search {
@@ -2686,7 +2710,11 @@ impl ApplicationHandler<UserEvent> for App {
                         editing_tab_value: self.editing_tab_value.clone(),
                         hovering_new_tab: self.hovering_new_tab,
                         hovering_close_button: self.hovering_close_button,
-                        conductor: None,
+                        conductor: if self.input_mode == InputMode::Conductor {
+                            self.conductor_state.as_ref().map(|s| s.snapshot())
+                        } else {
+                            None
+                        },
                     };
 
                     let mut iced_msgs = Vec::new();
@@ -2817,14 +2845,20 @@ impl ApplicationHandler<UserEvent> for App {
                             UiMessage::CloseButtonHovered(tab_idx) => {
                                 self.hovering_close_button = tab_idx;
                             }
-                            UiMessage::ConductorTrackClicked(_idx) => {
-                                // TODO: wire conductor track selection
+                            UiMessage::ConductorTrackClicked(idx) => {
+                                if let Some(cs) = &mut self.conductor_state {
+                                    cs.select_index(idx);
+                                }
                             }
                             UiMessage::ConductorFilterCycled => {
-                                // TODO: wire conductor filter cycling
+                                if let Some(cs) = &mut self.conductor_state {
+                                    cs.cycle_filter();
+                                }
                             }
                             UiMessage::ConductorSortCycled => {
-                                // TODO: wire conductor sort cycling
+                                if let Some(cs) = &mut self.conductor_state {
+                                    cs.cycle_sort();
+                                }
                             }
                             UiMessage::Noop => {}
                         }
