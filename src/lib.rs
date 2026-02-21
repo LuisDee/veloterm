@@ -1,10 +1,12 @@
 pub mod command_palette;
+pub mod conductor;
 pub mod config;
 pub mod context_menu;
 pub mod header_bar;
 pub mod hotkey;
 pub mod input;
 pub mod link;
+pub mod markdown_preview;
 pub mod pane;
 pub mod platform;
 pub mod pty;
