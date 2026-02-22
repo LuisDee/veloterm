@@ -150,19 +150,18 @@ impl CoreTextRasterizer {
             }
         }
 
-        // Extract pixel data with vertical flip.
-        // CGContext may use a larger internal row stride than bytes_per_row for
-        // alignment. We must read using the actual stride from bytes_per_row(),
-        // then write using our expected stride (w * 4) to strip any padding.
-        // CGBitmapContext stores data bottom-to-top (Y-up coordinate system),
-        // so we flip rows to produce top-to-bottom raster order for the atlas.
+        // Extract pixel data (no vertical flip).
+        // CGBitmapContextGetData() returns pixels in standard raster order
+        // (row 0 = top of image), despite CGContext using Y-up for drawing.
+        // CGContext may use a larger internal row stride than bytes_per_row
+        // for alignment — read with actual stride, write with expected stride.
         let actual_bpr = ctx.bytes_per_row();
         let data = ctx.data();
         let expected_bpr = w * 4;
 
         let mut pixels = vec![0u8; h * expected_bpr];
         for row in 0..h {
-            let src_start = (h - 1 - row) * actual_bpr;
+            let src_start = row * actual_bpr;
             let dst_start = row * expected_bpr;
             pixels[dst_start..dst_start + expected_bpr]
                 .copy_from_slice(&data[src_start..src_start + expected_bpr]);
@@ -312,20 +311,39 @@ mod tests {
         let w = glyph.width as usize;
         let h = glyph.height as usize;
 
-        // Sum coverage in top quarter vs bottom quarter
-        let quarter = h / 4;
-        let top_coverage: u64 = glyph.data[..quarter * w * 4]
-            .chunks(4)
-            .map(|px| px[3] as u64)
+        // Find glyph bounding box — check within it, not the full cell.
+        // CGBitmapContext returns top-to-bottom data; the glyph sits near
+        // the bottom of the cell because CGContext draws at y=descent.
+        let mut first_row = h;
+        let mut last_row = 0;
+        for row in 0..h {
+            for col in 0..w {
+                let idx = (row * w + col) * 4;
+                if glyph.data[idx + 3] > 0 {
+                    if row < first_row { first_row = row; }
+                    if row > last_row { last_row = row; }
+                }
+            }
+        }
+        assert!(last_row > first_row, "'T' glyph should have visible rows");
+
+        // Within the glyph bounding box, top quarter should have more
+        // coverage than bottom quarter (crossbar vs stem only).
+        let glyph_h = last_row - first_row + 1;
+        let quarter = glyph_h / 4;
+
+        let top_coverage: u64 = (first_row..first_row + quarter)
+            .flat_map(|row| (0..w).map(move |col| (row, col)))
+            .map(|(row, col)| glyph.data[(row * w + col) * 4 + 3] as u64)
             .sum();
-        let bottom_coverage: u64 = glyph.data[(h - quarter) * w * 4..]
-            .chunks(4)
-            .map(|px| px[3] as u64)
+        let bottom_coverage: u64 = (last_row + 1 - quarter..=last_row)
+            .flat_map(|row| (0..w).map(move |col| (row, col)))
+            .map(|(row, col)| glyph.data[(row * w + col) * 4 + 3] as u64)
             .sum();
 
         assert!(
             top_coverage > bottom_coverage,
-            "T crossbar should be at top: top_coverage={top_coverage}, bottom={bottom_coverage} — glyphs may be vertically flipped"
+            "T crossbar should be at top of glyph bbox: top_coverage={top_coverage}, bottom={bottom_coverage} — glyphs may be vertically flipped"
         );
     }
 
