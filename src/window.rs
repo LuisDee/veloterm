@@ -2292,9 +2292,9 @@ impl ApplicationHandler<UserEvent> for App {
                                 if let Some(state) = self.pane_states.get_mut(&focused_pane) {
                                     if state.mouse_selection.drag_phase != crate::input::mouse::DragPhase::Idle {
                                         let pane_origin_x = pgrid_bounds.x + pane_rect.map_or(0.0, |r| r.x);
-                                        let pane_origin_y = Self::PANE_GRID_PADDING + pane_rect.map_or(0.0, |r| r.y) + PANE_HEADER_HEIGHT;
+                                        let pane_origin_y = pgrid_bounds.y + pane_rect.map_or(0.0, |r| r.y) + PANE_HEADER_HEIGHT;
                                         let local_x = position.x as f32 - pane_origin_x - padding[2];
-                                        let local_y = content_y - pane_origin_y - padding[0];
+                                        let local_y = y - pane_origin_y - padding[0];
                                         let cols = state.terminal.columns();
                                         let rows = state.terminal.rows();
                                         let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal, renderer.theme());
@@ -2425,9 +2425,9 @@ impl ApplicationHandler<UserEvent> for App {
                             if let Some(state) = self.pane_states.get_mut(&focused_pane) {
                                 let cols = state.terminal.columns();
                                 let rows = state.terminal.rows();
-                                // Convert from content-space to pane-local terminal coords
+                                // Convert from window-space to pane-local terminal coords
                                 let pane_origin_x = sel_pgrid.x + sel_pane_rect.map_or(0.0, |r| r.x);
-                                let pane_origin_y = Self::PANE_GRID_PADDING + sel_pane_rect.map_or(0.0, |r| r.y) + PANE_HEADER_HEIGHT;
+                                let pane_origin_y = sel_pgrid.y + sel_pane_rect.map_or(0.0, |r| r.y) + PANE_HEADER_HEIGHT;
                                 let local_x = cursor_pos.0 - pane_origin_x - padding[2];
                                 let local_y = cursor_pos.1 - pane_origin_y - padding[0];
                                 match btn_state {
