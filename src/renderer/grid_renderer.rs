@@ -144,6 +144,18 @@ pub fn generate_row_instances(
     let start = row as usize * cols;
     let mut instances = Vec::with_capacity(cols);
 
+    // Bug A fix: find last occupied column in this row (rightmost non-space)
+    let last_occupied: Option<usize> = {
+        let mut last = None;
+        for c in (0..cols).rev() {
+            if cells.get(start + c).map(|cell| cell.ch != ' ').unwrap_or(false) {
+                last = Some(c);
+                break;
+            }
+        }
+        last
+    };
+
     for col in 0..cols {
         let i = start + col;
         let cell = cells
@@ -162,12 +174,22 @@ pub fn generate_row_instances(
             ([0.0, 0.0, 0.0, 0.0], false)
         };
 
+        // Bug A fix: strip selection on cells past last occupied column
+        let mut cell_flags = cell.flags;
+        if cell_flags & CELL_FLAG_SELECTED != 0 {
+            match last_occupied {
+                None => cell_flags &= !CELL_FLAG_SELECTED, // entirely empty row
+                Some(last) if col > last => cell_flags &= !CELL_FLAG_SELECTED,
+                _ => {}
+            }
+        }
+
         instances.push(CellInstance {
             position: [col as f32, row as f32],
             atlas_uv,
             fg_color: [cell.fg.r, cell.fg.g, cell.fg.b, cell.fg.a],
             bg_color: [cell.bg.r, cell.bg.g, cell.bg.b, cell.bg.a],
-            flags: (if has_glyph { 1 } else { 0 }) | cell.flags,
+            flags: (if has_glyph { 1 } else { 0 }) | cell_flags,
             _padding: [0; 3],
         });
     }
@@ -185,7 +207,21 @@ pub fn generate_instances(
     atlas: &GlyphAtlas,
 ) -> Vec<CellInstance> {
     let total = grid.total_cells() as usize;
+    let cols = grid.columns as usize;
+    let rows = grid.rows as usize;
     let mut instances = Vec::with_capacity(total);
+
+    // Bug A fix: precompute last occupied column per row (rightmost non-space)
+    let mut last_occupied: Vec<Option<usize>> = vec![None; rows];
+    for r in 0..rows {
+        let row_start = r * cols;
+        for c in (0..cols).rev() {
+            if cells.get(row_start + c).map(|cell| cell.ch != ' ').unwrap_or(false) {
+                last_occupied[r] = Some(c);
+                break;
+            }
+        }
+    }
 
     for i in 0..total {
         let col = (i as u32) % grid.columns;
@@ -207,12 +243,23 @@ pub fn generate_instances(
             ([0.0, 0.0, 0.0, 0.0], false)
         };
 
+        // Bug A fix: strip selection on cells past last occupied column
+        let mut cell_flags = cell.flags;
+        if cell_flags & CELL_FLAG_SELECTED != 0 {
+            let row_idx = row as usize;
+            match last_occupied.get(row_idx).copied().flatten() {
+                None => cell_flags &= !CELL_FLAG_SELECTED, // entirely empty row
+                Some(last) if col as usize > last => cell_flags &= !CELL_FLAG_SELECTED,
+                _ => {}
+            }
+        }
+
         instances.push(CellInstance {
             position: [col as f32, row as f32],
             atlas_uv,
             fg_color: [cell.fg.r, cell.fg.g, cell.fg.b, cell.fg.a],
             bg_color: [cell.bg.r, cell.bg.g, cell.bg.b, cell.bg.a],
-            flags: (if has_glyph { 1 } else { 0 }) | cell.flags,
+            flags: (if has_glyph { 1 } else { 0 }) | cell_flags,
             _padding: [0; 3],
         });
     }
