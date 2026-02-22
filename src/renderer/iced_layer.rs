@@ -28,7 +28,7 @@ const DM_SANS_TTF: &[u8] =
 const DM_SANS: iced_core::Font = iced_core::Font::with_name("DM Sans");
 
 /// Tracks icon (railroad tracks) — conductor dashboard toggle.
-const TRACKS_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/tracks.png");
+pub(crate) const TRACKS_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/tracks.png");
 
 /// Horizontal space filler (iced 0.14: space::horizontal, not horizontal_space).
 fn hspace<'a>() -> iced_widget::Space {
@@ -172,6 +172,8 @@ pub struct UiState<'a> {
     pub markdown_items: Option<Vec<iced_widget::markdown::Item>>,
     /// Markdown preview: file name being previewed.
     pub markdown_file_name: Option<String>,
+    /// Pre-created handle for the tracks icon (avoids per-frame Handle::from_bytes which creates new Id each call).
+    pub tracks_icon_handle: Option<iced_core::image::Handle>,
 }
 
 /// Holds iced rendering state: renderer, viewport, event queue, and UI cache.
@@ -486,7 +488,8 @@ impl IcedLayer {
         let content: IcedElement<'a> = if state.conductor_available {
             let icon_opacity = if state.conductor.is_some() { 1.0 } else { 0.5 };
             let icon_size = 16.0 / scale;
-            let handle = iced_widget::image::Handle::from_bytes(TRACKS_ICON_PNG);
+            let handle = state.tracks_icon_handle.clone()
+                .unwrap_or_else(|| iced_widget::image::Handle::from_bytes(TRACKS_ICON_PNG));
             let tracks_img = iced_widget::image::Image::new(handle)
                 .width(icon_size)
                 .height(icon_size)
@@ -1363,7 +1366,8 @@ impl IcedLayer {
         let tracks_btn_bg = if state.conductor.is_some() { bg_hover_color } else { bg };
         let tracks_btn_fg = if state.conductor.is_some() { text_secondary } else { text_muted };
         let tracks_btn_opacity = if state.conductor.is_some() { 1.0 } else { 0.5 };
-        let tracks_btn_handle = iced_widget::image::Handle::from_bytes(TRACKS_ICON_PNG);
+        let tracks_btn_handle = state.tracks_icon_handle.clone()
+            .unwrap_or_else(|| iced_widget::image::Handle::from_bytes(TRACKS_ICON_PNG));
         let tracks_btn_icon = iced_widget::image::Image::new(tracks_btn_handle)
             .width(12.0 / scale)
             .height(12.0 / scale)
@@ -2020,6 +2024,7 @@ mod tests {
             conductor: None,
             markdown_items: None,
             markdown_file_name: None,
+            tracks_icon_handle: None,
         }
     }
 
@@ -2280,6 +2285,7 @@ mod tests {
             conductor: None,
             markdown_items: None,
             markdown_file_name: None,
+            tracks_icon_handle: None,
             };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
@@ -2383,6 +2389,7 @@ mod tests {
             conductor: None,
             markdown_items: None,
             markdown_file_name: None,
+            tracks_icon_handle: None,
             };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");

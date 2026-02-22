@@ -152,6 +152,8 @@ pub struct App {
     hovering_close_button: Option<usize>,
     /// Conductor dashboard state (loaded once at startup if conductor dir found).
     conductor_state: Option<crate::conductor::ConductorState>,
+    /// Pre-created iced image handle for the tracks icon (stable Id across frames).
+    tracks_icon_handle: Option<iced_core::image::Handle>,
 }
 
 impl App {
@@ -200,6 +202,9 @@ impl App {
                 start.and_then(crate::conductor::discover_conductor_dir)
                     .map(|d| crate::conductor::ConductorState::load(&d))
             },
+            tracks_icon_handle: Some(iced_core::image::Handle::from_bytes(
+                crate::renderer::iced_layer::TRACKS_ICON_PNG.to_vec()
+            )),
         }
     }
 
@@ -2960,6 +2965,7 @@ impl ApplicationHandler<UserEvent> for App {
                         } else {
                             None
                         },
+                        tracks_icon_handle: self.tracks_icon_handle.clone(),
                     };
 
                     let mut iced_msgs = Vec::new();
