@@ -359,7 +359,7 @@ impl IcedLayer {
                 ..Default::default()
             });
 
-        let content: IcedElement<'a> = if state.panes.is_empty() {
+        let base_content: IcedElement<'a> = if state.panes.is_empty() {
             transparent_base.into()
         } else {
             let pane_chrome = Self::pane_chrome(state, scale);
@@ -367,6 +367,13 @@ impl IcedLayer {
                 .width(iced_core::Length::Fill)
                 .height(iced_core::Length::Fill)
                 .into()
+        };
+
+        // If conductor dashboard is active, replace content area with it
+        let content: IcedElement<'a> = if state.conductor.is_some() {
+            Self::conductor_dashboard(state, scale)
+        } else {
+            base_content
         };
 
         let status_divider = Self::divider(theme, scale);
@@ -442,26 +449,15 @@ impl IcedLayer {
             with_theme_popup
         };
 
-        // Conductor dashboard overlay (full-screen when active)
-        let with_conductor = if state.conductor.is_some() {
-            let conductor = Self::conductor_dashboard(state, scale);
-            stack![with_palette, conductor]
+        // Markdown preview overlay
+        if state.markdown_items.is_some() {
+            let md_overlay = Self::markdown_overlay(state, scale);
+            stack![with_palette, md_overlay]
                 .width(iced_core::Length::Fill)
                 .height(iced_core::Length::Fill)
                 .into()
         } else {
             with_palette
-        };
-
-        // Markdown preview overlay
-        if state.markdown_items.is_some() {
-            let md_overlay = Self::markdown_overlay(state, scale);
-            stack![with_conductor, md_overlay]
-                .width(iced_core::Length::Fill)
-                .height(iced_core::Length::Fill)
-                .into()
-        } else {
-            with_conductor
         }
     }
 
@@ -484,8 +480,27 @@ impl IcedLayer {
             .spacing(6.0 / scale)
             .align_y(iced_core::Alignment::Center);
 
-        let content = row![hspace(), center_content, hspace()]
-            .align_y(iced_core::Alignment::Center);
+        let content: IcedElement<'a> = if state.conductor_available {
+            let tracks_icon_fg = if state.conductor.is_some() {
+                accent
+            } else {
+                text_secondary
+            };
+            let tracks_icon = container(
+                text("\u{2550}").size(14.0).color(tracks_icon_fg).font(JETBRAINS_MONO),
+            )
+            .padding(iced_core::Padding::from([4.0 / scale, 8.0 / scale]));
+            let tracks_click = MouseArea::new(tracks_icon)
+                .on_press(UiMessage::ConductorToggled);
+            row![hspace(), center_content, hspace(), tracks_click]
+                .align_y(iced_core::Alignment::Center)
+                .padding(iced_core::Padding::from([0.0, 8.0 / scale]))
+                .into()
+        } else {
+            row![hspace(), center_content, hspace()]
+                .align_y(iced_core::Alignment::Center)
+                .into()
+        };
 
         container(content)
             .width(iced_core::Length::Fill)
@@ -1761,13 +1776,46 @@ impl IcedLayer {
         .width(iced_core::Length::Fill)
         .height(iced_core::Length::Fill);
 
-        // ── Keyboard hints bar ──
-        let hints_text = text("j/k Navigate \u{00B7} f Filter \u{00B7} s Sort \u{00B7} [] Resize \u{00B7} d/u Scroll \u{00B7} x Close")
-            .size(10.0).color(text_muted).font(DM_SANS);
-        let hints_bar = container(hints_text)
+        // ── Keyboard hints bar (dark blue background, left-aligned) ──
+        let hints_bg = iced_core::Color {
+            r: accent_blue.r * 0.3,
+            g: accent_blue.g * 0.3,
+            b: accent_blue.b * 0.3,
+            a: 1.0,
+        };
+        let hints_key_color = text_primary;
+        let hints_desc_color = text_secondary;
+        let hs = || iced_widget::Space::new().width(12.0 / scale);
+        let hints_row = row![
+            text("j/k").size(12.0).color(hints_key_color).font(JETBRAINS_MONO),
+            text(" Navigate").size(12.0).color(hints_desc_color).font(DM_SANS),
+            hs(),
+            text("f").size(12.0).color(hints_key_color).font(JETBRAINS_MONO),
+            text(" Filter").size(12.0).color(hints_desc_color).font(DM_SANS),
+            hs(),
+            text("s").size(12.0).color(hints_key_color).font(JETBRAINS_MONO),
+            text(" Sort").size(12.0).color(hints_desc_color).font(DM_SANS),
+            hs(),
+            text("[]").size(12.0).color(hints_key_color).font(JETBRAINS_MONO),
+            text(" Resize").size(12.0).color(hints_desc_color).font(DM_SANS),
+            hs(),
+            text("d/u").size(12.0).color(hints_key_color).font(JETBRAINS_MONO),
+            text(" Scroll").size(12.0).color(hints_desc_color).font(DM_SANS),
+            hs(),
+            text("x").size(12.0).color(hints_key_color).font(JETBRAINS_MONO),
+            text(" Close").size(12.0).color(hints_desc_color).font(DM_SANS),
+            hs(),
+            text("Esc").size(12.0).color(hints_key_color).font(JETBRAINS_MONO),
+            text(" Quit").size(12.0).color(hints_desc_color).font(DM_SANS),
+        ]
+        .align_y(iced_core::Alignment::Center);
+        let hints_bar = container(hints_row)
             .width(iced_core::Length::Fill)
-            .padding(iced_core::Padding::from([4.0 / scale, 12.0 / scale]))
-            .align_x(iced_core::Alignment::Center);
+            .padding(iced_core::Padding::from([6.0 / scale, 12.0 / scale]))
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(hints_bg)),
+                ..Default::default()
+            });
 
         let dashboard = column![
             container(header).padding(iced_core::Padding::from([8.0 / scale, 12.0 / scale])),
