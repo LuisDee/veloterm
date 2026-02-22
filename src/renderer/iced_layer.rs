@@ -50,6 +50,7 @@ pub enum UiMessage {
     NewTabHovered(bool),
     CloseButtonHovered(Option<usize>),
     // Conductor dashboard
+    ConductorToggled,
     ConductorTrackClicked(usize),
     ConductorFilterCycled,
     ConductorSortCycled,
@@ -160,6 +161,8 @@ pub struct UiState<'a> {
     pub hovering_new_tab: bool,
     /// Which tab's close button is hovered (if any).
     pub hovering_close_button: Option<usize>,
+    /// Whether a conductor directory was found (for showing the Tracks button).
+    pub conductor_available: bool,
     /// Conductor dashboard state (if loaded).
     pub conductor: Option<crate::conductor::ConductorSnapshot>,
     /// Markdown preview: parsed items for the active pane's overlay.
@@ -1337,11 +1340,36 @@ impl IcedLayer {
         let theme_btn_click = MouseArea::new(theme_btn)
             .on_press(UiMessage::ToggleThemeSelector);
 
-        let right = row![
-            text("UTF-8").size(status_size).color(text_ghost).font(DM_SANS),
-            make_divider(),
-            theme_btn_click,
-        ]
+        // Tracks button (only shown when conductor directory found)
+        let tracks_btn_bg = if state.conductor.is_some() { bg_hover_color } else { bg };
+        let tracks_btn_fg = if state.conductor.is_some() { text_secondary } else { text_muted };
+        let tracks_btn = container(
+            text("\u{25E7} Tracks").size(status_size).color(tracks_btn_fg).font(DM_SANS)
+        )
+        .padding(iced_core::Padding::from([2.0 / scale, 8.0 / scale]))
+        .style(move |_: &iced_core::Theme| container::Style {
+            background: Some(iced_core::Background::Color(tracks_btn_bg)),
+            border: iced_core::Border::default().rounded(btn_radius),
+            ..Default::default()
+        });
+        let tracks_btn_click = MouseArea::new(tracks_btn)
+            .on_press(UiMessage::ConductorToggled);
+
+        let right = if state.conductor_available {
+            row![
+                text("UTF-8").size(status_size).color(text_ghost).font(DM_SANS),
+                make_divider(),
+                tracks_btn_click,
+                make_divider(),
+                theme_btn_click,
+            ]
+        } else {
+            row![
+                text("UTF-8").size(status_size).color(text_ghost).font(DM_SANS),
+                make_divider(),
+                theme_btn_click,
+            ]
+        }
         .spacing(8.0 / scale)
         .align_y(iced_core::Alignment::Center);
 
@@ -1405,7 +1433,29 @@ impl IcedLayer {
             ..Default::default()
         });
 
-        let header = row![title, hspace(), sort_badge]
+        // Done button (blue accent)
+        let accent_blue = to_iced_color(&theme.accent_blue);
+        let done_btn = container(
+            text("Done").size(11.0).color(iced_core::Color::WHITE).font(DM_SANS)
+        )
+        .padding(iced_core::Padding::from([3.0 / scale, 10.0 / scale]))
+        .style(move |_: &iced_core::Theme| container::Style {
+            background: Some(iced_core::Background::Color(accent_blue)),
+            border: iced_core::Border::default().rounded(4.0 / scale),
+            ..Default::default()
+        });
+        let done_click = MouseArea::new(done_btn)
+            .on_press(UiMessage::ConductorToggled);
+
+        // Close (×) button
+        let close_btn = container(
+            text("\u{00D7}").size(14.0).color(text_muted).font(DM_SANS)
+        )
+        .padding(iced_core::Padding::from([1.0 / scale, 6.0 / scale]));
+        let close_click = MouseArea::new(close_btn)
+            .on_press(UiMessage::ConductorToggled);
+
+        let header = row![title, sort_badge, hspace(), done_click, close_click]
             .spacing(10.0 / scale)
             .align_y(iced_core::Alignment::Center);
 
@@ -1464,10 +1514,16 @@ impl IcedLayer {
             let mut track_row_items = Row::new().spacing(6.0 / scale)
                 .align_y(iced_core::Alignment::Center);
 
-            // Status dot
+            // Status icon: checkmark for complete, dot for others
+            let status_icon = match track.status {
+                crate::conductor::model::Status::Complete => "\u{2713}",
+                crate::conductor::model::Status::InProgress => "\u{25CF}",
+                crate::conductor::model::Status::Blocked => "\u{2717}",
+                _ => "\u{25CB}",
+            };
             track_row_items = track_row_items.push(
-                text("\u{25CF}").size(8.0).color(status_color).font(JETBRAINS_MONO)
-                    .width(12.0 / scale),
+                text(status_icon).size(10.0).color(status_color).font(JETBRAINS_MONO)
+                    .width(14.0 / scale),
             );
 
             // Title
@@ -1477,10 +1533,11 @@ impl IcedLayer {
                     .width(iced_core::Length::Fill),
             );
 
-            // COMPLETE tag
-            if track.status == crate::conductor::model::Status::Complete {
+            // Task count (right-aligned)
+            if track.tasks_total > 0 {
                 track_row_items = track_row_items.push(
-                    text("COMPLETE").size(8.0).color(green).font(JETBRAINS_MONO),
+                    text(format!("{}/{}", track.tasks_completed, track.tasks_total))
+                        .size(10.0).color(text_muted).font(JETBRAINS_MONO),
                 );
             }
 
@@ -1704,11 +1761,21 @@ impl IcedLayer {
         .width(iced_core::Length::Fill)
         .height(iced_core::Length::Fill);
 
+        // ── Keyboard hints bar ──
+        let hints_text = text("j/k Navigate \u{00B7} f Filter \u{00B7} s Sort \u{00B7} [] Resize \u{00B7} d/u Scroll \u{00B7} x Close")
+            .size(10.0).color(text_muted).font(DM_SANS);
+        let hints_bar = container(hints_text)
+            .width(iced_core::Length::Fill)
+            .padding(iced_core::Padding::from([4.0 / scale, 12.0 / scale]))
+            .align_x(iced_core::Alignment::Center);
+
         let dashboard = column![
             container(header).padding(iced_core::Padding::from([8.0 / scale, 12.0 / scale])),
             container(stats_row).padding(iced_core::Padding::from([0.0, 12.0 / scale])),
             make_hdiv(),
             body,
+            make_hdiv(),
+            hints_bar,
         ]
         .width(iced_core::Length::Fill)
         .height(iced_core::Length::Fill);
@@ -1889,6 +1956,7 @@ mod tests {
             editing_tab_value: String::new(),
             hovering_new_tab: false,
             hovering_close_button: None,
+            conductor_available: false,
             conductor: None,
             markdown_items: None,
             markdown_file_name: None,
@@ -2148,6 +2216,7 @@ mod tests {
             editing_tab_value: String::new(),
         hovering_new_tab: false,
             hovering_close_button: None,
+            conductor_available: false,
             conductor: None,
             markdown_items: None,
             markdown_file_name: None,
@@ -2250,6 +2319,7 @@ mod tests {
             editing_tab_value: String::new(),
         hovering_new_tab: false,
             hovering_close_button: None,
+            conductor_available: false,
             conductor: None,
             markdown_items: None,
             markdown_file_name: None,

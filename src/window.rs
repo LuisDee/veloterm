@@ -192,8 +192,12 @@ impl App {
             hovering_new_tab: false,
             hovering_close_button: None,
             conductor_state: {
-                let cwd = std::env::current_dir().unwrap_or_default();
-                crate::conductor::discover_conductor_dir(&cwd)
+                let project_dir = std::env::var("VELOTERM_PROJECT_DIR").ok()
+                    .map(std::path::PathBuf::from);
+                let cwd = std::env::current_dir().ok();
+                let start = project_dir.as_deref()
+                    .or(cwd.as_deref());
+                start.and_then(crate::conductor::discover_conductor_dir)
                     .map(|d| crate::conductor::ConductorState::load(&d))
             },
         }
@@ -1841,10 +1845,13 @@ impl ApplicationHandler<UserEvent> for App {
                         return;
                     }
 
-                    // Check for conductor dashboard toggle (Ctrl+Shift+D)
+                    // Check for conductor dashboard toggle (Cmd+Shift+D on macOS, Ctrl+Shift+D elsewhere)
+                    #[cfg(target_os = "macos")]
+                    let conductor_trigger = self.modifiers.super_key() && self.modifiers.shift_key();
+                    #[cfg(not(target_os = "macos"))]
+                    let conductor_trigger = self.modifiers.control_key() && self.modifiers.shift_key();
                     if matches!(event.logical_key, Key::Character(ref s) if s.as_str() == "d" || s.as_str() == "D")
-                        && self.modifiers.control_key()
-                        && self.modifiers.shift_key()
+                        && conductor_trigger
                         && self.conductor_state.is_some()
                     {
                         if self.input_mode == InputMode::Conductor {
@@ -1939,6 +1946,9 @@ impl ApplicationHandler<UserEvent> for App {
                                 Key::Character(ref s) if s.as_str() == "u" => cs.scroll_detail_up(),
                                 Key::Character(ref s) if s.as_str() == "f" => cs.cycle_filter(),
                                 Key::Character(ref s) if s.as_str() == "s" => cs.cycle_sort(),
+                                Key::Character(ref s) if s.as_str() == "x" => {
+                                    self.input_mode = InputMode::Normal;
+                                }
                                 _ => {} // Consume all other keys
                             }
                         } else {
@@ -2914,6 +2924,7 @@ impl ApplicationHandler<UserEvent> for App {
                         editing_tab_value: self.editing_tab_value.clone(),
                         hovering_new_tab: self.hovering_new_tab,
                         hovering_close_button: self.hovering_close_button,
+                        conductor_available: self.conductor_state.is_some(),
                         conductor: if self.input_mode == InputMode::Conductor {
                             self.conductor_state.as_ref().map(|s| s.snapshot())
                         } else {
@@ -3064,6 +3075,13 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                             UiMessage::CloseButtonHovered(tab_idx) => {
                                 self.hovering_close_button = tab_idx;
+                            }
+                            UiMessage::ConductorToggled => {
+                                if self.input_mode == InputMode::Conductor {
+                                    self.input_mode = InputMode::Normal;
+                                } else if self.conductor_state.is_some() {
+                                    self.input_mode = InputMode::Conductor;
+                                }
                             }
                             UiMessage::ConductorTrackClicked(idx) => {
                                 if let Some(cs) = &mut self.conductor_state {
