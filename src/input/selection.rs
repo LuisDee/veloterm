@@ -2,6 +2,14 @@
 
 use crate::renderer::grid_renderer::{GridCell, CELL_FLAG_SELECTED};
 
+/// Which half of a cell the selection anchor sits in.
+/// Used for sub-cell precision when normalizing selection boundaries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    Left,
+    Right,
+}
+
 /// Type of text selection.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SelectionType {
@@ -26,6 +34,10 @@ pub struct Selection {
     pub end: (i32, usize),
     /// Type of selection.
     pub selection_type: SelectionType,
+    /// Which side of the start cell the anchor sits in.
+    pub start_side: Side,
+    /// Which side of the end cell the anchor sits in.
+    pub end_side: Side,
 }
 
 /// Convert pixel coordinates to cell (row, col), clamped to grid bounds.
@@ -40,6 +52,26 @@ pub fn pixel_to_cell(
     let col = (pixel_x.max(0.0) as f32 / cell_width).floor() as usize;
     let row = (pixel_y.max(0.0) as f32 / cell_height).floor() as usize;
     (row.min(rows - 1), col.min(cols - 1))
+}
+
+/// Convert pixel coordinates to cell (row, col) plus which Side of the cell,
+/// clamped to grid bounds.
+pub fn pixel_to_cell_with_side(
+    pixel_x: f64,
+    pixel_y: f64,
+    cell_width: f32,
+    cell_height: f32,
+    cols: usize,
+    rows: usize,
+) -> (usize, usize, Side) {
+    let (row, col) = pixel_to_cell(pixel_x, pixel_y, cell_width, cell_height, cols, rows);
+    let cell_center_x = (col as f64 + 0.5) * cell_width as f64;
+    let side = if pixel_x.max(0.0) < cell_center_x {
+        Side::Left
+    } else {
+        Side::Right
+    };
+    (row, col, side)
 }
 
 /// Check if a character is a word character (not whitespace or punctuation).
@@ -76,13 +108,44 @@ pub fn find_word_boundaries(
 }
 
 /// Normalize selection so start is before end in reading order.
+/// Returns ((row, col), (row, col)) with Side adjustments applied:
+/// - If the first anchor is Side::Right, the column is incremented (selection starts after that cell)
+/// - If the last anchor is Side::Left, the column is decremented (selection ends before that cell)
 fn normalize(selection: &Selection) -> ((i32, usize), (i32, usize)) {
     let (s, e) = (selection.start, selection.end);
-    if s.0 < e.0 || (s.0 == e.0 && s.1 <= e.1) {
-        (s, e)
-    } else {
-        (e, s)
+    let (first, first_side, last, last_side) =
+        if s.0 < e.0 || (s.0 == e.0 && s.1 <= e.1) {
+            (s, selection.start_side, e, selection.end_side)
+        } else {
+            (e, selection.end_side, s, selection.start_side)
+        };
+
+    // For Word and Line selections, Side adjustment is not needed — boundaries
+    // are already at word/line edges.
+    if selection.selection_type == SelectionType::Word
+        || selection.selection_type == SelectionType::Line
+    {
+        return (first, last);
     }
+
+    // Apply Side adjustments for Range/VisualBlock:
+    // Right-side start → selection begins at the next cell
+    let first_col = match first_side {
+        Side::Right => first.1 + 1,
+        Side::Left => first.1,
+    };
+    // Left-side end → selection ends at the previous cell
+    let last_col = match last_side {
+        Side::Left => last.1.saturating_sub(1),
+        Side::Right => last.1,
+    };
+
+    // If Side adjustment causes first_col > last_col on same row, return empty
+    if first.0 == last.0 && first_col > last_col {
+        return ((first.0, first_col), (last.0, first_col.saturating_sub(1)));
+    }
+
+    ((first.0, first_col), (last.0, last_col))
 }
 
 /// Check if a cell at (absolute_row, col) is within the selection, in reading order.
@@ -143,8 +206,22 @@ pub fn selected_text(cells: &[GridCell], selection: &Selection, cols: usize, dis
     lines.join("\n")
 }
 
+/// Return the column index of the rightmost non-space cell in a grid row.
+/// Returns 0 if the row is entirely empty (spaces).
+fn last_occupied_column(cells: &[GridCell], row_offset: usize, cols: usize) -> usize {
+    for col in (0..cols).rev() {
+        if row_offset + col < cells.len() && cells[row_offset + col].ch != ' ' {
+            return col;
+        }
+    }
+    0
+}
+
 /// Set CELL_FLAG_SELECTED on all cells within the selection.
 /// `display_offset` converts absolute rows to viewport rows for cell lookup.
+/// For multi-line selections, middle rows and trailing portions of the start row
+/// are clamped to the last occupied (non-space) column to avoid highlighting
+/// empty regions beyond text content.
 pub fn apply_selection_flags(cells: &mut [GridCell], selection: &Selection, cols: usize, display_offset: usize) {
     let (start, end) = normalize(selection);
     let rows = cells.len() / cols;
@@ -165,15 +242,35 @@ pub fn apply_selection_flags(cells: &mut [GridCell], selection: &Selection, cols
         return;
     }
 
+    // Line-type selections highlight full rows — don't clamp
+    let is_line_selection = selection.selection_type == SelectionType::Line;
+
     for abs_row in start.0..=end.0 {
         let vp_row = abs_row + display_offset as i32;
         if vp_row < 0 || vp_row >= rows as i32 {
             continue;
         }
         let vp_row = vp_row as usize;
-        let col_start = if abs_row == start.0 { start.1 } else { 0 };
-        let col_end = if abs_row == end.0 { end.1 } else { cols - 1 };
         let row_offset = vp_row * cols;
+        let col_start = if abs_row == start.0 { start.1 } else { 0 };
+
+        let col_end = if abs_row == end.0 {
+            // Last row of selection: always use the selection end column
+            end.1
+        } else if is_line_selection {
+            // Line selections highlight full rows
+            cols - 1
+        } else {
+            // Middle/start rows: clamp to last occupied cell
+            let last_occ = last_occupied_column(cells, row_offset, cols);
+            // If the row is entirely empty, don't highlight anything beyond col 0
+            // But if start is on this row, at least go to the start column
+            if abs_row == start.0 {
+                last_occ.max(start.1)
+            } else {
+                last_occ
+            }
+        };
 
         for col in col_start..=col_end.min(cols - 1) {
             cells[row_offset + col].flags |= CELL_FLAG_SELECTED;
@@ -286,6 +383,8 @@ mod tests {
             start: (0, 5),
             end: (0, 10),
             selection_type: SelectionType::Range,
+            start_side: Side::Left,
+            end_side: Side::Right,
         };
         assert!(selection_contains(&sel, 0, 5));
     }
@@ -296,6 +395,8 @@ mod tests {
             start: (0, 5),
             end: (0, 10),
             selection_type: SelectionType::Range,
+            start_side: Side::Left,
+            end_side: Side::Right,
         };
         assert!(selection_contains(&sel, 0, 10));
     }
@@ -306,6 +407,8 @@ mod tests {
             start: (0, 5),
             end: (0, 10),
             selection_type: SelectionType::Range,
+            start_side: Side::Left,
+            end_side: Side::Right,
         };
         assert!(!selection_contains(&sel, 0, 4));
         assert!(!selection_contains(&sel, 0, 11));
@@ -317,6 +420,8 @@ mod tests {
             start: (0, 5),
             end: (2, 10),
             selection_type: SelectionType::Range,
+            start_side: Side::Left,
+            end_side: Side::Right,
         };
         // Middle row (row 1) should be fully selected
         assert!(selection_contains(&sel, 1, 0));
@@ -330,6 +435,8 @@ mod tests {
             start: (0, 10),
             end: (0, 5),
             selection_type: SelectionType::Range,
+            start_side: Side::Left,
+            end_side: Side::Right,
         };
         assert!(selection_contains(&sel, 0, 7));
     }
@@ -365,6 +472,8 @@ mod tests {
             start: (1, 0),
             end: (1, 19),
             selection_type: SelectionType::Line,
+            start_side: Side::Left,
+            end_side: Side::Right,
         };
         for col in 0..20 {
             assert!(selection_contains(&sel, 1, col));
@@ -380,6 +489,8 @@ mod tests {
             start: (0, 0),
             end: (0, 4),
             selection_type: SelectionType::Range,
+            start_side: Side::Left,
+            end_side: Side::Right,
         };
         let text = selected_text(&cells, &sel, 20, 0);
         assert_eq!(text, "hello");
@@ -393,6 +504,8 @@ mod tests {
             start: (0, 6),
             end: (1, 5),
             selection_type: SelectionType::Range,
+            start_side: Side::Left,
+            end_side: Side::Right,
         };
         let text = selected_text(&cells, &sel, 20, 0);
         assert_eq!(text, "world\nsecond");
@@ -407,6 +520,8 @@ mod tests {
             start: (0, 0),
             end: (0, 4),
             selection_type: SelectionType::Range,
+            start_side: Side::Left,
+            end_side: Side::Right,
         };
         apply_selection_flags(&mut cells, &sel, 10, 0);
         assert_ne!(cells[0].flags & CELL_FLAG_SELECTED, 0);
@@ -420,6 +535,8 @@ mod tests {
             start: (0, 0),
             end: (0, 4),
             selection_type: SelectionType::Range,
+            start_side: Side::Left,
+            end_side: Side::Right,
         };
         apply_selection_flags(&mut cells, &sel, 20, 0);
         assert_eq!(cells[5].flags & CELL_FLAG_SELECTED, 0);
@@ -434,6 +551,8 @@ mod tests {
             start: (0, 0),
             end: (0, 4),
             selection_type: SelectionType::Range,
+            start_side: Side::Left,
+            end_side: Side::Right,
         };
         apply_selection_flags(&mut cells, &sel, 10, 0);
         assert_ne!(cells[0].flags & CELL_FLAG_SELECTED, 0);
@@ -452,6 +571,8 @@ mod tests {
             start: (0, 2),
             end: (2, 5),
             selection_type: SelectionType::VisualBlock,
+            start_side: Side::Left,
+            end_side: Side::Right,
         };
         // Inside the rectangle
         assert!(selection_contains(&sel, 0, 3));
@@ -474,6 +595,8 @@ mod tests {
             start: (0, 2),
             end: (2, 5),
             selection_type: SelectionType::VisualBlock,
+            start_side: Side::Left,
+            end_side: Side::Right,
         };
         apply_selection_flags(&mut cells, &sel, 20, 0);
         // Row 0: cols 2-5 selected
@@ -495,6 +618,8 @@ mod tests {
             start: (0, 0),
             end: (1, 4),
             selection_type: SelectionType::VisualBlock,
+            start_side: Side::Left,
+            end_side: Side::Right,
         };
         let text = selected_text_block(&cells, &sel, 20, 0);
         assert_eq!(text, "hello\nabcde");
@@ -509,6 +634,8 @@ mod tests {
             start: (0, 0),
             end: (1, 19),
             selection_type: SelectionType::Line,
+            start_side: Side::Left,
+            end_side: Side::Right,
         };
         let text = selected_text_lines(&cells, &sel, 20, 0);
         assert_eq!(text, "first line\nsecond line");
@@ -527,6 +654,8 @@ mod tests {
             start: (-2, 0),
             end: (-2, 10),
             selection_type: SelectionType::Range,
+            start_side: Side::Left,
+            end_side: Side::Right,
         };
         // display_offset=2: abs -2 + 2 = viewport row 0
         let text = selected_text(&cells, &sel, 20, 2);
@@ -542,6 +671,8 @@ mod tests {
             start: (-1, 0),
             end: (-1, 4),
             selection_type: SelectionType::Range,
+            start_side: Side::Left,
+            end_side: Side::Right,
         };
         apply_selection_flags(&mut cells, &sel, 10, 1);
         assert_ne!(cells[0].flags & CELL_FLAG_SELECTED, 0); // viewport row 0
@@ -556,11 +687,92 @@ mod tests {
             start: (-5, 0),
             end: (-5, 6),
             selection_type: SelectionType::Range,
+            start_side: Side::Left,
+            end_side: Side::Right,
         };
         apply_selection_flags(&mut cells, &sel, 10, 1);
         // No cell should be flagged
         for cell in &cells {
             assert_eq!(cell.flags & CELL_FLAG_SELECTED, 0);
+        }
+    }
+
+    // ── Selection clamping to occupied cells (Bug 1) ─────────────
+
+    #[test]
+    fn selection_clamps_to_last_occupied_column() {
+        // Row 0: "hello" (5 chars) in 80-column grid
+        // Row 1: "world!" (6 chars) in 80-column grid
+        let mut cells = make_row("hello", 80);
+        cells.extend(make_row("world!", 80));
+        let sel = Selection {
+            start: (0, 0),
+            end: (1, 5),
+            selection_type: SelectionType::Range,
+            start_side: Side::Left,
+            end_side: Side::Right,
+        };
+        apply_selection_flags(&mut cells, &sel, 80, 0);
+        // Row 0: "hello" occupies cols 0-4, so cols 0-4 should be selected
+        for col in 0..5 {
+            assert_ne!(cells[col].flags & CELL_FLAG_SELECTED, 0,
+                "row 0, col {} should be selected", col);
+        }
+        // Row 0: cols beyond "hello" (5-79) should NOT be selected
+        for col in 5..80 {
+            assert_eq!(cells[col].flags & CELL_FLAG_SELECTED, 0,
+                "row 0, col {} should NOT be selected (empty)", col);
+        }
+        // Row 1: cols 0-5 should be selected (end of selection)
+        for col in 0..6 {
+            assert_ne!(cells[80 + col].flags & CELL_FLAG_SELECTED, 0,
+                "row 1, col {} should be selected", col);
+        }
+    }
+
+    #[test]
+    fn selection_middle_rows_clamped_to_content() {
+        // 3 rows in 40-column grid
+        let mut cells = make_row("start line", 40);     // 10 chars
+        cells.extend(make_row("mid", 40));               // 3 chars
+        cells.extend(make_row("end line here", 40));     // 13 chars
+        let sel = Selection {
+            start: (0, 0),
+            end: (2, 12),
+            selection_type: SelectionType::Range,
+            start_side: Side::Left,
+            end_side: Side::Right,
+        };
+        apply_selection_flags(&mut cells, &sel, 40, 0);
+        // Row 0 (start): clamped to last occupied = col 9 ("start line")
+        assert_ne!(cells[9].flags & CELL_FLAG_SELECTED, 0);
+        assert_eq!(cells[10].flags & CELL_FLAG_SELECTED, 0);
+        // Row 1 (middle): clamped to last occupied = col 2 ("mid")
+        assert_ne!(cells[40].flags & CELL_FLAG_SELECTED, 0);  // col 0
+        assert_ne!(cells[42].flags & CELL_FLAG_SELECTED, 0);  // col 2
+        assert_eq!(cells[43].flags & CELL_FLAG_SELECTED, 0);  // col 3 empty
+        assert_eq!(cells[79].flags & CELL_FLAG_SELECTED, 0);  // col 39 empty
+        // Row 2 (end): uses selection end col = 12
+        assert_ne!(cells[80 + 12].flags & CELL_FLAG_SELECTED, 0);
+        assert_eq!(cells[80 + 13].flags & CELL_FLAG_SELECTED, 0);
+    }
+
+    #[test]
+    fn line_selection_highlights_full_row_width() {
+        // Line selection should NOT clamp — it selects full rows
+        let mut cells = make_row("short", 20);
+        let sel = Selection {
+            start: (0, 0),
+            end: (0, 19),
+            selection_type: SelectionType::Line,
+            start_side: Side::Left,
+            end_side: Side::Right,
+        };
+        apply_selection_flags(&mut cells, &sel, 20, 0);
+        // All 20 columns should be selected for Line type
+        for col in 0..20 {
+            assert_ne!(cells[col].flags & CELL_FLAG_SELECTED, 0,
+                "line selection: col {} should be selected", col);
         }
     }
 }

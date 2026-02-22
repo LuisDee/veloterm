@@ -198,7 +198,7 @@ pub struct GridUniforms {
     pub grid_size: [f32; 2],
     pub atlas_size: [f32; 2],
     /// [0]: 1.0 if atlas is RGBA (per-channel subpixel blending), 0.0 for R8 (grayscale alpha).
-    /// [1]: reserved.
+    /// [1]: cursor height ratio — (font ascent+descent) / cell_height, for font-proportional cursor sizing.
     pub flags: [f32; 2],
 }
 

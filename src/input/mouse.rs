@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 use crate::input::selection::{
-    find_word_boundaries, pixel_to_cell, Selection, SelectionType,
+    find_word_boundaries, pixel_to_cell, pixel_to_cell_with_side, Selection, SelectionType, Side,
 };
 use crate::renderer::grid_renderer::GridCell;
 
@@ -44,6 +44,8 @@ pub struct MouseSelectionState {
     press_origin_px: (f32, f32),
     /// Cell coordinates of the drag origin (absolute_row, col).
     drag_origin: (i32, usize),
+    /// Which side of the origin cell was clicked.
+    drag_origin_side: Side,
     /// For word/line drag: the original word/line boundaries at the click origin.
     drag_anchor: Option<(i32, usize, i32, usize)>, // (start_abs_row, start_col, end_abs_row, end_col)
     /// Set to true when the next click should be swallowed (focus change).
@@ -72,6 +74,7 @@ impl MouseSelectionState {
             drag_phase: DragPhase::Idle,
             press_origin_px: (0.0, 0.0),
             drag_origin: (0, 0),
+            drag_origin_side: Side::Left,
             drag_anchor: None,
             swallow_next_click: false,
             last_drag_pos: (0.0, 0.0),
@@ -140,7 +143,7 @@ impl MouseSelectionState {
             return self.click_count;
         }
 
-        let (vp_row, col) = pixel_to_cell(
+        let (vp_row, col, side) = pixel_to_cell_with_side(
             pixel_x as f64,
             pixel_y as f64,
             cell_width,
@@ -151,6 +154,7 @@ impl MouseSelectionState {
         let abs_row = vp_row as i32 - display_offset as i32;
 
         self.drag_origin = (abs_row, col);
+        self.drag_origin_side = side;
 
         match self.click_count {
             1 => {
@@ -168,6 +172,8 @@ impl MouseSelectionState {
                     start: (abs_row, word_start),
                     end: (abs_row, word_end),
                     selection_type: SelectionType::Word,
+                    start_side: Side::Left,
+                    end_side: Side::Right,
                 });
                 self.drag_anchor = Some((abs_row, word_start, abs_row, word_end));
             }
@@ -178,6 +184,8 @@ impl MouseSelectionState {
                     start: (abs_row, 0),
                     end: (abs_row, cols.saturating_sub(1)),
                     selection_type: SelectionType::Line,
+                    start_side: Side::Left,
+                    end_side: Side::Right,
                 });
                 self.drag_anchor = Some((abs_row, 0, abs_row, cols.saturating_sub(1)));
             }
@@ -230,12 +238,14 @@ impl MouseSelectionState {
                     start: (origin_row, origin_col),
                     end: (origin_row, origin_col),
                     selection_type: SelectionType::Range,
+                    start_side: self.drag_origin_side,
+                    end_side: self.drag_origin_side,
                 });
             }
             DragPhase::Active => {} // Continue below
         }
 
-        let (vp_row, col) = pixel_to_cell(
+        let (vp_row, col, end_side) = pixel_to_cell_with_side(
             pixel_x as f64,
             pixel_y.clamp(0.0, (rows as f32 * cell_height) - 1.0) as f64,
             cell_width,
@@ -249,6 +259,7 @@ impl MouseSelectionState {
             match sel.selection_type {
                 SelectionType::Range => {
                     sel.end = (abs_row, col);
+                    sel.end_side = end_side;
                 }
                 SelectionType::Word => {
                     // Extend by word boundaries
@@ -305,7 +316,7 @@ impl MouseSelectionState {
         cursor_col: usize,
         display_offset: usize,
     ) {
-        let (vp_row, col) = pixel_to_cell(
+        let (vp_row, col, side) = pixel_to_cell_with_side(
             pixel_x as f64,
             pixel_y as f64,
             cell_width,
@@ -319,12 +330,15 @@ impl MouseSelectionState {
         if let Some(ref mut sel) = self.active_selection {
             // Extend existing selection
             sel.end = (abs_row, col);
+            sel.end_side = side;
         } else {
             // Create new selection from cursor to click
             self.active_selection = Some(Selection {
                 start: (cursor_abs_row, cursor_col),
                 end: (abs_row, col),
                 selection_type: SelectionType::Range,
+                start_side: Side::Left,
+                end_side: side,
             });
         }
     }
@@ -413,7 +427,7 @@ impl MouseSelectionState {
             return self.click_count;
         }
 
-        let (vp_row, col) = pixel_to_cell(
+        let (vp_row, col, side) = pixel_to_cell_with_side(
             pixel_x as f64,
             pixel_y as f64,
             cell_width,
@@ -424,6 +438,7 @@ impl MouseSelectionState {
         let abs_row = vp_row as i32 - display_offset as i32;
 
         self.drag_origin = (abs_row, col);
+        self.drag_origin_side = side;
 
         match self.click_count {
             1 => {
@@ -438,6 +453,8 @@ impl MouseSelectionState {
                     start: (abs_row, word_start),
                     end: (abs_row, word_end),
                     selection_type: SelectionType::Word,
+                    start_side: Side::Left,
+                    end_side: Side::Right,
                 });
                 self.drag_anchor = Some((abs_row, word_start, abs_row, word_end));
             }
@@ -447,6 +464,8 @@ impl MouseSelectionState {
                     start: (abs_row, 0),
                     end: (abs_row, cols.saturating_sub(1)),
                     selection_type: SelectionType::Line,
+                    start_side: Side::Left,
+                    end_side: Side::Right,
                 });
                 self.drag_anchor = Some((abs_row, 0, abs_row, cols.saturating_sub(1)));
             }
@@ -818,6 +837,8 @@ mod tests {
             start: (0, 0),
             end: (0, 5),
             selection_type: SelectionType::Range,
+            start_side: Side::Left,
+            end_side: Side::Right,
         });
         // Update endpoint to viewport row 2, col 3 with display_offset=1
         // abs_row = 2 - 1 = 1

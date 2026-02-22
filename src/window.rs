@@ -505,6 +505,8 @@ impl App {
                             start: (0, 0),
                             end: (rows.saturating_sub(1) as i32, cols.saturating_sub(1)),
                             selection_type: crate::input::selection::SelectionType::Range,
+                            start_side: crate::input::selection::Side::Left,
+                            end_side: crate::input::selection::Side::Right,
                         },
                     );
                 }
@@ -936,6 +938,10 @@ impl App {
             let usable_h = (rect.height - PANE_HEADER_HEIGHT - pad_top - pad_bottom).max(0.0);
             let cols = (usable_w / cw).floor().max(1.0) as u16;
             let rows = (usable_h / ch).floor().max(1.0) as u16;
+            log::debug!(
+                "grid_dims_for_rect: rect={:.0}x{:.0} usable={:.0}x{:.0} cell={:.1}x{:.1} → {}x{}",
+                rect.width, rect.height, usable_w, usable_h, cw, ch, cols, rows
+            );
             (cols, rows)
         } else {
             (80, 24)
@@ -1294,6 +1300,8 @@ impl App {
                             start: (0, 0),
                             end: (rows.saturating_sub(1) as i32, cols.saturating_sub(1)),
                             selection_type: crate::input::selection::SelectionType::Range,
+                            start_side: crate::input::selection::Side::Left,
+                            end_side: crate::input::selection::Side::Right,
                         },
                     );
                 }
@@ -2116,6 +2124,8 @@ impl ApplicationHandler<UserEvent> for App {
                                     start: (0, 0),
                                     end: (rows.saturating_sub(1) as i32, cols.saturating_sub(1)),
                                     selection_type: crate::input::selection::SelectionType::Range,
+                                    start_side: crate::input::selection::Side::Left,
+                                    end_side: crate::input::selection::Side::Right,
                                 },
                             );
                         }

@@ -40,6 +40,9 @@ pub struct GlyphAtlas {
     pub cell_height: f32,
     /// Bytes per pixel: 1 for R8 grayscale, 4 for RGBA.
     pub bytes_per_pixel: u32,
+    /// Ratio of font metrics height (ascent+descent) to cell_height.
+    /// Used by the shader to size the cursor to font height instead of full cell height.
+    pub cursor_height_ratio: f32,
     glyphs: HashMap<char, GlyphInfo>,
 }
 
@@ -103,9 +106,9 @@ impl GlyphAtlas {
         let rasterizer = CoreTextRasterizer::new(JETBRAINS_MONO_TTF, scaled_size);
 
         let cell_width = rasterizer.advance_width('M') as f32;
-        let cell_height = ((rasterizer.ascent() + rasterizer.descent()) as f32
-            * line_height_multiplier)
-            .ceil();
+        let font_metrics_height = (rasterizer.ascent() + rasterizer.descent()) as f32;
+        let cell_height = (font_metrics_height * line_height_multiplier).ceil();
+        let cursor_height_ratio = font_metrics_height / cell_height;
 
         let cell_w = cell_width.ceil() as u32;
         let cell_h = cell_height.ceil() as u32;
@@ -187,6 +190,7 @@ impl GlyphAtlas {
             cell_width,
             cell_height,
             bytes_per_pixel,
+            cursor_height_ratio,
             glyphs,
         }
     }
@@ -229,6 +233,7 @@ impl GlyphAtlas {
             .unwrap_or(scaled_size * 0.6);
 
         let cell_height = line_height;
+        let cursor_height_ratio = scaled_size / cell_height;
         let slot_w = cell_width.ceil() as u32 + GLYPH_PADDING * 2;
         let slot_h = cell_height.ceil() as u32 + GLYPH_PADDING * 2;
 
@@ -306,6 +311,7 @@ impl GlyphAtlas {
             cell_width,
             cell_height,
             bytes_per_pixel: 1,
+            cursor_height_ratio,
             glyphs,
         }
     }
@@ -479,6 +485,15 @@ mod tests {
             "cell_height {} should be in reasonable range for 13pt @ 2x with 1.5x line height",
             atlas.cell_height
         );
+    }
+
+    #[test]
+    fn atlas_cursor_height_ratio_is_less_than_one_with_line_height() {
+        let atlas = GlyphAtlas::new(13.0, 2.0, "JetBrains Mono", 1.6);
+        // With line_height_multiplier > 1.0, cursor_height_ratio should be < 1.0
+        assert!(atlas.cursor_height_ratio > 0.0 && atlas.cursor_height_ratio < 1.0,
+            "cursor_height_ratio {} should be between 0 and 1 for line_height > 1.0",
+            atlas.cursor_height_ratio);
     }
 
     // ── Glyph metrics ───────────────────────────────────────────────

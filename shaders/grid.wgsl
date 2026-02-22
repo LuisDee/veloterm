@@ -8,7 +8,7 @@ struct Uniforms {
     grid_size: vec2<f32>,    // columns, rows
     atlas_size: vec2<f32>,   // atlas texture dimensions in pixels
     flags: vec2<f32>,        // x: 1.0 = RGBA atlas (per-channel subpixel), 0.0 = R8 (grayscale alpha)
-                             // y: reserved (always 0.0)
+                             // y: cursor height ratio — (font ascent+descent) / cell_height
 };
 
 @group(0) @binding(0)
@@ -111,30 +111,40 @@ fn srgb3_to_linear(c: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Cursor rendering — draw cursor shape using bg_color as cursor color
+    // The cursor is sized to font metrics (ascent+descent), not the full cell height.
+    // cursor_height_ratio = (ascent+descent) / cell_height; padding centers the cursor vertically.
     if in.is_cursor > 0.5 {
         let cursor_color = srgb3_to_linear(in.bg_color.rgb);
         let shape = u32(in.cursor_shape + 0.5);
+        let ratio = select(uniforms.flags.y, 1.0, uniforms.flags.y <= 0.0);
+        let pad = (1.0 - ratio) * 0.5;
+        let in_cursor_y = in.cell_y_frac >= pad && in.cell_y_frac <= (1.0 - pad);
 
         if shape == 0u {
-            // Block cursor: fill entire cell
-            return vec4<f32>(cursor_color, 1.0);
+            // Block cursor: fill font metrics area
+            if in_cursor_y {
+                return vec4<f32>(cursor_color, 1.0);
+            }
+            discard;
         } else if shape == 1u {
-            // Beam cursor: ~1px vertical line on left edge
-            if in.cell_x_frac < 0.08 {
+            // Beam cursor: ~1px vertical line on left edge, font height
+            if in.cell_x_frac < 0.08 && in_cursor_y {
                 return vec4<f32>(cursor_color, 1.0);
             }
             discard;
         } else if shape == 2u {
-            // Underline cursor: thin horizontal line at bottom (~10% of cell height)
-            if in.cell_y_frac > 0.88 {
+            // Underline cursor: thin line at font baseline
+            let underline_top = 1.0 - pad - 0.06;
+            if in.cell_y_frac > underline_top && in.cell_y_frac <= (1.0 - pad) {
                 return vec4<f32>(cursor_color, 1.0);
             }
             discard;
         } else {
-            // Hollow block cursor: outline border (~8% on each edge)
+            // Hollow block cursor: outline border within font metrics area
             let border = 0.08;
-            if in.cell_x_frac < border || in.cell_x_frac > (1.0 - border) ||
-               in.cell_y_frac < border || in.cell_y_frac > (1.0 - border) {
+            if in_cursor_y && (
+               in.cell_x_frac < border || in.cell_x_frac > (1.0 - border) ||
+               in.cell_y_frac < (pad + border * ratio) || in.cell_y_frac > (1.0 - pad - border * ratio)) {
                 return vec4<f32>(cursor_color, 1.0);
             }
             discard;

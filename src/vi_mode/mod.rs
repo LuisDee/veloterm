@@ -645,7 +645,7 @@ impl ViState {
 }
 
 use crate::input::selection::{
-    Selection, SelectionType, selected_text, selected_text_block, selected_text_lines,
+    Selection, SelectionType, Side, selected_text, selected_text_block, selected_text_lines,
 };
 use crate::renderer::grid_renderer::{GridCell, CELL_FLAG_VI_CURSOR};
 
@@ -677,6 +677,8 @@ impl ViState {
             start,
             end,
             selection_type,
+            start_side: Side::Left,
+            end_side: Side::Right,
         })
     }
 

@@ -190,7 +190,7 @@ impl Renderer {
             cell_size: grid.cell_size_ndc(),
             grid_size: grid.grid_size(),
             atlas_size: [atlas.atlas_width as f32, atlas.atlas_height as f32],
-            flags: [atlas_rgba, 0.0],
+            flags: [atlas_rgba, atlas.cursor_height_ratio],
         };
         let mut uniform_data = vec![0u8; uniform_buffer_size as usize];
         uniform_data[..std::mem::size_of::<GridUniforms>()].copy_from_slice(bytemuck::bytes_of(&uniforms));
@@ -321,7 +321,7 @@ impl Renderer {
             cell_size: grid.cell_size_ndc(),
             grid_size: grid.grid_size(),
             atlas_size: [atlas.atlas_width as f32, atlas.atlas_height as f32],
-            flags: [atlas_rgba, 0.0],
+            flags: [atlas_rgba, self.atlas.cursor_height_ratio],
         };
         self.queue
             .write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
@@ -417,7 +417,7 @@ impl Renderer {
                 self.atlas.atlas_width as f32,
                 self.atlas.atlas_height as f32,
             ],
-            flags: [atlas_rgba, 0.0],
+            flags: [atlas_rgba, self.atlas.cursor_height_ratio],
         };
         self.queue
             .write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
@@ -707,7 +707,7 @@ impl Renderer {
                     self.atlas.atlas_width as f32,
                     self.atlas.atlas_height as f32,
                 ],
-                flags: [atlas_rgba, 0.0],
+                flags: [atlas_rgba, self.atlas.cursor_height_ratio],
             };
             let offset = i as u64 * align;
             self.queue
