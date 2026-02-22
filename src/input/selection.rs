@@ -206,22 +206,25 @@ pub fn selected_text(cells: &[GridCell], selection: &Selection, cols: usize, dis
     lines.join("\n")
 }
 
-/// Return the column index of the rightmost non-space cell in a grid row.
-/// Returns 0 if the row is entirely empty (spaces).
-fn last_occupied_column(cells: &[GridCell], row_offset: usize, cols: usize) -> usize {
+/// Return the column index of the rightmost non-empty cell in a grid row.
+/// Returns None if the row is entirely empty (all spaces/nulls).
+fn last_occupied_column(cells: &[GridCell], row_offset: usize, cols: usize) -> Option<usize> {
     for col in (0..cols).rev() {
-        if row_offset + col < cells.len() && cells[row_offset + col].ch != ' ' {
-            return col;
+        if row_offset + col < cells.len() {
+            let ch = cells[row_offset + col].ch;
+            if ch != ' ' && ch != '\0' {
+                return Some(col);
+            }
         }
     }
-    0
+    None
 }
 
 /// Set CELL_FLAG_SELECTED on all cells within the selection.
 /// `display_offset` converts absolute rows to viewport rows for cell lookup.
-/// For multi-line selections, middle rows and trailing portions of the start row
-/// are clamped to the last occupied (non-space) column to avoid highlighting
-/// empty regions beyond text content.
+/// For multi-line selections, non-final rows are clamped to the last occupied
+/// (non-space) column to avoid highlighting empty regions beyond text content.
+/// Entirely empty rows get NO highlight.
 pub fn apply_selection_flags(cells: &mut [GridCell], selection: &Selection, cols: usize, display_offset: usize) {
     let (start, end) = normalize(selection);
     let rows = cells.len() / cols;
@@ -261,14 +264,17 @@ pub fn apply_selection_flags(cells: &mut [GridCell], selection: &Selection, cols
             // Line selections highlight full rows
             cols - 1
         } else {
-            // Middle/start rows: clamp to last occupied cell
-            let last_occ = last_occupied_column(cells, row_offset, cols);
-            // If the row is entirely empty, don't highlight anything beyond col 0
-            // But if start is on this row, at least go to the start column
-            if abs_row == start.0 {
-                last_occ.max(start.1)
-            } else {
-                last_occ
+            // Non-final rows: clamp to last occupied cell
+            match last_occupied_column(cells, row_offset, cols) {
+                Some(last_occ) => {
+                    eprintln!("[SEL-CLAMP] row={} col_start={} last_occ={}", abs_row, col_start, last_occ);
+                    last_occ
+                }
+                None => {
+                    // Entirely empty row — skip it, no highlight at all
+                    eprintln!("[SEL-CLAMP] row={} EMPTY — skipping", abs_row);
+                    continue;
+                }
             }
         };
 

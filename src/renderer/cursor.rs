@@ -141,8 +141,9 @@ impl CursorState {
     }
 
     /// Whether the cursor should be rendered this frame.
+    /// Unfocused cursors always render (as hollow blocks) — they don't blink.
     pub fn should_render(&self) -> bool {
-        self.visible && self.blink_visible
+        self.visible && (self.blink_visible || !self.focused)
     }
 
     /// Generate the cursor CellInstance for rendering.

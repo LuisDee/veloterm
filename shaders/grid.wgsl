@@ -112,16 +112,18 @@ fn srgb3_to_linear(c: vec3<f32>) -> vec3<f32> {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Cursor rendering — draw cursor shape using bg_color as cursor color
     // The cursor is sized to font metrics (ascent+descent), not the full cell height.
-    // cursor_height_ratio = (ascent+descent) / cell_height; padding centers the cursor vertically.
+    // cursor_height_ratio = (ascent+descent) / cell_height.
+    // Glyphs are bottom-aligned in cells (CoreText draws at y=descent in Y-up context),
+    // so all line-height padding is at the TOP of the cell. The cursor must match.
     if in.is_cursor > 0.5 {
         let cursor_color = srgb3_to_linear(in.bg_color.rgb);
         let shape = u32(in.cursor_shape + 0.5);
         let ratio = select(uniforms.flags.y, 1.0, uniforms.flags.y <= 0.0);
-        let pad = (1.0 - ratio) * 0.5;
-        let in_cursor_y = in.cell_y_frac >= pad && in.cell_y_frac <= (1.0 - pad);
+        let pad = 1.0 - ratio;  // all padding at top — cursor is bottom-aligned
+        let in_cursor_y = in.cell_y_frac >= pad;
 
         if shape == 0u {
-            // Block cursor: fill font metrics area
+            // Block cursor: fill font metrics area (bottom-aligned)
             if in_cursor_y {
                 return vec4<f32>(cursor_color, 1.0);
             }
@@ -133,9 +135,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             }
             discard;
         } else if shape == 2u {
-            // Underline cursor: thin line at font baseline
-            let underline_top = 1.0 - pad - 0.06;
-            if in.cell_y_frac > underline_top && in.cell_y_frac <= (1.0 - pad) {
+            // Underline cursor: thin line at bottom of font area
+            if in.cell_y_frac > 0.94 {
                 return vec4<f32>(cursor_color, 1.0);
             }
             discard;
@@ -144,7 +145,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let border = 0.08;
             if in_cursor_y && (
                in.cell_x_frac < border || in.cell_x_frac > (1.0 - border) ||
-               in.cell_y_frac < (pad + border * ratio) || in.cell_y_frac > (1.0 - pad - border * ratio)) {
+               in.cell_y_frac < (pad + border * ratio) || in.cell_y_frac > (1.0 - border * ratio)) {
                 return vec4<f32>(cursor_color, 1.0);
             }
             discard;

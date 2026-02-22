@@ -955,6 +955,10 @@ impl App {
         let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
         for (pane_id, rect) in &layout {
             let (cols, rows) = self.grid_dims_for_rect(rect);
+            if let Some(renderer) = &self.renderer {
+                eprintln!("[PTY-RESIZE] pane={:?} pty_cols={} pty_rows={} cell_w={:.1} cell_h={:.1} rect={:.0}x{:.0}",
+                    pane_id, cols, rows, renderer.cell_width(), renderer.cell_height(), rect.width, rect.height);
+            }
             if let Some(state) = self.pane_states.get_mut(pane_id) {
                 state.terminal.resize(cols as usize, rows as usize);
                 let _ = state.pty.resize(cols, rows);
