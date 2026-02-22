@@ -12,9 +12,9 @@ winit = "0.30"
 wgpu = "27"
 
 # iced UI framework (integration mode — sharing wgpu device/queue)
-iced_wgpu = "0.14"
+iced_wgpu = { version = "0.14", features = ["image"] }
 iced_winit = "0.14"
-iced_widget = { version = "0.14", features = ["markdown", "highlighter"] }
+iced_widget = { version = "0.14", features = ["markdown", "highlighter", "image"] }
 iced_runtime = "0.14"
 iced_graphics = "0.14"
 iced_core = "0.14"

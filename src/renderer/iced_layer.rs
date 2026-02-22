@@ -27,6 +27,9 @@ const DM_SANS_TTF: &[u8] =
 /// DM Sans font descriptor for iced widgets.
 const DM_SANS: iced_core::Font = iced_core::Font::with_name("DM Sans");
 
+/// Tracks icon (railroad tracks) — conductor dashboard toggle.
+const TRACKS_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/tracks.png");
+
 /// Horizontal space filler (iced 0.14: space::horizontal, not horizontal_space).
 fn hspace<'a>() -> iced_widget::Space {
     iced_widget::Space::new().width(iced_core::Length::Fill)
@@ -481,15 +484,16 @@ impl IcedLayer {
             .align_y(iced_core::Alignment::Center);
 
         let content: IcedElement<'a> = if state.conductor_available {
-            let tracks_icon_fg = if state.conductor.is_some() {
-                accent
-            } else {
-                text_secondary
-            };
-            let tracks_icon = container(
-                text("\u{2550}").size(14.0).color(tracks_icon_fg).font(JETBRAINS_MONO),
-            )
-            .padding(iced_core::Padding::from([4.0 / scale, 8.0 / scale]));
+            let icon_opacity = if state.conductor.is_some() { 1.0 } else { 0.5 };
+            let icon_size = 16.0 / scale;
+            let handle = iced_widget::image::Handle::from_bytes(TRACKS_ICON_PNG);
+            let tracks_img = iced_widget::image::Image::new(handle)
+                .width(icon_size)
+                .height(icon_size)
+                .content_fit(iced_core::ContentFit::Contain)
+                .opacity(icon_opacity);
+            let tracks_icon = container(tracks_img)
+                .padding(iced_core::Padding::from([4.0 / scale, 8.0 / scale]));
             let tracks_click = MouseArea::new(tracks_icon)
                 .on_press(UiMessage::ConductorToggled);
             row![hspace(), center_content, hspace(), tracks_click]
@@ -1358,8 +1362,16 @@ impl IcedLayer {
         // Tracks button (only shown when conductor directory found)
         let tracks_btn_bg = if state.conductor.is_some() { bg_hover_color } else { bg };
         let tracks_btn_fg = if state.conductor.is_some() { text_secondary } else { text_muted };
+        let tracks_btn_opacity = if state.conductor.is_some() { 1.0 } else { 0.5 };
+        let tracks_btn_handle = iced_widget::image::Handle::from_bytes(TRACKS_ICON_PNG);
+        let tracks_btn_icon = iced_widget::image::Image::new(tracks_btn_handle)
+            .width(12.0 / scale)
+            .height(12.0 / scale)
+            .content_fit(iced_core::ContentFit::Contain)
+            .opacity(tracks_btn_opacity);
         let tracks_btn = container(
-            text("\u{25E7} Tracks").size(status_size).color(tracks_btn_fg).font(DM_SANS)
+            row![tracks_btn_icon, text(" Tracks").size(status_size).color(tracks_btn_fg).font(DM_SANS)]
+                .align_y(iced_core::Alignment::Center)
         )
         .padding(iced_core::Padding::from([2.0 / scale, 8.0 / scale]))
         .style(move |_: &iced_core::Theme| container::Style {

@@ -229,7 +229,7 @@ impl Default for RawFontConfig {
     fn default() -> Self {
         Self {
             family: "JetBrains Mono".to_string(),
-            size: 18.0,
+            size: 15.0,
             line_height: 1.6,
             ui_family: "Inter".to_string(),
             display_family: "Georgia".to_string(),
@@ -266,7 +266,7 @@ struct RawColorsConfig {
 impl Default for RawColorsConfig {
     fn default() -> Self {
         Self {
-            theme: "warm_dark".to_string(),
+            theme: "midnight".to_string(),
         }
     }
 }
@@ -418,7 +418,7 @@ impl Default for FontConfig {
     fn default() -> Self {
         Self {
             family: "JetBrains Mono".to_string(),
-            size: 18.0,
+            size: 15.0,
             line_height: 1.6,
             ui_family: "Inter".to_string(),
             display_family: "Georgia".to_string(),
@@ -440,7 +440,7 @@ impl Default for PaddingConfig {
 impl Default for ColorsConfig {
     fn default() -> Self {
         Self {
-            theme: "warm_dark".to_string(),
+            theme: "midnight".to_string(),
         }
     }
 }
@@ -636,7 +636,7 @@ impl Config {
 # Terminal content font family (with fallback: JetBrains Mono -> SF Mono -> Menlo -> system)
 family = "JetBrains Mono"
 # Font size in points
-size = 18.0
+size = 15.0
 # Line-height multiplier (1.6 = 160% of font size)
 line_height = 1.6
 # UI chrome font (tab bar, menus, status)
@@ -653,7 +653,7 @@ right = 22.0
 
 [colors]
 # Theme: "warm_dark", "midnight", "ember", "dusk", or "light"
-theme = "warm_dark"
+theme = "midnight"
 
 [cursor]
 # Cursor style: "block", "beam", or "underline"
@@ -758,7 +758,7 @@ mod tests {
     #[test]
     fn default_font_size() {
         let config = Config::default();
-        assert_eq!(config.font.size, 18.0);
+        assert_eq!(config.font.size, 15.0);
     }
 
     #[test]
@@ -797,7 +797,7 @@ mod tests {
     #[test]
     fn default_theme() {
         let config = Config::default();
-        assert_eq!(config.colors.theme, "warm_dark");
+        assert_eq!(config.colors.theme, "midnight");
     }
 
     #[test]
@@ -884,7 +884,7 @@ size = 14.0
         assert_eq!(config.font.size, 14.0);
         assert_eq!(config.font.family, "JetBrains Mono");
         assert_eq!(config.font.line_height, 1.6);
-        assert_eq!(config.colors.theme, "warm_dark");
+        assert_eq!(config.colors.theme, "midnight");
         assert_eq!(config.cursor.style, "block");
         assert!(config.cursor.blink);
         assert_eq!(config.scrollback.lines, 10_000);
@@ -895,10 +895,10 @@ size = 14.0
     #[test]
     fn parse_empty_toml_uses_all_defaults() {
         let config = Config::from_toml("").unwrap();
-        assert_eq!(config.font.size, 18.0);
+        assert_eq!(config.font.size, 15.0);
         assert_eq!(config.font.family, "JetBrains Mono");
         assert_eq!(config.font.line_height, 1.6);
-        assert_eq!(config.colors.theme, "warm_dark");
+        assert_eq!(config.colors.theme, "midnight");
         assert_eq!(config.padding.top, 16.0);
     }
 
@@ -1228,15 +1228,15 @@ fps_limit = 0
         }
         let config = Config::load(&path).unwrap();
         assert_eq!(config.font.size, 20.0);
-        assert_eq!(config.colors.theme, "warm_dark");
+        assert_eq!(config.colors.theme, "midnight");
     }
 
     #[test]
     fn load_missing_file_returns_defaults() {
         let path = Path::new("/tmp/nonexistent_veloterm_config_test.toml");
         let config = Config::load(path).unwrap();
-        assert_eq!(config.font.size, 18.0);
-        assert_eq!(config.colors.theme, "warm_dark");
+        assert_eq!(config.font.size, 15.0);
+        assert_eq!(config.colors.theme, "midnight");
     }
 
     // ── ConfigError display test ────────────────────────────────────
