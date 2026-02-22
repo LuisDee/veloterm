@@ -160,10 +160,10 @@ impl GlyphAtlas {
                 c,
                 GlyphInfo {
                     uv: [
-                        slot_x as f32 / atlas_width as f32,
-                        slot_y as f32 / atlas_height as f32,
-                        slot_w as f32 / atlas_width as f32,
-                        slot_h as f32 / atlas_height as f32,
+                        (slot_x + pad) as f32 / atlas_width as f32,
+                        (slot_y + pad) as f32 / atlas_height as f32,
+                        cell_w as f32 / atlas_width as f32,
+                        cell_h as f32 / atlas_height as f32,
                     ],
                 },
             );
@@ -363,14 +363,16 @@ impl GlyphAtlas {
             }
         });
 
+        let cell_w_px = cell_width.ceil() as u32;
+        let cell_h_px = cell_height.ceil() as u32;
         glyphs.insert(
             c,
             GlyphInfo {
                 uv: [
-                    slot_x as f32 / atlas_width as f32,
-                    slot_y as f32 / atlas_height as f32,
-                    slot_w as f32 / atlas_width as f32,
-                    slot_h as f32 / atlas_height as f32,
+                    (slot_x + pad) as f32 / atlas_width as f32,
+                    (slot_y + pad) as f32 / atlas_height as f32,
+                    cell_w_px as f32 / atlas_width as f32,
+                    cell_h_px as f32 / atlas_height as f32,
                 ],
             },
         );
@@ -641,19 +643,20 @@ mod tests {
     // ── Glyph padding tests ────────────────────────────────────────
 
     #[test]
-    fn atlas_padded_slot_larger_than_cell() {
+    fn atlas_uv_covers_cell_area_not_padded_slot() {
         let atlas = create_test_atlas();
         let info = atlas.glyph_info('A').unwrap();
-        let slot_w_px = info.uv[2] * atlas.atlas_width as f32;
-        let slot_h_px = info.uv[3] * atlas.atlas_height as f32;
+        let uv_w_px = info.uv[2] * atlas.atlas_width as f32;
+        let uv_h_px = info.uv[3] * atlas.atlas_height as f32;
+        // UV should cover exactly the cell area (glyph content), not the padded slot
         assert!(
-            slot_w_px > atlas.cell_width.ceil(),
-            "slot width {slot_w_px} should exceed cell width {}",
+            (uv_w_px - atlas.cell_width.ceil()).abs() < 1.0,
+            "UV width {uv_w_px} should match cell width {}",
             atlas.cell_width.ceil()
         );
         assert!(
-            slot_h_px > atlas.cell_height.ceil(),
-            "slot height {slot_h_px} should exceed cell height {}",
+            (uv_h_px - atlas.cell_height.ceil()).abs() < 1.0,
+            "UV height {uv_h_px} should match cell height {}",
             atlas.cell_height.ceil()
         );
     }

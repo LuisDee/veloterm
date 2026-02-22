@@ -97,10 +97,12 @@ impl CoreTextRasterizer {
             kCGImageAlphaPremultipliedLast,
         );
 
-        // Grayscale AA only — subpixel smoothing creates color fringes on dark backgrounds.
-        // macOS since Mojave disables subpixel AA on Retina displays anyway.
+        // Enable font smoothing for system-consistent rendering weight.
+        // macOS Retina displays use grayscale smoothing (not subpixel AA) which
+        // adds slight stem weight without color fringes. Disabling smoothing
+        // produces noticeably thinner text than native terminal emulators.
         ctx.set_allows_font_smoothing(true);
-        ctx.set_should_smooth_fonts(false);
+        ctx.set_should_smooth_fonts(true);
         ctx.set_should_antialias(true);
 
         // Draw white glyph — RGB channels carry subpixel coverage
