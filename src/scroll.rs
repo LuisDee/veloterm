@@ -134,6 +134,16 @@ impl ScrollState {
         self.last_scroll_time = Some(Instant::now());
     }
 
+    /// Apply an immediate scroll delta (for auto-scroll during drag selection).
+    /// Positive lines = scroll into history, negative = scroll toward live.
+    pub fn apply_auto_scroll(&mut self, lines: i32, history_size: usize) {
+        let new_offset = (self.target_offset as i64 + lines as i64).max(0) as usize;
+        let clamped = new_offset.min(history_size);
+        self.target_offset = clamped;
+        self.current_offset = clamped as f32;
+        self.last_scroll_time = Some(Instant::now());
+    }
+
     /// Scrollbar alpha based on time since last scroll activity.
     /// Returns 0.3 if within 1.5s, fades to 0.0 over next 0.3s.
     pub fn scrollbar_alpha(&self, now: Instant) -> f32 {

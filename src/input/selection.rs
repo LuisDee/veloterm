@@ -16,12 +16,14 @@ pub enum SelectionType {
 }
 
 /// A text selection region defined by start and end cell coordinates.
+/// Row coordinates are absolute (negative = scrollback history, 0+ = screen).
+/// `abs_row = viewport_row as i32 - display_offset as i32`
 #[derive(Debug, Clone, PartialEq)]
 pub struct Selection {
-    /// Start position (row, col).
-    pub start: (usize, usize),
-    /// End position (row, col).
-    pub end: (usize, usize),
+    /// Start position (absolute_row, col).
+    pub start: (i32, usize),
+    /// End position (absolute_row, col).
+    pub end: (i32, usize),
     /// Type of selection.
     pub selection_type: SelectionType,
 }
@@ -74,7 +76,7 @@ pub fn find_word_boundaries(
 }
 
 /// Normalize selection so start is before end in reading order.
-fn normalize(selection: &Selection) -> ((usize, usize), (usize, usize)) {
+fn normalize(selection: &Selection) -> ((i32, usize), (i32, usize)) {
     let (s, e) = (selection.start, selection.end);
     if s.0 < e.0 || (s.0 == e.0 && s.1 <= e.1) {
         (s, e)
@@ -83,8 +85,8 @@ fn normalize(selection: &Selection) -> ((usize, usize), (usize, usize)) {
     }
 }
 
-/// Check if a cell at (row, col) is within the selection, in reading order.
-pub fn selection_contains(selection: &Selection, row: usize, col: usize) -> bool {
+/// Check if a cell at (absolute_row, col) is within the selection, in reading order.
+pub fn selection_contains(selection: &Selection, row: i32, col: usize) -> bool {
     let (start, end) = normalize(selection);
 
     if row < start.0 || row > end.0 {
@@ -113,14 +115,21 @@ pub fn selection_contains(selection: &Selection, row: usize, col: usize) -> bool
 
 /// Extract the selected text from grid cells as a UTF-8 string.
 /// Trailing spaces per line are trimmed; lines are joined with '\n'.
-pub fn selected_text(cells: &[GridCell], selection: &Selection, cols: usize) -> String {
+/// `display_offset` converts absolute rows to viewport rows for cell lookup.
+pub fn selected_text(cells: &[GridCell], selection: &Selection, cols: usize, display_offset: usize) -> String {
     let (start, end) = normalize(selection);
+    let rows = cells.len() / cols;
     let mut lines = Vec::new();
 
-    for row in start.0..=end.0 {
-        let col_start = if row == start.0 { start.1 } else { 0 };
-        let col_end = if row == end.0 { end.1 } else { cols - 1 };
-        let row_offset = row * cols;
+    for abs_row in start.0..=end.0 {
+        let vp_row = abs_row + display_offset as i32;
+        if vp_row < 0 || vp_row >= rows as i32 {
+            continue;
+        }
+        let vp_row = vp_row as usize;
+        let col_start = if abs_row == start.0 { start.1 } else { 0 };
+        let col_end = if abs_row == end.0 { end.1 } else { cols - 1 };
+        let row_offset = vp_row * cols;
 
         let mut line = String::new();
         for col in col_start..=col_end {
@@ -135,15 +144,20 @@ pub fn selected_text(cells: &[GridCell], selection: &Selection, cols: usize) -> 
 }
 
 /// Set CELL_FLAG_SELECTED on all cells within the selection.
-pub fn apply_selection_flags(cells: &mut [GridCell], selection: &Selection, cols: usize) {
+/// `display_offset` converts absolute rows to viewport rows for cell lookup.
+pub fn apply_selection_flags(cells: &mut [GridCell], selection: &Selection, cols: usize, display_offset: usize) {
     let (start, end) = normalize(selection);
     let rows = cells.len() / cols;
 
     if selection.selection_type == SelectionType::VisualBlock {
         let col_min = start.1.min(end.1);
         let col_max = start.1.max(end.1);
-        for row in start.0..=end.0.min(rows - 1) {
-            let row_offset = row * cols;
+        for abs_row in start.0..=end.0 {
+            let vp_row = abs_row + display_offset as i32;
+            if vp_row < 0 || vp_row >= rows as i32 {
+                continue;
+            }
+            let row_offset = vp_row as usize * cols;
             for col in col_min..=col_max.min(cols - 1) {
                 cells[row_offset + col].flags |= CELL_FLAG_SELECTED;
             }
@@ -151,10 +165,15 @@ pub fn apply_selection_flags(cells: &mut [GridCell], selection: &Selection, cols
         return;
     }
 
-    for row in start.0..=end.0.min(rows - 1) {
-        let col_start = if row == start.0 { start.1 } else { 0 };
-        let col_end = if row == end.0 { end.1 } else { cols - 1 };
-        let row_offset = row * cols;
+    for abs_row in start.0..=end.0 {
+        let vp_row = abs_row + display_offset as i32;
+        if vp_row < 0 || vp_row >= rows as i32 {
+            continue;
+        }
+        let vp_row = vp_row as usize;
+        let col_start = if abs_row == start.0 { start.1 } else { 0 };
+        let col_end = if abs_row == end.0 { end.1 } else { cols - 1 };
+        let row_offset = vp_row * cols;
 
         for col in col_start..=col_end.min(cols - 1) {
             cells[row_offset + col].flags |= CELL_FLAG_SELECTED;
@@ -164,14 +183,19 @@ pub fn apply_selection_flags(cells: &mut [GridCell], selection: &Selection, cols
 
 /// Extract selected text from a visual-block (rectangular) selection.
 /// Each row's selected columns are extracted and joined with newlines.
-pub fn selected_text_block(cells: &[GridCell], selection: &Selection, cols: usize) -> String {
+pub fn selected_text_block(cells: &[GridCell], selection: &Selection, cols: usize, display_offset: usize) -> String {
     let (start, end) = normalize(selection);
     let col_min = start.1.min(end.1);
     let col_max = start.1.max(end.1);
+    let rows = cells.len() / cols;
     let mut lines = Vec::new();
 
-    for row in start.0..=end.0 {
-        let row_offset = row * cols;
+    for abs_row in start.0..=end.0 {
+        let vp_row = abs_row + display_offset as i32;
+        if vp_row < 0 || vp_row >= rows as i32 {
+            continue;
+        }
+        let row_offset = vp_row as usize * cols;
         let mut line = String::new();
         for col in col_min..=col_max {
             if row_offset + col < cells.len() {
@@ -185,12 +209,17 @@ pub fn selected_text_block(cells: &[GridCell], selection: &Selection, cols: usiz
 }
 
 /// Extract selected text from a visual-line selection (full rows).
-pub fn selected_text_lines(cells: &[GridCell], selection: &Selection, cols: usize) -> String {
+pub fn selected_text_lines(cells: &[GridCell], selection: &Selection, cols: usize, display_offset: usize) -> String {
     let (start, end) = normalize(selection);
+    let rows = cells.len() / cols;
     let mut lines = Vec::new();
 
-    for row in start.0..=end.0 {
-        let row_offset = row * cols;
+    for abs_row in start.0..=end.0 {
+        let vp_row = abs_row + display_offset as i32;
+        if vp_row < 0 || vp_row >= rows as i32 {
+            continue;
+        }
+        let row_offset = vp_row as usize * cols;
         let mut line = String::new();
         for col in 0..cols {
             if row_offset + col < cells.len() {
@@ -352,7 +381,7 @@ mod tests {
             end: (0, 4),
             selection_type: SelectionType::Range,
         };
-        let text = selected_text(&cells, &sel, 20);
+        let text = selected_text(&cells, &sel, 20, 0);
         assert_eq!(text, "hello");
     }
 
@@ -365,7 +394,7 @@ mod tests {
             end: (1, 5),
             selection_type: SelectionType::Range,
         };
-        let text = selected_text(&cells, &sel, 20);
+        let text = selected_text(&cells, &sel, 20, 0);
         assert_eq!(text, "world\nsecond");
     }
 
@@ -379,7 +408,7 @@ mod tests {
             end: (0, 4),
             selection_type: SelectionType::Range,
         };
-        apply_selection_flags(&mut cells, &sel, 10);
+        apply_selection_flags(&mut cells, &sel, 10, 0);
         assert_ne!(cells[0].flags & CELL_FLAG_SELECTED, 0);
         assert_ne!(cells[4].flags & CELL_FLAG_SELECTED, 0);
     }
@@ -392,7 +421,7 @@ mod tests {
             end: (0, 4),
             selection_type: SelectionType::Range,
         };
-        apply_selection_flags(&mut cells, &sel, 20);
+        apply_selection_flags(&mut cells, &sel, 20, 0);
         assert_eq!(cells[5].flags & CELL_FLAG_SELECTED, 0);
     }
 
@@ -406,7 +435,7 @@ mod tests {
             end: (0, 4),
             selection_type: SelectionType::Range,
         };
-        apply_selection_flags(&mut cells, &sel, 10);
+        apply_selection_flags(&mut cells, &sel, 10, 0);
         assert_ne!(cells[0].flags & CELL_FLAG_SELECTED, 0);
         // Clear by applying empty-range or resetting flags
         for cell in cells.iter_mut() {
@@ -446,7 +475,7 @@ mod tests {
             end: (2, 5),
             selection_type: SelectionType::VisualBlock,
         };
-        apply_selection_flags(&mut cells, &sel, 20);
+        apply_selection_flags(&mut cells, &sel, 20, 0);
         // Row 0: cols 2-5 selected
         assert_ne!(cells[2].flags & CELL_FLAG_SELECTED, 0);
         assert_ne!(cells[5].flags & CELL_FLAG_SELECTED, 0);
@@ -467,7 +496,7 @@ mod tests {
             end: (1, 4),
             selection_type: SelectionType::VisualBlock,
         };
-        let text = selected_text_block(&cells, &sel, 20);
+        let text = selected_text_block(&cells, &sel, 20, 0);
         assert_eq!(text, "hello\nabcde");
     }
 
@@ -481,7 +510,57 @@ mod tests {
             end: (1, 19),
             selection_type: SelectionType::Line,
         };
-        let text = selected_text_lines(&cells, &sel, 20);
+        let text = selected_text_lines(&cells, &sel, 20, 0);
         assert_eq!(text, "first line\nsecond line");
+    }
+
+    // ── Absolute coordinate with display_offset ────────────────────
+
+    #[test]
+    fn selection_with_scroll_offset_maps_correctly() {
+        // 3 viewport rows, selection at absolute rows -2..-1 (scrollback)
+        // display_offset=2 means viewport row 0 = abs -2, row 1 = abs -1, row 2 = abs 0
+        let mut cells = make_row("scrollback1", 20);
+        cells.extend(make_row("scrollback2", 20));
+        cells.extend(make_row("screen line", 20));
+        let sel = Selection {
+            start: (-2, 0),
+            end: (-2, 10),
+            selection_type: SelectionType::Range,
+        };
+        // display_offset=2: abs -2 + 2 = viewport row 0
+        let text = selected_text(&cells, &sel, 20, 2);
+        assert_eq!(text, "scrollback1");
+    }
+
+    #[test]
+    fn apply_flags_with_scroll_offset() {
+        let mut cells = make_row("line0", 10);
+        cells.extend(make_row("line1", 10));
+        // Selection at absolute row -1 with display_offset=1 → viewport row 0
+        let sel = Selection {
+            start: (-1, 0),
+            end: (-1, 4),
+            selection_type: SelectionType::Range,
+        };
+        apply_selection_flags(&mut cells, &sel, 10, 1);
+        assert_ne!(cells[0].flags & CELL_FLAG_SELECTED, 0); // viewport row 0
+        assert_eq!(cells[10].flags & CELL_FLAG_SELECTED, 0); // viewport row 1 unaffected
+    }
+
+    #[test]
+    fn selection_offscreen_skipped() {
+        let mut cells = make_row("visible", 10);
+        // Selection at absolute row -5, display_offset=1 → viewport row -4 (off-screen)
+        let sel = Selection {
+            start: (-5, 0),
+            end: (-5, 6),
+            selection_type: SelectionType::Range,
+        };
+        apply_selection_flags(&mut cells, &sel, 10, 1);
+        // No cell should be flagged
+        for cell in &cells {
+            assert_eq!(cell.flags & CELL_FLAG_SELECTED, 0);
+        }
     }
 }

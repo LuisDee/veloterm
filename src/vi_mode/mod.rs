@@ -663,13 +663,13 @@ impl ViState {
 
         let (start, end) = match self.mode {
             ViMode::VisualLine => {
-                // Full rows from anchor to cursor
-                let min_row = anchor.row.min(self.cursor.row);
-                let max_row = anchor.row.max(self.cursor.row);
+                // Full rows from anchor to cursor (vi-mode rows are already absolute)
+                let min_row = anchor.row.min(self.cursor.row) as i32;
+                let max_row = anchor.row.max(self.cursor.row) as i32;
                 ((min_row, 0), (max_row, usize::MAX))
             }
             _ => {
-                ((anchor.row, anchor.col), (self.cursor.row, self.cursor.col))
+                ((anchor.row as i32, anchor.col), (self.cursor.row as i32, self.cursor.col))
             }
         };
 
@@ -682,12 +682,13 @@ impl ViState {
 
     /// Extract the selected text for yank, based on the current visual mode.
     /// Returns None if not in a visual mode.
-    pub fn yank_text(&self, cells: &[GridCell], cols: usize) -> Option<String> {
+    /// `display_offset`: current scroll position for viewport mapping.
+    pub fn yank_text(&self, cells: &[GridCell], cols: usize, display_offset: usize) -> Option<String> {
         let selection = self.to_selection()?;
         let text = match selection.selection_type {
-            SelectionType::VisualBlock => selected_text_block(cells, &selection, cols),
-            SelectionType::Line => selected_text_lines(cells, &selection, cols),
-            _ => selected_text(cells, &selection, cols),
+            SelectionType::VisualBlock => selected_text_block(cells, &selection, cols, display_offset),
+            SelectionType::Line => selected_text_lines(cells, &selection, cols, display_offset),
+            _ => selected_text(cells, &selection, cols, display_offset),
         };
         Some(text)
     }
@@ -1624,7 +1625,7 @@ mod tests {
         let mut state = ViState::new(0, 0);
         state.process_key('v', false);
         state.cursor = CursorPos { row: 0, col: 4 };
-        let text = state.yank_text(&cells, 20).unwrap();
+        let text = state.yank_text(&cells, 20, 0).unwrap();
         assert_eq!(text, "hello");
     }
 
@@ -1634,7 +1635,7 @@ mod tests {
         let mut state = ViState::new(0, 3);
         state.process_key('V', false);
         state.cursor = CursorPos { row: 1, col: 0 };
-        let text = state.yank_text(&cells, 20).unwrap();
+        let text = state.yank_text(&cells, 20, 0).unwrap();
         assert_eq!(text, "hello world\nsecond line");
     }
 
@@ -1644,7 +1645,7 @@ mod tests {
         let mut state = ViState::new(0, 0);
         state.process_key('v', true); // Ctrl+V
         state.cursor = CursorPos { row: 1, col: 4 };
-        let text = state.yank_text(&cells, 20).unwrap();
+        let text = state.yank_text(&cells, 20, 0).unwrap();
         assert_eq!(text, "hello\nabcde");
     }
 
@@ -1652,7 +1653,7 @@ mod tests {
     fn yank_text_returns_none_in_normal() {
         let cells = make_cells(&["hello"], 20);
         let state = ViState::new(0, 0);
-        assert_eq!(state.yank_text(&cells, 20), None);
+        assert_eq!(state.yank_text(&cells, 20, 0), None);
     }
 
     // ── Search input mode ─────────────────────────────────────────────

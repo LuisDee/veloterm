@@ -459,14 +459,15 @@ impl App {
                     if let Some(ref sel) = state.mouse_selection.active_selection {
                         let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal, theme);
                         let cols = state.terminal.columns();
+                        let display_offset = state.terminal.display_offset();
                         let text = match sel.selection_type {
                             crate::input::selection::SelectionType::VisualBlock => {
-                                crate::input::selection::selected_text_block(&cells, sel, cols)
+                                crate::input::selection::selected_text_block(&cells, sel, cols, display_offset)
                             }
                             crate::input::selection::SelectionType::Line => {
-                                crate::input::selection::selected_text_lines(&cells, sel, cols)
+                                crate::input::selection::selected_text_lines(&cells, sel, cols, display_offset)
                             }
-                            _ => crate::input::selection::selected_text(&cells, sel, cols),
+                            _ => crate::input::selection::selected_text(&cells, sel, cols, display_offset),
                         };
                         if !text.is_empty() {
                             if let Ok(mut clipboard) = arboard::Clipboard::new() {
@@ -498,7 +499,7 @@ impl App {
                     state.mouse_selection.active_selection = Some(
                         crate::input::selection::Selection {
                             start: (0, 0),
-                            end: (rows.saturating_sub(1), cols.saturating_sub(1)),
+                            end: (rows.saturating_sub(1) as i32, cols.saturating_sub(1)),
                             selection_type: crate::input::selection::SelectionType::Range,
                         },
                     );
@@ -1256,7 +1257,8 @@ impl App {
                     if let Some(ref sel) = state.mouse_selection.active_selection {
                         let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal, theme);
                         let cols = state.terminal.columns();
-                        let text_str = crate::input::selection::selected_text(&cells, sel, cols);
+                        let display_offset = state.terminal.display_offset();
+                        let text_str = crate::input::selection::selected_text(&cells, sel, cols, display_offset);
                         if !text_str.is_empty() {
                             if let Ok(mut clipboard) = arboard::Clipboard::new() {
                                 let _ = clipboard.set_text(&text_str);
@@ -1286,7 +1288,7 @@ impl App {
                     state.mouse_selection.active_selection = Some(
                         crate::input::selection::Selection {
                             start: (0, 0),
-                            end: (rows.saturating_sub(1), cols.saturating_sub(1)),
+                            end: (rows.saturating_sub(1) as i32, cols.saturating_sub(1)),
                             selection_type: crate::input::selection::SelectionType::Range,
                         },
                     );
@@ -1449,7 +1451,8 @@ impl App {
                         let cells = crate::terminal::grid_bridge::extract_grid_cells(
                             &state.terminal, theme,
                         );
-                        if let Some(text) = vi.yank_text(&cells, cols) {
+                        let display_offset = state.terminal.display_offset();
+                        if let Some(text) = vi.yank_text(&cells, cols, display_offset) {
                             if let Ok(mut clipboard) = arboard::Clipboard::new() {
                                 if let Err(e) = clipboard.set_text(&text) {
                                     log::warn!("Clipboard write error: {e}");
@@ -2058,14 +2061,15 @@ impl ApplicationHandler<UserEvent> for App {
                             if let Some(ref sel) = state.mouse_selection.active_selection {
                                 let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal, theme);
                                 let cols = state.terminal.columns();
+                                let display_offset = state.terminal.display_offset();
                                 let text = match sel.selection_type {
                                     crate::input::selection::SelectionType::VisualBlock => {
-                                        crate::input::selection::selected_text_block(&cells, sel, cols)
+                                        crate::input::selection::selected_text_block(&cells, sel, cols, display_offset)
                                     }
                                     crate::input::selection::SelectionType::Line => {
-                                        crate::input::selection::selected_text_lines(&cells, sel, cols)
+                                        crate::input::selection::selected_text_lines(&cells, sel, cols, display_offset)
                                     }
-                                    _ => crate::input::selection::selected_text(&cells, sel, cols),
+                                    _ => crate::input::selection::selected_text(&cells, sel, cols, display_offset),
                                 };
                                 if !text.is_empty() {
                                     if let Ok(mut clipboard) = arboard::Clipboard::new() {
@@ -2100,7 +2104,7 @@ impl ApplicationHandler<UserEvent> for App {
                             state.mouse_selection.active_selection = Some(
                                 crate::input::selection::Selection {
                                     start: (0, 0),
-                                    end: (rows.saturating_sub(1), cols.saturating_sub(1)),
+                                    end: (rows.saturating_sub(1) as i32, cols.saturating_sub(1)),
                                     selection_type: crate::input::selection::SelectionType::Range,
                                 },
                             );
@@ -2270,8 +2274,9 @@ impl ApplicationHandler<UserEvent> for App {
                                         let cols = state.terminal.columns();
                                         let rows = state.terminal.rows();
                                         let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal, renderer.theme());
+                                        let display_offset = state.terminal.display_offset();
                                         state.mouse_selection.on_mouse_drag(
-                                            local_x, local_y, cell_width, cell_height, cols, rows, &cells,
+                                            local_x, local_y, cell_width, cell_height, cols, rows, &cells, display_offset,
                                         );
                                         if let Some(window) = &self.window {
                                             window.request_redraw();
@@ -2404,14 +2409,15 @@ impl ApplicationHandler<UserEvent> for App {
                                 match btn_state {
                                     ElementState::Pressed => {
                                         let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal, renderer.theme());
+                                        let display_offset = state.terminal.display_offset();
                                         if self.modifiers.shift_key() {
                                             let (crow, ccol) = state.terminal.cursor_position();
                                             state.mouse_selection.on_shift_click(
-                                                local_x, local_y, cell_width, cell_height, cols, rows, crow, ccol,
+                                                local_x, local_y, cell_width, cell_height, cols, rows, crow, ccol, display_offset,
                                             );
                                         } else {
                                             state.mouse_selection.on_mouse_press(
-                                                local_x, local_y, cell_width, cell_height, cols, rows, &cells,
+                                                local_x, local_y, cell_width, cell_height, cols, rows, &cells, display_offset,
                                             );
                                         }
                                     }
@@ -2495,6 +2501,20 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                     let offset = state.scroll_state.current_line_offset();
                     state.terminal.set_display_offset(offset);
+                    // If dragging during scroll, update selection endpoint at new offset
+                    if state.mouse_selection.drag_phase == crate::input::mouse::DragPhase::Active {
+                        let (lx, ly) = state.mouse_selection.last_drag_pos;
+                        let new_offset = state.scroll_state.current_line_offset();
+                        if let Some(renderer) = &self.renderer {
+                            let cols = state.terminal.columns();
+                            let rows = state.terminal.rows();
+                            state.mouse_selection.update_drag_endpoint(
+                                lx, ly,
+                                renderer.cell_width(), renderer.cell_height(),
+                                cols, rows, new_offset,
+                            );
+                        }
+                    }
                 }
                 if let Some(window) = &self.window {
                     window.request_redraw();
@@ -2597,6 +2617,34 @@ impl ApplicationHandler<UserEvent> for App {
                     state.cursor.tick_blink();
                     // Tick scroll animation (~60fps assumed)
                     state.scroll_state.tick(1.0 / 60.0);
+                    // Auto-scroll during active drag selection
+                    if state.mouse_selection.drag_phase == crate::input::mouse::DragPhase::Active {
+                        let speed = state.mouse_selection.auto_scroll_speed;
+                        if speed != 0.0 {
+                            let dt = 1.0 / 60.0_f32;
+                            let lines = (speed * dt).round() as i32;
+                            if lines != 0 {
+                                let history_size = state.terminal.history_size();
+                                state.scroll_state.apply_auto_scroll(lines, history_size);
+                                let new_offset = state.scroll_state.current_line_offset();
+                                state.terminal.set_display_offset(new_offset);
+                                // Update selection endpoint from last drag position
+                                if let Some(ref cell_d) = cell_dims {
+                                    let (lx, ly) = state.mouse_selection.last_drag_pos;
+                                    let cols = state.terminal.columns();
+                                    let rows = state.terminal.rows();
+                                    state.mouse_selection.update_drag_endpoint(
+                                        lx, ly, cell_d.0, cell_d.1,
+                                        cols, rows, new_offset,
+                                    );
+                                }
+                            }
+                            // Keep redrawing while auto-scrolling
+                            if let Some(window) = &self.window {
+                                window.request_redraw();
+                            }
+                        }
+                    }
                     let offset = state.scroll_state.current_line_offset();
                     state.terminal.set_display_offset(offset);
                     // Clamp scroll to current history size (may have shrunk)
@@ -2671,7 +2719,8 @@ impl ApplicationHandler<UserEvent> for App {
                         // Apply mouse selection highlight flags
                         if let Some(ref sel) = state.mouse_selection.active_selection {
                             let cols = state.terminal.columns();
-                            crate::input::selection::apply_selection_flags(&mut cells, sel, cols);
+                            let display_offset = state.terminal.display_offset();
+                            crate::input::selection::apply_selection_flags(&mut cells, sel, cols, display_offset);
                         }
 
                         // Offset rect by pane grid origin + pane header for screen-space rendering
@@ -3215,7 +3264,7 @@ mod tests {
     fn app_config_defaults_match_expected_values() {
         let app = App::new(WindowConfig::default(), Config::default());
         assert_eq!(app.app_config.colors.theme, "warm_dark");
-        assert_eq!(app.app_config.font.size, 16.0);
+        assert_eq!(app.app_config.font.size, 18.0);
         assert_eq!(app.app_config.scrollback.lines, 10_000);
         assert_eq!(app.app_config.cursor.style, "block");
         assert!(app.app_config.cursor.blink);
@@ -3913,8 +3962,8 @@ blink = false
     #[test]
     fn font_size_tracks_in_app() {
         let app = App::new(WindowConfig::default(), Config::default());
-        assert_eq!(app.current_font_size, 16.0);
-        assert_eq!(app.default_font_size, 16.0);
+        assert_eq!(app.current_font_size, 18.0);
+        assert_eq!(app.default_font_size, 18.0);
     }
 
     // ── Config hot-reload ────────────────────────────────────────
@@ -3922,7 +3971,7 @@ blink = false
     #[test]
     fn config_reload_font_updates_app_state() {
         let mut app = App::new(WindowConfig::default(), Config::default());
-        assert_eq!(app.current_font_size, 16.0);
+        assert_eq!(app.current_font_size, 18.0);
 
         let mut new_config = Config::default();
         new_config.font.size = 20.0;
