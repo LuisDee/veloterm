@@ -108,44 +108,15 @@ pub fn find_word_boundaries(
 }
 
 /// Normalize selection so start is before end in reading order.
-/// Returns ((row, col), (row, col)) with Side adjustments applied:
-/// - If the first anchor is Side::Right, the column is incremented (selection starts after that cell)
-/// - If the last anchor is Side::Left, the column is decremented (selection ends before that cell)
+/// Returns ((row, col), (row, col)) — purely positional, no Side adjustments.
+/// This ensures symmetric results regardless of drag direction.
 fn normalize(selection: &Selection) -> ((i32, usize), (i32, usize)) {
     let (s, e) = (selection.start, selection.end);
-    let (first, first_side, last, last_side) =
-        if s.0 < e.0 || (s.0 == e.0 && s.1 <= e.1) {
-            (s, selection.start_side, e, selection.end_side)
-        } else {
-            (e, selection.end_side, s, selection.start_side)
-        };
-
-    // For Word and Line selections, Side adjustment is not needed — boundaries
-    // are already at word/line edges.
-    if selection.selection_type == SelectionType::Word
-        || selection.selection_type == SelectionType::Line
-    {
-        return (first, last);
+    if s.0 < e.0 || (s.0 == e.0 && s.1 <= e.1) {
+        (s, e)
+    } else {
+        (e, s)
     }
-
-    // Apply Side adjustments for Range/VisualBlock:
-    // Right-side start → selection begins at the next cell
-    let first_col = match first_side {
-        Side::Right => first.1 + 1,
-        Side::Left => first.1,
-    };
-    // Left-side end → selection ends at the previous cell
-    let last_col = match last_side {
-        Side::Left => last.1.saturating_sub(1),
-        Side::Right => last.1,
-    };
-
-    // If Side adjustment causes first_col > last_col on same row, return empty
-    if first.0 == last.0 && first_col > last_col {
-        return ((first.0, first_col), (last.0, first_col.saturating_sub(1)));
-    }
-
-    ((first.0, first_col), (last.0, last_col))
 }
 
 /// Check if a cell at (absolute_row, col) is within the selection, in reading order.
