@@ -150,6 +150,8 @@ pub struct App {
     hovering_new_tab: bool,
     /// Which tab's close button is hovered.
     hovering_close_button: Option<usize>,
+    /// Whether the tracks icon in the header bar is hovered.
+    hovering_tracks_icon: bool,
     /// Conductor dashboard state (loaded once at startup if conductor dir found).
     conductor_state: Option<crate::conductor::ConductorState>,
     /// Pre-created iced image handle for the tracks icon (stable Id across frames).
@@ -193,6 +195,7 @@ impl App {
             editing_tab_value: String::new(),
             hovering_new_tab: false,
             hovering_close_button: None,
+            hovering_tracks_icon: false,
             conductor_state: {
                 let project_dir = std::env::var("VELOTERM_PROJECT_DIR").ok()
                     .map(std::path::PathBuf::from);
@@ -2943,6 +2946,7 @@ impl ApplicationHandler<UserEvent> for App {
                         editing_tab_value: self.editing_tab_value.clone(),
                         hovering_new_tab: self.hovering_new_tab,
                         hovering_close_button: self.hovering_close_button,
+                        is_tracks_hovered: self.hovering_tracks_icon,
                         conductor_available: self.conductor_state.is_some(),
                         conductor: if self.input_mode == InputMode::Conductor {
                             self.conductor_state.as_ref().map(|s| s.snapshot())
@@ -3095,6 +3099,12 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                             UiMessage::CloseButtonHovered(tab_idx) => {
                                 self.hovering_close_button = tab_idx;
+                            }
+                            UiMessage::TracksIconEnter => {
+                                self.hovering_tracks_icon = true;
+                            }
+                            UiMessage::TracksIconExit => {
+                                self.hovering_tracks_icon = false;
                             }
                             UiMessage::ConductorToggled => {
                                 if self.input_mode == InputMode::Conductor {

@@ -54,6 +54,8 @@ pub enum UiMessage {
     CloseButtonHovered(Option<usize>),
     // Conductor dashboard
     ConductorToggled,
+    TracksIconEnter,
+    TracksIconExit,
     ConductorTrackClicked(usize),
     ConductorFilterCycled,
     ConductorSortCycled,
@@ -174,6 +176,8 @@ pub struct UiState<'a> {
     pub markdown_file_name: Option<String>,
     /// Pre-created handle for the tracks icon (avoids per-frame Handle::from_bytes which creates new Id each call).
     pub tracks_icon_handle: Option<iced_core::image::Handle>,
+    /// Whether the tracks icon in the header bar is hovered.
+    pub is_tracks_hovered: bool,
 }
 
 /// Holds iced rendering state: renderer, viewport, event queue, and UI cache.
@@ -486,8 +490,8 @@ impl IcedLayer {
             .align_y(iced_core::Alignment::Center);
 
         let content: IcedElement<'a> = if state.conductor_available {
-            let icon_opacity = if state.conductor.is_some() { 1.0 } else { 0.5 };
-            let icon_size = 16.0 / scale;
+            let icon_opacity = if state.conductor.is_some() { 1.0 } else { 0.6 };
+            let icon_size = 20.0 / scale;
             let handle = state.tracks_icon_handle.clone()
                 .unwrap_or_else(|| iced_widget::image::Handle::from_bytes(TRACKS_ICON_PNG));
             let tracks_img = iced_widget::image::Image::new(handle)
@@ -495,10 +499,26 @@ impl IcedLayer {
                 .height(icon_size)
                 .content_fit(iced_core::ContentFit::Contain)
                 .opacity(icon_opacity);
+            let btn_bg = if state.is_tracks_hovered {
+                to_iced_color(&theme.bg_hover)
+            } else {
+                to_iced_color(&theme.bg_raised)
+            };
             let tracks_icon = container(tracks_img)
-                .padding(iced_core::Padding::from([4.0 / scale, 8.0 / scale]));
+                .padding(iced_core::Padding::from([6.0 / scale, 10.0 / scale]))
+                .style(move |_: &iced_core::Theme| container::Style {
+                    background: Some(iced_core::Background::Color(btn_bg)),
+                    border: iced_core::Border {
+                        color: border_subtle,
+                        width: 0.0,
+                        radius: (4.0 / scale).into(),
+                    },
+                    ..Default::default()
+                });
             let tracks_click = MouseArea::new(tracks_icon)
-                .on_press(UiMessage::ConductorToggled);
+                .on_press(UiMessage::ConductorToggled)
+                .on_enter(UiMessage::TracksIconEnter)
+                .on_exit(UiMessage::TracksIconExit);
             row![hspace(), center_content, hspace(), tracks_click]
                 .align_y(iced_core::Alignment::Center)
                 .padding(iced_core::Padding::from([0.0, 8.0 / scale]))
@@ -2025,6 +2045,7 @@ mod tests {
             markdown_items: None,
             markdown_file_name: None,
             tracks_icon_handle: None,
+            is_tracks_hovered: false,
         }
     }
 
@@ -2286,6 +2307,7 @@ mod tests {
             markdown_items: None,
             markdown_file_name: None,
             tracks_icon_handle: None,
+            is_tracks_hovered: false,
             };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
@@ -2390,6 +2412,7 @@ mod tests {
             markdown_items: None,
             markdown_file_name: None,
             tracks_icon_handle: None,
+            is_tracks_hovered: false,
             };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
