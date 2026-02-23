@@ -181,26 +181,26 @@ impl CoreTextRasterizer {
 mod tests {
     use super::*;
 
-    const JETBRAINS_MONO_TTF: &[u8] =
-        include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
+    const SOURCE_CODE_PRO_TTF: &[u8] =
+        include_bytes!("../../assets/fonts/SourceCodePro-Medium.ttf");
 
     #[test]
     fn coretext_rasterizer_creates_successfully() {
-        let rast = CoreTextRasterizer::new(JETBRAINS_MONO_TTF, 26.0);
+        let rast = CoreTextRasterizer::new(SOURCE_CODE_PRO_TTF, 26.0);
         assert!(rast.ascent() > 0.0);
         assert!(rast.descent() > 0.0);
     }
 
     #[test]
     fn coretext_rasterizer_advance_width_positive() {
-        let rast = CoreTextRasterizer::new(JETBRAINS_MONO_TTF, 26.0);
+        let rast = CoreTextRasterizer::new(SOURCE_CODE_PRO_TTF, 26.0);
         let advance = rast.advance_width('M');
         assert!(advance > 0.0, "advance should be positive: {advance}");
     }
 
     #[test]
     fn coretext_rasterize_produces_nonempty_bitmap() {
-        let rast = CoreTextRasterizer::new(JETBRAINS_MONO_TTF, 26.0);
+        let rast = CoreTextRasterizer::new(SOURCE_CODE_PRO_TTF, 26.0);
         let glyph = rast.rasterize('A', 16, 42);
         assert_eq!(glyph.width, 16);
         assert_eq!(glyph.height, 42);
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn coretext_rasterize_space_is_blank() {
-        let rast = CoreTextRasterizer::new(JETBRAINS_MONO_TTF, 26.0);
+        let rast = CoreTextRasterizer::new(SOURCE_CODE_PRO_TTF, 26.0);
         let glyph = rast.rasterize(' ', 16, 42);
         let nonzero = glyph.data.iter().filter(|&&b| b > 0).count();
         assert_eq!(nonzero, 0, "space should have no visible pixels");
@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn coretext_rasterize_data_size_matches_dimensions() {
-        let rast = CoreTextRasterizer::new(JETBRAINS_MONO_TTF, 26.0);
+        let rast = CoreTextRasterizer::new(SOURCE_CODE_PRO_TTF, 26.0);
         for (w, h) in [(16, 42), (15, 39), (17, 45), (13, 33)] {
             let glyph = rast.rasterize('A', w, h);
             assert_eq!(
@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn coretext_rasterize_vertical_bar_no_diagonal_shear() {
-        let rast = CoreTextRasterizer::new(JETBRAINS_MONO_TTF, 26.0);
+        let rast = CoreTextRasterizer::new(SOURCE_CODE_PRO_TTF, 26.0);
         let glyph = rast.rasterize('|', 16, 42);
         let w = glyph.width as usize;
 
@@ -268,7 +268,7 @@ mod tests {
 
     #[test]
     fn coretext_rasterize_channels_consistent_grayscale() {
-        let rast = CoreTextRasterizer::new(JETBRAINS_MONO_TTF, 26.0);
+        let rast = CoreTextRasterizer::new(SOURCE_CODE_PRO_TTF, 26.0);
         let glyph = rast.rasterize('A', 16, 42);
         for (i, pixel) in glyph.data.chunks(4).enumerate() {
             let a = pixel[3];
@@ -287,7 +287,7 @@ mod tests {
 
     #[test]
     fn coretext_rasterize_glyph_centered_in_cell() {
-        let rast = CoreTextRasterizer::new(JETBRAINS_MONO_TTF, 26.0);
+        let rast = CoreTextRasterizer::new(SOURCE_CODE_PRO_TTF, 26.0);
         let glyph = rast.rasterize('M', 16, 42);
         let w = glyph.width as usize;
         let third = w / 3;
@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn coretext_rasterize_t_crossbar_at_top() {
-        let rast = CoreTextRasterizer::new(JETBRAINS_MONO_TTF, 26.0);
+        let rast = CoreTextRasterizer::new(SOURCE_CODE_PRO_TTF, 26.0);
         let glyph = rast.rasterize('T', 16, 42);
         let w = glyph.width as usize;
         let h = glyph.height as usize;
@@ -351,7 +351,7 @@ mod tests {
 
     #[test]
     fn coretext_rasterize_l_stroke_on_left() {
-        let rast = CoreTextRasterizer::new(JETBRAINS_MONO_TTF, 26.0);
+        let rast = CoreTextRasterizer::new(SOURCE_CODE_PRO_TTF, 26.0);
         let glyph = rast.rasterize('L', 16, 42);
         let w = glyph.width as usize;
         let h = glyph.height as usize;
@@ -380,13 +380,13 @@ mod tests {
         );
     }
 
-    const JETBRAINS_MONO_BOLD_TTF: &[u8] =
-        include_bytes!("../../assets/fonts/JetBrainsMono-Bold.ttf");
+    const SOURCE_CODE_PRO_BOLD_TTF: &[u8] =
+        include_bytes!("../../assets/fonts/SourceCodePro-Bold.ttf");
 
     #[test]
     fn coretext_rasterize_bold_has_more_coverage() {
-        let regular = CoreTextRasterizer::new(JETBRAINS_MONO_TTF, 26.0);
-        let bold = CoreTextRasterizer::new(JETBRAINS_MONO_BOLD_TTF, 26.0);
+        let regular = CoreTextRasterizer::new(SOURCE_CODE_PRO_TTF, 26.0);
+        let bold = CoreTextRasterizer::new(SOURCE_CODE_PRO_BOLD_TTF, 26.0);
 
         let reg_glyph = regular.rasterize('A', 16, 42);
         let bold_glyph = bold.rasterize('A', 16, 42);
@@ -403,8 +403,8 @@ mod tests {
 
     #[test]
     fn coretext_rasterize_fallback_for_missing_glyph() {
-        let rast = CoreTextRasterizer::new(JETBRAINS_MONO_TTF, 26.0);
-        // U+276F (❯) may not be in JetBrains Mono — system font fallback should render it
+        let rast = CoreTextRasterizer::new(SOURCE_CODE_PRO_TTF, 26.0);
+        // U+276F (❯) may not be in Source Code Pro — system font fallback should render it
         let glyph = rast.rasterize('\u{276F}', 16, 42);
         let nonzero = glyph.data.iter().filter(|&&b| b > 0).count();
         assert!(nonzero > 0, "fallback glyph '❯' (U+276F) should have visible pixels");

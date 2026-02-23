@@ -8,9 +8,9 @@
 use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, SwashCache};
 use std::collections::HashMap;
 
-/// JetBrains Mono Regular — bundled as a compiled-in resource (~264KB).
-const JETBRAINS_MONO_TTF: &[u8] =
-    include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
+/// Source Code Pro Medium — bundled as a compiled-in resource.
+const SOURCE_CODE_PRO_TTF: &[u8] =
+    include_bytes!("../../assets/fonts/SourceCodePro-Medium.ttf");
 
 /// Extra pixels per side added to each atlas slot to prevent glyph clipping.
 /// Descenders, ascenders, and anti-aliased fringes need room beyond the cell boundary.
@@ -103,7 +103,7 @@ impl GlyphAtlas {
         use crate::renderer::coretext_rasterizer::CoreTextRasterizer;
 
         let scaled_size = font_size * scale_factor;
-        let rasterizer = CoreTextRasterizer::new(JETBRAINS_MONO_TTF, scaled_size);
+        let rasterizer = CoreTextRasterizer::new(SOURCE_CODE_PRO_TTF, scaled_size);
 
         let cell_width = rasterizer.advance_width('M') as f32;
         let font_metrics_height = (rasterizer.ascent() + rasterizer.descent()) as f32;
@@ -210,7 +210,7 @@ impl GlyphAtlas {
         let mut font_system = FontSystem::new();
         font_system
             .db_mut()
-            .load_font_data(JETBRAINS_MONO_TTF.to_vec());
+            .load_font_data(SOURCE_CODE_PRO_TTF.to_vec());
 
         let mut swash_cache = SwashCache::new();
         let metrics = Metrics::new(scaled_size, line_height);
@@ -388,6 +388,7 @@ impl GlyphAtlas {
     #[cfg(not(target_os = "macos"))]
     fn resolve_font_attrs(font_family: &str) -> Attrs<'static> {
         match font_family.to_lowercase().as_str() {
+            "source code pro" => Attrs::new().family(Family::Name("Source Code Pro")),
             "jetbrains mono" => Attrs::new().family(Family::Name("JetBrains Mono")),
             "sf mono" => Attrs::new().family(Family::Name("SF Mono")),
             "menlo" => Attrs::new().family(Family::Name("Menlo")),

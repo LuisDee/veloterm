@@ -228,9 +228,9 @@ struct RawFontConfig {
 impl Default for RawFontConfig {
     fn default() -> Self {
         Self {
-            family: "JetBrains Mono".to_string(),
+            family: "Source Code Pro".to_string(),
             size: 15.0,
-            line_height: 1.6,
+            line_height: 1.2,
             ui_family: "Inter".to_string(),
             display_family: "Georgia".to_string(),
         }
@@ -417,9 +417,9 @@ impl Default for RawSidebarConfig {
 impl Default for FontConfig {
     fn default() -> Self {
         Self {
-            family: "JetBrains Mono".to_string(),
+            family: "Source Code Pro".to_string(),
             size: 15.0,
-            line_height: 1.6,
+            line_height: 1.2,
             ui_family: "Inter".to_string(),
             display_family: "Georgia".to_string(),
         }
@@ -633,12 +633,12 @@ impl Config {
 # Place this file at ~/.config/veloterm/veloterm.toml
 
 [font]
-# Terminal content font family (with fallback: JetBrains Mono -> SF Mono -> Menlo -> system)
-family = "JetBrains Mono"
+# Terminal content font family (with fallback: Source Code Pro -> SF Mono -> Menlo -> system)
+family = "Source Code Pro"
 # Font size in points
 size = 15.0
-# Line-height multiplier (1.6 = 160% of font size)
-line_height = 1.6
+# Line-height multiplier (1.2 = 120% of font size)
+line_height = 1.2
 # UI chrome font (tab bar, menus, status)
 ui_family = "Inter"
 # Display/header font (welcome screen, about)
@@ -764,13 +764,13 @@ mod tests {
     #[test]
     fn default_font_family() {
         let config = Config::default();
-        assert_eq!(config.font.family, "JetBrains Mono");
+        assert_eq!(config.font.family, "Source Code Pro");
     }
 
     #[test]
     fn default_font_line_height() {
         let config = Config::default();
-        assert_eq!(config.font.line_height, 1.6);
+        assert_eq!(config.font.line_height, 1.2);
     }
 
     #[test]
@@ -882,8 +882,8 @@ size = 14.0
 "#;
         let config = Config::from_toml(toml).unwrap();
         assert_eq!(config.font.size, 14.0);
-        assert_eq!(config.font.family, "JetBrains Mono");
-        assert_eq!(config.font.line_height, 1.6);
+        assert_eq!(config.font.family, "Source Code Pro");
+        assert_eq!(config.font.line_height, 1.2);
         assert_eq!(config.colors.theme, "midnight");
         assert_eq!(config.cursor.style, "block");
         assert!(config.cursor.blink);
@@ -896,8 +896,8 @@ size = 14.0
     fn parse_empty_toml_uses_all_defaults() {
         let config = Config::from_toml("").unwrap();
         assert_eq!(config.font.size, 15.0);
-        assert_eq!(config.font.family, "JetBrains Mono");
-        assert_eq!(config.font.line_height, 1.6);
+        assert_eq!(config.font.family, "Source Code Pro");
+        assert_eq!(config.font.line_height, 1.2);
         assert_eq!(config.colors.theme, "midnight");
         assert_eq!(config.padding.top, 16.0);
     }
