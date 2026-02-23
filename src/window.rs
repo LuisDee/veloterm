@@ -2600,9 +2600,9 @@ impl ApplicationHandler<UserEvent> for App {
                                     // alacritty_terminal uses internal indices:
                                     // 256 = foreground (OSC 10), 257 = background (OSC 11)
                                     let color = match index {
-                                        256 | 10 => theme.text_primary,
+                                        256 | 10 => theme.text_muted,
                                         257 | 11 => theme.bg_deep,
-                                        _ => theme.text_primary,
+                                        _ => theme.text_muted,
                                     };
                                     let rgb = alacritty_terminal::vte::ansi::Rgb {
                                         r: (color.r * 255.0) as u8,

@@ -9,8 +9,10 @@ use alacritty_terminal::vte::ansi::Color as AnsiColor;
 use alacritty_terminal::vte::ansi::NamedColor;
 
 /// Default foreground color from the given theme.
+/// Uses text_muted so uncolored terminal output (metadata, permissions, etc.)
+/// stays subdued while ANSI-colored content (filenames, prompts) pops.
 pub fn default_fg(theme: &TerminalTheme) -> Color {
-    theme.text_primary
+    theme.text_muted
 }
 
 /// Default background color from the given theme.
@@ -323,8 +325,8 @@ mod tests {
     #[test]
     fn default_fg_matches_theme_text() {
         let fg = default_fg(&DARK);
-        // #e8e6dc → r = 0xe8/255 ≈ 0.910
-        assert!((fg.r - 0.910).abs() < 0.01);
+        // text_muted #7a786f → r = 0x7a/255 ≈ 0.478
+        assert!((fg.r - 0.478).abs() < 0.01);
     }
 
     #[test]
