@@ -24,24 +24,24 @@
 
 ## Phase 2: Platform Module Implementation
 
-- [ ] Task: Create `src/platform/linux.rs` with platform stubs
-  - [ ] Write tests for `foreground_process_name()` with mock /proc data
-  - [ ] Write tests for edge cases (no children, invalid pid, missing /proc files)
-  - [ ] Implement `foreground_process_name()` via `/proc/<pid>/task/<pid>/children` + `/proc/<child>/comm`
-  - [ ] Implement `detect_display_scale()` as winit passthrough
-  - [ ] Implement `check_hidpi_status()` as no-op
-  - [ ] Implement `set_titlebar_color()` as no-op
+- [x] Task: Create `src/platform/linux.rs` with platform stubs <!-- a20a463 -->
+  - [x] Write tests for `foreground_process_name()` with mock /proc data
+  - [x] Write tests for edge cases (no children, invalid pid, missing /proc files)
+  - [x] Implement `foreground_process_name()` via `/proc/<pid>/task/<pid>/children` + `/proc/<child>/comm`
+  - [x] Implement `detect_display_scale()` as winit passthrough
+  - [x] Implement `check_hidpi_status()` as no-op
+  - [x] Implement `set_titlebar_color()` as no-op
 
-- [ ] Task: Update `src/platform/mod.rs` to include Linux module
-  - [ ] Add `#[cfg(target_os = "linux")] pub mod linux;`
+- [x] Task: Update `src/platform/mod.rs` to include Linux module <!-- a20a463 -->
+  - [x] Add `#[cfg(target_os = "linux")] pub mod linux;`
 
-- [ ] Task: Wire Linux foreground process detection into PTY
-  - [ ] Update `src/pty/mod.rs` non-macOS `foreground_process_name()` to call `platform::linux::foreground_process_name()`
-  - [ ] Verify with unit tests
+- [x] Task: Wire Linux foreground process detection into PTY <!-- a20a463 -->
+  - [x] Update `src/pty/mod.rs` non-macOS `foreground_process_name()` to call `platform::linux::foreground_process_name()`
+  - [x] Verify with unit tests
 
-- [ ] Task: Verify cross-compile still passes with new platform module
-  - [ ] `cargo check --target x86_64-unknown-linux-gnu`
-  - [ ] All macOS tests pass
+- [x] Task: Verify cross-compile still passes with new platform module <!-- a20a463 -->
+  - [x] `cargo check --target x86_64-unknown-linux-gnu`
+  - [x] All macOS tests pass
 
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Platform Module Implementation' (Protocol in workflow.md)
 
