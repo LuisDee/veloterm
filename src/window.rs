@@ -156,6 +156,12 @@ pub struct App {
     conductor_state: Option<crate::conductor::ConductorState>,
     /// Pre-created iced image handle for the tracks icon (stable Id across frames).
     tracks_icon_handle: Option<iced_core::image::Handle>,
+    /// Context menu overlay visible (non-macOS only — macOS uses native NSMenu).
+    context_menu_visible: bool,
+    /// Context menu position in physical pixels.
+    context_menu_position: (f32, f32),
+    /// Whether the focused pane has selection (for context menu Copy item).
+    context_menu_has_selection: bool,
 }
 
 impl App {
@@ -208,6 +214,9 @@ impl App {
             tracks_icon_handle: Some(iced_core::image::Handle::from_bytes(
                 crate::renderer::iced_layer::TRACKS_ICON_PNG.to_vec()
             )),
+            context_menu_visible: false,
+            context_menu_position: (0.0, 0.0),
+            context_menu_has_selection: false,
         }
     }
 
@@ -1188,6 +1197,7 @@ impl App {
             Key::Named(NamedKey::Escape) => {
                 self.input_mode = InputMode::Normal;
                 self.palette_state = None;
+                self.context_menu_visible = false;
             }
             Key::Named(NamedKey::ArrowUp) => {
                 palette.select_prev();
@@ -1630,7 +1640,11 @@ impl App {
                     Some(mgr)
                 }
                 Err(e) => {
-                    log::warn!("Failed to register quick terminal hotkey: {e}");
+                    log::warn!(
+                        "Failed to register quick terminal hotkey: {e}. \
+                         Note: global hotkeys may not work on Wayland compositors \
+                         that don't support the X11 XGrabKey protocol."
+                    );
                     None
                 }
             }
@@ -1924,6 +1938,15 @@ impl ApplicationHandler<UserEvent> for App {
                             self.input_mode = InputMode::Search;
                             self.search_state.is_active = true;
                         }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+
+                    // Dismiss context menu on any key press
+                    if self.context_menu_visible {
+                        self.context_menu_visible = false;
                         if let Some(window) = &self.window {
                             window.request_redraw();
                         }
@@ -2501,12 +2524,23 @@ impl ApplicationHandler<UserEvent> for App {
                         .pane_states
                         .get(&focused_pane)
                         .map_or(false, |s| s.mouse_selection.has_selection());
-                    if let Some(window) = &self.window {
-                        if let Some(action) =
-                            crate::context_menu::show_context_menu(has_selection, window)
-                        {
-                            self.handle_context_menu_action(action, event_loop);
+
+                    #[cfg(target_os = "macos")]
+                    {
+                        if let Some(window) = &self.window {
+                            if let Some(action) =
+                                crate::context_menu::show_context_menu(has_selection, window)
+                            {
+                                self.handle_context_menu_action(action, event_loop);
+                            }
                         }
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        // Show iced overlay context menu at cursor position
+                        self.context_menu_visible = true;
+                        self.context_menu_position = cursor_pos;
+                        self.context_menu_has_selection = has_selection;
                     }
                 }
             }
@@ -2970,6 +3004,9 @@ impl ApplicationHandler<UserEvent> for App {
                             None
                         },
                         tracks_icon_handle: self.tracks_icon_handle.clone(),
+                        context_menu_visible: self.context_menu_visible,
+                        context_menu_position: self.context_menu_position,
+                        context_menu_has_selection: self.context_menu_has_selection,
                     };
 
                     let mut iced_msgs = Vec::new();
@@ -3143,6 +3180,13 @@ impl ApplicationHandler<UserEvent> for App {
                                         .arg(url.as_str())
                                         .spawn();
                                 }
+                            }
+                            UiMessage::ContextMenuAction(action) => {
+                                self.context_menu_visible = false;
+                                self.handle_context_menu_action(action, event_loop);
+                            }
+                            UiMessage::ContextMenuDismiss => {
+                                self.context_menu_visible = false;
                             }
                             UiMessage::Noop => {}
                         }

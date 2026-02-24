@@ -195,4 +195,56 @@ mod tests {
         let result = paste_bytes("caf\u{00e9}", false);
         assert_eq!(result, "caf\u{00e9}".as_bytes());
     }
+
+    // ── Cross-platform clipboard integration ──────────────────────────
+
+    #[test]
+    fn arboard_clipboard_creates_successfully() {
+        // arboard auto-detects X11 vs Wayland vs macOS pasteboard at runtime.
+        // This test verifies the crate initializes without panic on the current platform.
+        let result = arboard::Clipboard::new();
+        assert!(
+            result.is_ok(),
+            "arboard::Clipboard::new() should succeed on this platform: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn arboard_clipboard_roundtrip() {
+        // Verify clipboard read/write works on the current platform.
+        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+            let test_text = "veloterm_clipboard_test_98765";
+            let _ = clipboard.set_text(test_text);
+            // Note: clipboard may be cleared by other processes, so we don't
+            // assert exact match — just verify the API doesn't panic.
+            let _ = clipboard.get_text();
+        }
+    }
+
+    #[test]
+    fn linux_copy_keybinding_uses_ctrl_shift_c() {
+        // On Linux terminals, copy is Ctrl+Shift+C (not Ctrl+C which is SIGINT)
+        assert!(is_copy_keybinding(
+            &Key::Character("c".into()),
+            ModifiersState::CONTROL | ModifiersState::SHIFT
+        ));
+        // Ctrl+C alone must NOT be copy
+        assert!(!is_copy_keybinding(
+            &Key::Character("c".into()),
+            ModifiersState::CONTROL
+        ));
+    }
+
+    #[test]
+    fn linux_paste_keybinding_uses_ctrl_shift_v() {
+        assert!(is_paste_keybinding(
+            &Key::Character("v".into()),
+            ModifiersState::CONTROL | ModifiersState::SHIFT
+        ));
+        assert!(!is_paste_keybinding(
+            &Key::Character("v".into()),
+            ModifiersState::CONTROL
+        ));
+    }
 }

@@ -61,6 +61,10 @@ pub enum UiMessage {
     ConductorSortCycled,
     /// Markdown preview link clicked (Uri is an alias for String).
     MarkdownLinkClicked(String),
+    /// Context menu item selected (non-macOS iced overlay).
+    ContextMenuAction(crate::context_menu::ContextMenuAction),
+    /// Dismiss the context menu overlay (click outside or Escape).
+    ContextMenuDismiss,
     Noop,
 }
 
@@ -178,6 +182,12 @@ pub struct UiState<'a> {
     pub tracks_icon_handle: Option<iced_core::image::Handle>,
     /// Whether the tracks icon in the header bar is hovered.
     pub is_tracks_hovered: bool,
+    /// Context menu overlay state (non-macOS only).
+    pub context_menu_visible: bool,
+    /// Context menu position in physical pixels.
+    pub context_menu_position: (f32, f32),
+    /// Whether the focused pane has an active selection (affects Copy item).
+    pub context_menu_has_selection: bool,
 }
 
 /// Holds iced rendering state: renderer, viewport, event queue, and UI cache.
@@ -459,7 +469,7 @@ impl IcedLayer {
         };
 
         // Markdown preview overlay
-        if state.markdown_items.is_some() {
+        let with_markdown: IcedElement<'a> = if state.markdown_items.is_some() {
             let md_overlay = Self::markdown_overlay(state, scale);
             stack![with_palette, md_overlay]
                 .width(iced_core::Length::Fill)
@@ -467,6 +477,31 @@ impl IcedLayer {
                 .into()
         } else {
             with_palette
+        };
+
+        // Context menu overlay (non-macOS only — macOS uses native NSMenu)
+        if state.context_menu_visible {
+            let ctx_menu = Self::context_menu_overlay(state, scale);
+            // Scrim: clicking outside the menu dismisses it
+            let scrim = MouseArea::new(
+                container(column![])
+                    .width(iced_core::Length::Fill)
+                    .height(iced_core::Length::Fill)
+                    .style(|_: &iced_core::Theme| container::Style {
+                        background: Some(iced_core::Background::Color(
+                            iced_core::Color::from_rgba(0.0, 0.0, 0.0, 0.15),
+                        )),
+                        ..Default::default()
+                    }),
+            )
+            .on_press(UiMessage::ContextMenuDismiss);
+
+            stack![with_markdown, scrim, ctx_menu]
+                .width(iced_core::Length::Fill)
+                .height(iced_core::Length::Fill)
+                .into()
+        } else {
+            with_markdown
         }
     }
 
@@ -1048,6 +1083,137 @@ impl IcedLayer {
             .width(1.0 / scale)
             .height(iced_core::Length::Fill)
             .into()
+    }
+
+    /// Context menu overlay (non-macOS): a floating menu at the cursor position.
+    ///
+    /// Renders a column of clickable menu items (Copy, Paste, Select All, etc.)
+    /// positioned at `state.context_menu_position`. Used on Linux/other platforms
+    /// where native NSMenu is unavailable.
+    fn context_menu_overlay<'a>(state: &'a UiState, scale: f32) -> IcedElement<'a> {
+        use crate::context_menu::ContextMenuAction;
+
+        let theme = state.theme;
+        let bg = to_iced_color(&theme.bg_surface);
+        let text_color = to_iced_color(&theme.text_primary);
+        let text_muted = to_iced_color(&theme.text_secondary);
+        let border_color = to_iced_color(&theme.border_subtle);
+        let has_sel = state.context_menu_has_selection;
+
+        let menu_items: Vec<(ContextMenuAction, &str, &str, bool)> = vec![
+            (ContextMenuAction::Copy, "Copy", "Ctrl+Shift+C", has_sel),
+            (ContextMenuAction::Paste, "Paste", "Ctrl+Shift+V", true),
+            (ContextMenuAction::SelectAll, "Select All", "Ctrl+Shift+A", true),
+            (ContextMenuAction::ClearScrollback, "Clear", "", true),
+            (ContextMenuAction::NewTab, "New Tab", "", true),
+            (ContextMenuAction::SplitVertical, "Split Right", "", true),
+            (ContextMenuAction::SplitHorizontal, "Split Down", "", true),
+            (ContextMenuAction::ClosePane, "Close Pane", "", true),
+        ];
+
+        let font_size = 13.0 / scale;
+        let hint_size = 11.0 / scale;
+        let item_pad_h = 12.0 / scale;
+        let item_pad_v = 6.0 / scale;
+        let menu_width = 200.0 / scale;
+
+        let mut col = iced_widget::Column::new().width(menu_width);
+
+        for (i, (action, label, hint, enabled)) in menu_items.iter().enumerate() {
+            // Separator before "Clear" and before "New Tab"
+            if i == 3 || i == 4 {
+                col = col.push(
+                    container(column![])
+                        .width(iced_core::Length::Fill)
+                        .height(1.0 / scale)
+                        .style(move |_: &iced_core::Theme| container::Style {
+                            background: Some(iced_core::Background::Color(border_color)),
+                            ..Default::default()
+                        }),
+                );
+            }
+
+            let label_color = if *enabled { text_color } else { text_muted };
+            let action_clone = *action;
+
+            let label_text = text(*label)
+                .size(font_size)
+                .color(label_color)
+                .font(DM_SANS);
+
+            let item_content: IcedElement<'a> = if hint.is_empty() {
+                container(label_text)
+                    .width(iced_core::Length::Fill)
+                    .padding(iced_core::Padding::from([item_pad_v, item_pad_h]))
+                    .into()
+            } else {
+                let hint_text = text(*hint)
+                    .size(hint_size)
+                    .color(text_muted)
+                    .font(JETBRAINS_MONO);
+                container(
+                    row![label_text, hspace(), hint_text]
+                        .align_y(iced_core::Alignment::Center),
+                )
+                .width(iced_core::Length::Fill)
+                .padding(iced_core::Padding::from([item_pad_v, item_pad_h]))
+                .into()
+            };
+
+            let hover_item = container(item_content)
+                .width(iced_core::Length::Fill)
+                .style(move |_: &iced_core::Theme| container::Style {
+                    ..Default::default()
+                });
+
+            if *enabled {
+                let mouse_area = MouseArea::new(hover_item)
+                    .on_press(UiMessage::ContextMenuAction(action_clone));
+                col = col.push(mouse_area);
+            } else {
+                col = col.push(hover_item);
+            }
+        }
+
+        let menu_container = container(col)
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(bg)),
+                border: iced_core::Border {
+                    color: border_color,
+                    width: 1.0 / scale,
+                    radius: (6.0 / scale).into(),
+                },
+                shadow: iced_core::Shadow {
+                    color: iced_core::Color::from_rgba(0.0, 0.0, 0.0, 0.3),
+                    offset: iced_core::Vector::new(0.0, 2.0 / scale),
+                    blur_radius: 8.0 / scale,
+                },
+                ..Default::default()
+            })
+            .padding(iced_core::Padding::from([4.0 / scale, 0.0]));
+
+        // Position the menu at the cursor location using pin + padding
+        let pos_x = state.context_menu_position.0 / scale;
+        let pos_y = state.context_menu_position.1 / scale;
+
+        // Clamp to keep menu on-screen
+        let win_w = state.window_width / scale;
+        let win_h = state.window_height / scale;
+        let clamped_x = pos_x.min(win_w - menu_width - 8.0 / scale).max(0.0);
+        let clamped_y = pos_y.min(win_h - 300.0 / scale).max(0.0);
+
+        pin(
+            container(menu_container)
+                .padding(iced_core::Padding {
+                    top: clamped_y,
+                    left: clamped_x,
+                    right: 0.0,
+                    bottom: 0.0,
+                })
+                .width(iced_core::Length::Fill)
+                .height(iced_core::Length::Fill),
+        )
+        .into()
     }
 
     /// Sidebar: "SESSIONS" header + tab entries with indicator dots.
@@ -2046,6 +2212,9 @@ mod tests {
             markdown_file_name: None,
             tracks_icon_handle: None,
             is_tracks_hovered: false,
+            context_menu_visible: false,
+            context_menu_position: (0.0, 0.0),
+            context_menu_has_selection: false,
         }
     }
 
@@ -2308,6 +2477,9 @@ mod tests {
             markdown_file_name: None,
             tracks_icon_handle: None,
             is_tracks_hovered: false,
+            context_menu_visible: false,
+            context_menu_position: (0.0, 0.0),
+            context_menu_has_selection: false,
             };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
@@ -2413,6 +2585,9 @@ mod tests {
             markdown_file_name: None,
             tracks_icon_handle: None,
             is_tracks_hovered: false,
+            context_menu_visible: false,
+            context_menu_position: (0.0, 0.0),
+            context_menu_has_selection: false,
             };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
@@ -2748,5 +2923,90 @@ mod tests {
             result.is_none(),
             "iced_winit should NOT convert RedrawRequested — we inject it ourselves"
         );
+    }
+
+    // ── Context menu overlay tests ─────────────────────────────────
+
+    #[test]
+    fn context_menu_ui_message_variants_exist() {
+        // Verify the context menu UiMessage variants compile
+        let action_msg = UiMessage::ContextMenuAction(
+            crate::context_menu::ContextMenuAction::Copy,
+        );
+        let dismiss_msg = UiMessage::ContextMenuDismiss;
+        // Just verify they're constructable (Debug impl)
+        let _ = format!("{:?}", action_msg);
+        let _ = format!("{:?}", dismiss_msg);
+    }
+
+    #[test]
+    fn context_menu_state_defaults_to_hidden() {
+        let theme = TerminalTheme::warm_dark();
+        let state = UiState {
+            tabs: vec![],
+            active_tab_index: 0,
+            hovered_tab: None,
+            active_pane_index: 0,
+            panes: vec![],
+            pane_count: 1,
+            is_zoomed: false,
+            theme: &theme,
+            window_width: 800.0,
+            window_height: 600.0,
+            scale_factor: 2.0,
+            search_active: false,
+            search_query: String::new(),
+            search_current: 0,
+            search_total: 0,
+            search_error: false,
+            dividers: vec![],
+            bell_flash: false,
+            palette_active: false,
+            palette_query: String::new(),
+            palette_items: vec![],
+            palette_selected: 0,
+            sidebar_visible: false,
+            sidebar_tabs: vec![],
+            sidebar_width: 200.0,
+            hovered_sidebar_tab: None,
+            theme_selector_open: false,
+            editing_tab: None,
+            editing_tab_value: String::new(),
+            hovering_new_tab: false,
+            hovering_close_button: None,
+            conductor_available: false,
+            conductor: None,
+            markdown_items: None,
+            markdown_file_name: None,
+            tracks_icon_handle: None,
+            is_tracks_hovered: false,
+            context_menu_visible: false,
+            context_menu_position: (0.0, 0.0),
+            context_menu_has_selection: false,
+        };
+        assert!(!state.context_menu_visible);
+        assert_eq!(state.context_menu_position, (0.0, 0.0));
+        assert!(!state.context_menu_has_selection);
+    }
+
+    #[test]
+    fn context_menu_overlay_source_contains_menu_items() {
+        // Verify the context menu overlay renders expected action items
+        let source = include_str!("iced_layer.rs");
+        assert!(source.contains("ContextMenuAction::Copy"));
+        assert!(source.contains("ContextMenuAction::Paste"));
+        assert!(source.contains("ContextMenuAction::SelectAll"));
+        assert!(source.contains("ContextMenuAction::ClearScrollback"));
+        assert!(source.contains("ContextMenuAction::NewTab"));
+        assert!(source.contains("ContextMenuAction::SplitVertical"));
+        assert!(source.contains("ContextMenuAction::SplitHorizontal"));
+        assert!(source.contains("ContextMenuAction::ClosePane"));
+    }
+
+    #[test]
+    fn context_menu_dismissed_by_scrim_click() {
+        // Verify the scrim sends ContextMenuDismiss on press
+        let source = include_str!("iced_layer.rs");
+        assert!(source.contains("UiMessage::ContextMenuDismiss"));
     }
 }

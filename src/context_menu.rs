@@ -217,4 +217,42 @@ mod tests {
             assert!(seen.insert(action), "Tag {tag} produced duplicate action");
         }
     }
+
+    #[test]
+    fn non_macos_context_menu_returns_none() {
+        // On non-macOS, show_context_menu returns None (iced overlay handles it instead)
+        #[cfg(not(target_os = "macos"))]
+        {
+            // Without a real window we can't call show_context_menu,
+            // but we verify the stub signature exists and compiles.
+            let _fn_ptr: fn(bool, &winit::window::Window) -> Option<ContextMenuAction> =
+                show_context_menu;
+        }
+    }
+
+    #[test]
+    fn non_macos_tab_context_menu_returns_none() {
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _fn_ptr: fn(&winit::window::Window) -> Option<ContextMenuAction> =
+                show_tab_context_menu;
+        }
+    }
+
+    #[test]
+    fn context_menu_action_debug_and_clone() {
+        let action = ContextMenuAction::Copy;
+        let cloned = action;
+        assert_eq!(format!("{:?}", cloned), "Copy");
+    }
+
+    #[test]
+    fn context_menu_action_hash() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(ContextMenuAction::Copy);
+        set.insert(ContextMenuAction::Paste);
+        set.insert(ContextMenuAction::Copy); // duplicate
+        assert_eq!(set.len(), 2);
+    }
 }

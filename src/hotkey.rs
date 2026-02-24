@@ -90,4 +90,21 @@ mod tests {
     fn validate_hotkey_empty_string() {
         assert!(validate_hotkey_str("").is_err());
     }
+
+    #[test]
+    fn validate_common_linux_hotkeys() {
+        // Hotkeys that should work on X11 (global-hotkey uses XGrabKey)
+        assert!(validate_hotkey_str("Control+`").is_ok());
+        assert!(validate_hotkey_str("Alt+Space").is_ok());
+        assert!(validate_hotkey_str("Super+F12").is_ok());
+    }
+
+    #[test]
+    fn hotkey_manager_returns_result() {
+        // Verify HotkeyManager::new returns Result (graceful failure on Wayland)
+        // We can't actually register a hotkey in tests (no event loop),
+        // but we verify the API shape allows graceful error handling.
+        let _fn_sig: fn(&str, winit::event_loop::EventLoopProxy<crate::config::watcher::UserEvent>) -> Result<HotkeyManager, String> =
+            HotkeyManager::new;
+    }
 }
