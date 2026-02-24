@@ -82,20 +82,20 @@
 
 ## Phase 5: CI & Documentation
 
-- [ ] Task: Create GitHub Actions CI workflow for Linux
-  - [ ] Create `.github/workflows/linux-ci.yml`
-  - [ ] Use `quay.io/centos/centos:stream9` container
-  - [ ] Install build dependencies via `dnf install`
-  - [ ] Run `cargo check`, `cargo test --lib`, `cargo clippy`
+- [x] Task: Create GitHub Actions CI workflow for Linux <!-- f2b3d54 -->
+  - [x] Create `.github/workflows/linux-ci.yml`
+  - [x] Use `quay.io/centos/centos:stream9` container
+  - [x] Install build dependencies via `dnf install`
+  - [x] Run `cargo check`, `cargo test --lib`, `cargo clippy`
 
-- [ ] Task: Document CentOS 9 system dependencies
-  - [ ] List required `dnf install` packages (gcc, cmake, pkg-config, mesa-libEGL-devel, etc.)
-  - [ ] Document Vulkan driver requirements
+- [x] Task: Document CentOS 9 system dependencies <!-- f2b3d54 -->
+  - [x] List required `dnf install` packages (gcc, cmake, pkg-config, mesa-libEGL-devel, etc.)
+  - [x] Document Vulkan driver requirements
 
-- [ ] Task: Document known platform differences
-  - [ ] macOS vs Linux feature matrix
-  - [ ] Wayland global hotkey limitations
-  - [ ] Font fallback recommendations
-  - [ ] Context menu differences (NSMenu vs iced overlay)
+- [x] Task: Document known platform differences <!-- f2b3d54 -->
+  - [x] macOS vs Linux feature matrix
+  - [x] Wayland global hotkey limitations
+  - [x] Font fallback recommendations
+  - [x] Context menu differences (NSMenu vs iced overlay)
 
 - [ ] Task: Conductor - User Manual Verification 'Phase 5: CI & Documentation' (Protocol in workflow.md)
