@@ -76,6 +76,7 @@ impl GlyphAtlas {
     ///
     /// On macOS, uses CoreText for native-quality rendering (RGBA atlas).
     /// On other platforms, uses cosmic-text/swash (R8 grayscale atlas).
+    #[allow(unused_variables)] // font_family only used on non-macOS
     pub fn new(
         font_size: f32,
         scale_factor: f32,

@@ -1955,16 +1955,13 @@ impl ApplicationHandler<UserEvent> for App {
 
                     // In markdown preview mode, intercept keys
                     if self.input_mode == InputMode::MarkdownPreview {
-                        match &event.logical_key {
-                            Key::Named(NamedKey::Escape) => {
-                                // Close preview and clear state
-                                self.input_mode = InputMode::Normal;
-                                let focused = self.tab_manager.active_tab().pane_tree.focused_pane_id();
-                                if let Some(state) = self.pane_states.get_mut(&focused) {
-                                    state.markdown_preview = None;
-                                }
+                        if let Key::Named(NamedKey::Escape) = &event.logical_key {
+                            // Close preview and clear state
+                            self.input_mode = InputMode::Normal;
+                            let focused = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+                            if let Some(state) = self.pane_states.get_mut(&focused) {
+                                state.markdown_preview = None;
                             }
-                            _ => {} // Consume all other keys
                         }
                         if let Some(window) = &self.window {
                             window.request_redraw();
@@ -2523,7 +2520,7 @@ impl ApplicationHandler<UserEvent> for App {
                     let has_selection = self
                         .pane_states
                         .get(&focused_pane)
-                        .map_or(false, |s| s.mouse_selection.has_selection());
+                        .is_some_and(|s| s.mouse_selection.has_selection());
 
                     #[cfg(target_os = "macos")]
                     {
@@ -2620,7 +2617,7 @@ impl ApplicationHandler<UserEvent> for App {
                     .unwrap_or((1280, 720));
 
                 // Drain PTY output into terminals for all panes, update cursor positions
-                let theme_for_queries = self.renderer.as_ref().map(|r| r.theme().clone());
+                let theme_for_queries = self.renderer.as_ref().map(|r| *r.theme());
                 let cell_dims = self.renderer.as_ref().map(|r| (r.cell_width(), r.cell_height()));
                 for state in self.pane_states.values_mut() {
                     while let Ok(bytes) = state.pty.reader_rx.try_recv() {
@@ -2941,7 +2938,7 @@ impl ApplicationHandler<UserEvent> for App {
                 };
 
                 if let Some(renderer) = &mut self.renderer {
-                    let theme_clone = renderer.theme().clone();
+                    let theme_clone = *renderer.theme();
                     let ui_state = UiState {
                         tabs: ui_tabs,
                         active_tab_index: ui_active_tab,

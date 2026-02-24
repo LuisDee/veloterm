@@ -5,14 +5,17 @@
 Install build dependencies via `dnf`:
 
 ```bash
-sudo dnf install -y \
+sudo dnf install -y --allowerasing \
   gcc gcc-c++ cmake make pkg-config \
-  mesa-libEGL-devel mesa-libGL-devel mesa-vulkan-drivers \
+  mesa-libEGL-devel mesa-libGL-devel \
   libX11-devel libXcursor-devel libXrandr-devel libXi-devel \
   wayland-devel libxkbcommon-devel \
   fontconfig-devel freetype-devel \
   git curl
 ```
+
+> **Note:** The `--allowerasing` flag is needed on minimal CentOS images that ship
+> `curl-minimal` instead of `curl`. On a full desktop install you can omit it.
 
 ### Package breakdown
 
@@ -21,21 +24,23 @@ sudo dnf install -y \
 | `gcc`, `gcc-c++`, `cmake`, `make` | C/C++ toolchain for native dependencies |
 | `pkg-config` | Locating system libraries during build |
 | `mesa-libEGL-devel`, `mesa-libGL-devel` | OpenGL/EGL headers for wgpu |
-| `mesa-vulkan-drivers` | Vulkan ICD (Intel/AMD) for wgpu Vulkan backend |
 | `libX11-devel`, `libXcursor-devel`, `libXrandr-devel`, `libXi-devel` | X11 windowing support |
 | `wayland-devel`, `libxkbcommon-devel` | Wayland windowing support |
 | `fontconfig-devel`, `freetype-devel` | Font discovery and rasterization (cosmic-text) |
 
-### Vulkan drivers
+### Vulkan drivers (runtime only)
 
-VeloTerm uses wgpu which auto-selects the best GPU backend:
+VeloTerm uses wgpu which auto-selects the best GPU backend. For running (not just building):
 
 - **Intel**: `mesa-vulkan-drivers` provides the Intel ANV driver
 - **AMD**: `mesa-vulkan-drivers` provides the AMD RADV driver
 - **NVIDIA**: Install the proprietary NVIDIA driver package from RPM Fusion
 
-Verify Vulkan support:
 ```bash
+# Install Vulkan drivers (needed at runtime, not compile time)
+sudo dnf install -y mesa-vulkan-drivers
+
+# Verify Vulkan support
 vulkaninfo --summary 2>/dev/null | head -5
 ```
 
@@ -60,13 +65,43 @@ cargo build --release
 ./target/release/veloterm
 ```
 
+Or use the cross-platform run script:
+
+```bash
+./run.sh              # debug build
+./run.sh release      # release build
+```
+
+## Local Docker Testing
+
+To validate the Linux build on macOS (or any Docker host):
+
+```bash
+docker run --rm -it -v "$(pwd)":/src -w /src quay.io/centos/centos:stream9 bash
+
+# Inside the container:
+dnf install -y --allowerasing \
+  gcc gcc-c++ cmake make pkg-config \
+  mesa-libEGL-devel mesa-libGL-devel \
+  libX11-devel libXcursor-devel libXrandr-devel libXi-devel \
+  wayland-devel libxkbcommon-devel \
+  fontconfig-devel freetype-devel \
+  git curl
+
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+cargo check
+cargo test --lib
+```
+
 ## Running
 
 Unlike macOS (which requires a `.app` bundle for proper Retina scaling), on Linux the
 bare binary runs correctly. winit auto-detects the display scale from X11/Wayland.
 
 ```bash
-cargo run --release
+./run.sh          # debug build, launches directly
+./run.sh release  # release build
 ```
 
 ## Troubleshooting

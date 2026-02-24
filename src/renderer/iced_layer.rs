@@ -31,7 +31,7 @@ const DM_SANS: iced_core::Font = iced_core::Font::with_name("DM Sans");
 pub(crate) const TRACKS_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/tracks.png");
 
 /// Horizontal space filler (iced 0.14: space::horizontal, not horizontal_space).
-fn hspace<'a>() -> iced_widget::Space {
+fn hspace() -> iced_widget::Space {
     iced_widget::Space::new().width(iced_core::Length::Fill)
 }
 
@@ -1969,7 +1969,7 @@ impl IcedLayer {
             .into();
 
         // ── Assemble layout ──
-        let split = snap.split_percent.max(20).min(80) as f32;
+        let split = snap.split_percent.clamp(20, 80) as f32;
         let body = row![
             container(left_pane).width(iced_core::Length::FillPortion(split as u16)),
             vdiv,
@@ -2068,7 +2068,7 @@ impl IcedLayer {
         let md_content: IcedElement<'a> = if let Some(ref items) = state.markdown_items {
             let iced_theme = iced_core::Theme::Dark;
             let md_element: iced_core::Element<'a, String, iced_core::Theme, iced_wgpu::Renderer> =
-                iced_widget::markdown::view(items, &iced_theme).into();
+                iced_widget::markdown::view(items, &iced_theme);
             md_element.map(UiMessage::MarkdownLinkClicked)
         } else {
             iced_widget::text("No content").color(text_muted).into()

@@ -15,9 +15,12 @@ jobs:
     steps:
       - name: Install system dependencies
         run: |
-          dnf install -y \
+          # CentOS Stream 9 base image ships curl-minimal which conflicts
+          # with the full curl package. Use --allowerasing to replace it,
+          # since rustup installer needs full curl.
+          dnf install -y --allowerasing \
             gcc gcc-c++ cmake make pkg-config \
-            mesa-libEGL-devel mesa-libGL-devel mesa-vulkan-drivers \
+            mesa-libEGL-devel mesa-libGL-devel \
             libX11-devel libXcursor-devel libXrandr-devel libXi-devel \
             wayland-devel libxkbcommon-devel \
             fontconfig-devel freetype-devel \

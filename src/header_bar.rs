@@ -12,14 +12,14 @@ pub const CHROME_BAR_HEIGHT: f32 = 38.0;
 
 /// Generate overlay quads for the header bar background and bottom divider.
 pub fn generate_header_bar_quads(window_width: f32, theme: &TerminalTheme) -> Vec<OverlayQuad> {
-    let mut quads = Vec::new();
-
-    // Background
-    quads.push(OverlayQuad {
-        rect: Rect::new(0.0, 0.0, window_width, HEADER_BAR_HEIGHT),
-        color: [theme.bg_surface.r, theme.bg_surface.g, theme.bg_surface.b, 1.0],
-        border_radius: 0.0,
-    });
+    let mut quads = vec![
+        // Background
+        OverlayQuad {
+            rect: Rect::new(0.0, 0.0, window_width, HEADER_BAR_HEIGHT),
+            color: [theme.bg_surface.r, theme.bg_surface.g, theme.bg_surface.b, 1.0],
+            border_radius: 0.0,
+        },
+    ];
 
     // Bottom divider (1px)
     quads.push(OverlayQuad {

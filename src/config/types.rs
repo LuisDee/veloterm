@@ -152,18 +152,10 @@ impl Default for QuickTerminalConfig {
 }
 
 /// Session persistence configuration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct SessionConfig {
     /// Automatically restore the previous session on startup.
     pub auto_restore: bool,
-}
-
-impl Default for SessionConfig {
-    fn default() -> Self {
-        Self {
-            auto_restore: false,
-        }
-    }
 }
 
 /// Sidebar configuration.
@@ -382,19 +374,12 @@ impl Default for RawQuickTerminalConfig {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 #[serde(default)]
 struct RawSessionConfig {
     auto_restore: bool,
 }
 
-impl Default for RawSessionConfig {
-    fn default() -> Self {
-        Self {
-            auto_restore: false,
-        }
-    }
-}
 
 #[derive(Deserialize)]
 #[serde(default)]

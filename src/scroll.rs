@@ -31,8 +31,8 @@ const SNAP_THRESHOLD: f32 = 0.01;
 /// Lines per discrete mouse wheel notch.
 const LINES_PER_NOTCH: f32 = 3.0;
 
-impl ScrollState {
-    pub fn new() -> Self {
+impl Default for ScrollState {
+    fn default() -> Self {
         Self {
             target_offset: 0,
             current_offset: 0.0,
@@ -42,6 +42,12 @@ impl ScrollState {
             drag_start_y: 0.0,
             drag_start_offset: 0,
         }
+    }
+}
+
+impl ScrollState {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Apply a discrete line delta (mouse wheel). Positive = scroll up (view history).

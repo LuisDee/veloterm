@@ -216,7 +216,7 @@ pub fn generate_instances(
     for r in 0..rows {
         let row_start = r * cols;
         for c in (0..cols).rev() {
-            if cells.get(row_start + c).map(|cell| cell.ch != ' ').unwrap_or(false) {
+            if cells.get(row_start + c).is_some_and(|cell| cell.ch != ' ') {
                 last_occupied[r] = Some(c);
                 break;
             }

@@ -3,7 +3,6 @@
 //! Uses native CoreText font rendering for system-consistent antialiasing,
 //! subpixel rendering, and font hinting. Produces RGBA glyph bitmaps where
 //! each channel carries independent coverage for subpixel AA blending.
-#![cfg(target_os = "macos")]
 
 use core_foundation::base::{CFRange, TCFType};
 use core_foundation::string::CFString;

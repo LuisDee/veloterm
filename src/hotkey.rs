@@ -37,14 +37,9 @@ impl HotkeyManager {
 
         let listener_thread = thread::spawn(move || {
             let receiver = GlobalHotKeyEvent::receiver();
-            loop {
-                match receiver.recv() {
-                    Ok(_event) => {
-                        if proxy.send_event(UserEvent::QuickTerminalToggle).is_err() {
-                            break; // Event loop closed
-                        }
-                    }
-                    Err(_) => break,
+            while let Ok(_event) = receiver.recv() {
+                if proxy.send_event(UserEvent::QuickTerminalToggle).is_err() {
+                    break; // Event loop closed
                 }
             }
         });

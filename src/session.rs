@@ -52,7 +52,7 @@ impl SessionState {
             .iter()
             .map(|tab| SessionTab {
                 title: tab.title.clone(),
-                pane_tree: capture_pane_node(&tab.pane_tree.root(), pane_cwds),
+                pane_tree: capture_pane_node(tab.pane_tree.root(), pane_cwds),
             })
             .collect();
 

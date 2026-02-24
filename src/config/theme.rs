@@ -538,8 +538,9 @@ pub const DUSK: TerminalTheme = TerminalTheme {
 
 // ── Theme selection enum ────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ThemeMode {
+    #[default]
     WarmDark,
     Midnight,
     Ember,
@@ -569,11 +570,6 @@ impl ThemeMode {
     }
 }
 
-impl Default for ThemeMode {
-    fn default() -> Self {
-        ThemeMode::WarmDark
-    }
-}
 
 // ── Tests ───────────────────────────────────────────────────────────
 

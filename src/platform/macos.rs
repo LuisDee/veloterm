@@ -12,7 +12,7 @@ pub fn check_hidpi_status(winit_scale: f64) {
         .parent() // MacOS/
         .and_then(|p| p.parent()) // Contents/
         .and_then(|p| p.parent()) // .app/
-        .map(|p| p.extension().map_or(false, |e| e == "app"))
+        .map(|p| p.extension().is_some_and(|e| e == "app"))
         .unwrap_or(false);
 
     if winit_scale < 1.5 && !in_bundle {

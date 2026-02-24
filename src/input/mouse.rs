@@ -56,6 +56,12 @@ pub struct MouseSelectionState {
     pub auto_scroll_speed: f32,
 }
 
+impl Default for MouseSelectionState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Backwards-compatible alias.
 impl MouseSelectionState {
     /// Whether a drag is actively selecting (phase == Active).
@@ -214,10 +220,10 @@ impl MouseSelectionState {
         let viewport_height = rows as f32 * cell_height;
         if pixel_y < 0.0 {
             // Above viewport — scroll into history
-            self.auto_scroll_speed = ((-pixel_y) / 50.0).min(5.0).max(0.5);
+            self.auto_scroll_speed = ((-pixel_y) / 50.0).clamp(0.5, 5.0);
         } else if pixel_y > viewport_height {
             // Below viewport — scroll toward live
-            self.auto_scroll_speed = -((pixel_y - viewport_height) / 50.0).min(5.0).max(0.5);
+            self.auto_scroll_speed = -((pixel_y - viewport_height) / 50.0).clamp(0.5, 5.0);
         } else {
             self.auto_scroll_speed = 0.0;
         }

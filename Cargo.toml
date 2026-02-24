@@ -3,6 +3,10 @@ name = "veloterm"
 version = "0.1.0"
 edition = "2021"
 description = "A cross-platform, GPU-accelerated terminal emulator with native split panes"
+license = "MIT"
+repository = "https://github.com/luisdeburnay/veloterm"
+authors = ["Luis de Burnay"]
+rust-version = "1.87"
 
 [dependencies]
 # Window + Event Loop

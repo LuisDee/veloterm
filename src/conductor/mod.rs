@@ -257,7 +257,7 @@ pub fn discover_conductor_dir(start_dir: &Path) -> Option<PathBuf> {
         }
         // Also check if `dir` itself is a conductor dir
         let direct = dir.join("tracks.md");
-        if direct.exists() && dir.file_name().map_or(false, |n| n == "conductor") {
+        if direct.exists() && dir.file_name().is_some_and(|n| n == "conductor") {
             return Some(dir.clone());
         }
         if !dir.pop() {

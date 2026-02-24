@@ -274,8 +274,6 @@ fn parse_track_heading(text: &str) -> Option<IndexEntry> {
         CheckboxStatus::Checked
     } else if text.starts_with("[~]") || text.starts_with("[-]") {
         CheckboxStatus::InProgress
-    } else if text.starts_with("[ ]") {
-        CheckboxStatus::Unchecked
     } else {
         CheckboxStatus::Unchecked
     };

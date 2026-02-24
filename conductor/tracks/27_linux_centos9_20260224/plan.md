@@ -99,3 +99,30 @@
   - [x] Context menu differences (NSMenu vs iced overlay)
 
 - [ ] Task: Conductor - User Manual Verification 'Phase 5: CI & Documentation' (Protocol in workflow.md)
+
+## Phase 6: Local Docker Validation & Repo Polish
+
+- [x] Task: Fix CI workflow curl-minimal conflict
+  - [x] Add `--allowerasing` to `dnf install` in `.github/workflows/linux-ci.yml`
+  - [x] Remove `mesa-vulkan-drivers` from CI (not needed for build, only runtime)
+  - [x] Update `docs/linux-build.md` with `--allowerasing` flag and Docker testing section
+
+- [ ] Task: Validate Linux build in local Docker container
+  - [x] Pull `quay.io/centos/centos:stream9` image
+  - [x] dnf deps install works with `--allowerasing` (verified in first Docker run before I/O failure)
+  - [x] Cross-compile `cargo check --target x86_64-unknown-linux-gnu` passes clean
+  - [ ] Full Docker build test (Docker Desktop I/O errors — needs restart)
+
+- [x] Task: Production-grade cross-platform run.sh
+  - [x] Rewrite `run.sh` with platform detection (macOS/Linux)
+  - [x] macOS: .app bundle with Retina HiDPI support
+  - [x] Linux: direct binary execution
+  - [x] Proper argument parsing (release, --clean, --no-log, --help)
+
+- [x] Task: Repo hygiene
+  - [x] Create `.gitignore` (target/, .DS_Store, node_modules/, screenshots)
+  - [x] Add Cargo.toml metadata (license, repository, authors, rust-version)
+  - [x] Fix clippy warnings (33 -> 10)
+  - [x] Remove stale root-level planning docs
+
+- [ ] Task: Conductor - User Manual Verification 'Phase 6: Local Docker Validation & Repo Polish' (Protocol in workflow.md)
