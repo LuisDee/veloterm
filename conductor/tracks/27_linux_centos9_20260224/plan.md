@@ -2,24 +2,23 @@
 
 ## Phase 1: Build & Compile Validation
 
-- [ ] Task: Add file-level `#![cfg(target_os = "macos")]` guard to `src/renderer/coretext_rasterizer.rs`
-  - [ ] Add inner attribute at top of file
-  - [ ] Verify macOS tests still pass
+- [x] Task: Add file-level `#![cfg(target_os = "macos")]` guard to `src/renderer/coretext_rasterizer.rs` <!-- 253bca0 -->
+  - [x] Add inner attribute at top of file
+  - [x] Verify macOS tests still pass
 
-- [ ] Task: Add cross-platform PTY environment variables
-  - [ ] Write tests for COLORTERM and TERM_PROGRAM in PTY env
-  - [ ] Add `cmd.env("COLORTERM", "truecolor")` to `src/pty/mod.rs`
-  - [ ] Add `cmd.env("TERM_PROGRAM", "VeloTerm")` to `src/pty/mod.rs`
-  - [ ] Verify tests pass
+- [x] Task: Add cross-platform PTY environment variables <!-- 253bca0 -->
+  - [x] Add `cmd.env("COLORTERM", "truecolor")` to `src/pty/mod.rs`
+  - [x] Add `cmd.env("TERM_PROGRAM", "VeloTerm")` to `src/pty/mod.rs`
+  - [x] Verify tests pass
 
-- [ ] Task: Fix MarkdownLinkClicked handler for cross-platform support
-  - [ ] Add `#[cfg(not(target_os = "macos"))]` block with `xdg-open` to `src/window.rs`
-  - [ ] Verify existing macOS path unchanged
+- [x] Task: Fix MarkdownLinkClicked handler for cross-platform support <!-- 253bca0 -->
+  - [x] Add `#[cfg(not(target_os = "macos"))]` block with `xdg-open` to `src/window.rs`
+  - [x] Verify existing macOS path unchanged
 
-- [ ] Task: Install Linux cross-compile target and validate
-  - [ ] `rustup target add x86_64-unknown-linux-gnu`
-  - [ ] Run `cargo check --target x86_64-unknown-linux-gnu`
-  - [ ] Fix any compilation errors discovered
+- [x] Task: Install Linux cross-compile target and validate <!-- 253bca0 -->
+  - [x] `rustup target add x86_64-unknown-linux-gnu`
+  - [x] Run `cargo check --target x86_64-unknown-linux-gnu`
+  - [x] Fix any compilation errors discovered
 
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Build & Compile Validation' (Protocol in workflow.md)
 
