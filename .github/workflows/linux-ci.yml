@@ -1,0 +1,57 @@
+name: Linux CI (CentOS Stream 9)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  linux-build:
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/centos/centos:stream9
+
+    steps:
+      - name: Install system dependencies
+        run: |
+          dnf install -y \
+            gcc gcc-c++ cmake make pkg-config \
+            mesa-libEGL-devel mesa-libGL-devel mesa-vulkan-drivers \
+            libX11-devel libXcursor-devel libXrandr-devel libXi-devel \
+            wayland-devel libxkbcommon-devel \
+            fontconfig-devel freetype-devel \
+            git curl
+
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: centos9-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: centos9-cargo-
+
+      - name: Build check
+        run: |
+          source "$HOME/.cargo/env"
+          cargo check 2>&1
+
+      - name: Run tests
+        run: |
+          source "$HOME/.cargo/env"
+          cargo test --lib 2>&1
+
+      - name: Clippy lint
+        run: |
+          source "$HOME/.cargo/env"
+          rustup component add clippy
+          cargo clippy -- -D warnings 2>&1
