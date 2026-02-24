@@ -742,4 +742,58 @@ mod tests {
             "total glyphs should be ASCII + extras"
         );
     }
+
+    // ── Cross-platform validation (exercises whichever backend is active) ──
+
+    #[test]
+    fn atlas_minimum_512px_constraint() {
+        // Even at 1x scale with small font, atlas must be >= 512px
+        let atlas = GlyphAtlas::new(10.0, 1.0, "Source Code Pro", 1.2);
+        assert!(
+            atlas.atlas_width >= 512,
+            "Atlas width {} should be >= 512",
+            atlas.atlas_width
+        );
+        assert!(
+            atlas.atlas_height >= 512,
+            "Atlas height {} should be >= 512",
+            atlas.atlas_height
+        );
+    }
+
+    #[test]
+    fn atlas_bundled_source_code_pro_metrics() {
+        // Source Code Pro is the bundled font — must produce valid metrics on all platforms
+        let atlas = GlyphAtlas::new(15.0, 2.0, "Source Code Pro", 1.2);
+        assert!(atlas.cell_width > 0.0, "cell_width must be positive");
+        assert!(atlas.cell_height > 0.0, "cell_height must be positive");
+        assert!(
+            atlas.cell_width < atlas.cell_height,
+            "monospace cells should be taller than wide"
+        );
+        assert!(atlas.glyphs.len() >= 95, "must have all ASCII printable");
+    }
+
+    #[test]
+    fn atlas_bytes_per_pixel_matches_platform() {
+        let atlas = create_test_atlas();
+        // macOS CoreText: 4 (RGBA), Linux swash: 1 (R8 grayscale)
+        #[cfg(target_os = "macos")]
+        assert_eq!(atlas.bytes_per_pixel, 4, "macOS should use RGBA atlas");
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(atlas.bytes_per_pixel, 1, "Linux should use R8 grayscale atlas");
+    }
+
+    #[test]
+    fn atlas_scale_factors_produce_different_sizes() {
+        let atlas_1x = GlyphAtlas::new(13.0, 1.0, "Source Code Pro", 1.5);
+        let atlas_2x = GlyphAtlas::new(13.0, 2.0, "Source Code Pro", 1.5);
+        // 2x scale should produce larger cell dimensions
+        assert!(
+            atlas_2x.cell_width > atlas_1x.cell_width,
+            "2x scale ({}) should produce wider cells than 1x ({})",
+            atlas_2x.cell_width,
+            atlas_1x.cell_width
+        );
+    }
 }
