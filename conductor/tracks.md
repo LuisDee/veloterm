@@ -124,3 +124,17 @@ _Link: [./conductor/tracks/12_session_persistence_20260207/](./conductor/tracks/
 
 ### [x] Track 13: Command Palette (M)
 _Link: [./conductor/tracks/13_command_palette_20260207/](./conductor/tracks/13_command_palette_20260207/)_
+
+---
+
+## Wave 13 — UI Chrome Redesign
+
+### [ ] Track 26: UI Chrome Redesign (L)
+_Link: [./conductor/tracks/26_ui_chrome_redesign_20260209/](./conductor/tracks/26_ui_chrome_redesign_20260209/)_
+
+---
+
+## Wave 14 — Platform Portability
+
+### [ ] Track 27: Linux CentOS 9 Port (L)
+_Link: [./conductor/tracks/27_linux_centos9_20260224/](./conductor/tracks/27_linux_centos9_20260224/)_
