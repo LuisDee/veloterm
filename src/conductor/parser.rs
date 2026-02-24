@@ -864,13 +864,8 @@ _Link: [./conductor/tracks/03_config_20260207/](./conductor/tracks/03_config_202
         let tracks = load_all_tracks(&conductor_dir).unwrap();
         assert!(tracks.len() >= 25, "Expected at least 25 tracks, got {}", tracks.len());
 
-        // All tracks should be complete (all 25 tracks are done)
-        for (id, track) in &tracks {
-            assert_eq!(
-                track.status, Status::Complete,
-                "Track {} ({}) should be complete",
-                id, track.title
-            );
-        }
+        // The original 25 tracks should be complete; newer tracks may be in other states
+        let complete_count = tracks.values().filter(|t| t.status == Status::Complete).count();
+        assert!(complete_count >= 25, "Expected at least 25 complete tracks, got {}", complete_count);
     }
 }

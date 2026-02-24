@@ -3137,6 +3137,12 @@ impl ApplicationHandler<UserEvent> for App {
                                         .arg(url.as_str())
                                         .spawn();
                                 }
+                                #[cfg(not(target_os = "macos"))]
+                                {
+                                    let _ = std::process::Command::new("xdg-open")
+                                        .arg(url.as_str())
+                                        .spawn();
+                                }
                             }
                             UiMessage::Noop => {}
                         }
