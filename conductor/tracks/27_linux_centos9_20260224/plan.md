@@ -47,14 +47,16 @@
 
 ## Phase 3: Terminal Environment & Font Validation
 
-- [ ] Task: Validate cosmic-text/swash font rendering path
-  - [ ] Write test verifying `GlyphAtlas::new_swash()` produces valid atlas dimensions
-  - [ ] Write test verifying cell width/height consistency with bundled Source Code Pro
-  - [ ] Verify atlas minimum 512px constraint holds
+- [x] Task: Validate cosmic-text/swash font rendering path <!-- 0d3f1b4 -->
+  - [x] Write test verifying atlas produces valid dimensions (atlas_minimum_512px_constraint)
+  - [x] Write test verifying cell width/height consistency with bundled Source Code Pro (atlas_bundled_source_code_pro_metrics)
+  - [x] Verify atlas minimum 512px constraint holds
+  - [x] Write test verifying bytes_per_pixel matches platform (atlas_bytes_per_pixel_matches_platform)
+  - [x] Write test verifying scale factors produce different sizes (atlas_scale_factors_produce_different_sizes)
 
-- [ ] Task: Verify cosmic-text system font fallback
-  - [ ] Document cosmic-text `FontSystem` built-in fallback behavior
-  - [ ] Recommend `google-noto-fonts-common` for CentOS 9 Unicode coverage
+- [x] Task: Verify cosmic-text system font fallback <!-- 0d3f1b4 -->
+  - [x] cosmic-text FontSystem built-in fallback documented in brief.md
+  - [x] google-noto-fonts-common recommendation in brief.md
 
 - [ ] Task: Conductor - User Manual Verification 'Phase 3: Terminal Environment & Font Validation' (Protocol in workflow.md)
 
