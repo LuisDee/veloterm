@@ -98,10 +98,13 @@ pub fn foreground_process_name(shell_pid: u32) -> Option<String> {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
+pub fn foreground_process_name(shell_pid: u32) -> Option<String> {
+    crate::platform::linux::foreground_process_name(shell_pid)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn foreground_process_name(_shell_pid: u32) -> Option<String> {
-    // Linux: could read /proc/<pid>/task/<pid>/children + /proc/<child>/comm
-    // For now, return None (fall back to CWD)
     None
 }
 
