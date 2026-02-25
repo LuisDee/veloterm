@@ -102,27 +102,44 @@
 
 ## Phase 6: Local Docker Validation & Repo Polish
 
-- [x] Task: Fix CI workflow curl-minimal conflict
+- [x] Task: Fix CI workflow curl-minimal conflict <!-- 4101c70 -->
   - [x] Add `--allowerasing` to `dnf install` in `.github/workflows/linux-ci.yml`
   - [x] Remove `mesa-vulkan-drivers` from CI (not needed for build, only runtime)
   - [x] Update `docs/linux-build.md` with `--allowerasing` flag and Docker testing section
+
+- [x] Task: Fix CI test failures on headless Linux <!-- 56fa310 -->
+  - [x] Platform-aware keybinding tests (Cmd+Shift+P on macOS, Ctrl+Shift+P on Linux)
+  - [x] Graceful skip for arboard clipboard test without display server
+  - [x] Graceful skip for GPU adapter type assertion on software renderers
+
+- [x] Task: Fix all clippy warnings for Linux CI (-D warnings) <!-- 8384f06 -->
+  - [x] Remove duplicate cfg gate in platform/linux.rs
+  - [x] Allow large_enum_variant, too_many_arguments where appropriate
+  - [x] Fix needless_range_loop in grid_renderer
+  - [x] Remove unnecessary f32 cast in iced_layer
+
+- [x] Task: GitHub Actions CI fully GREEN <!-- run 22376123698 -->
+  - [x] Build check passes
+  - [x] All tests pass (1362 on macOS, 1364 on Linux)
+  - [x] Clippy clean with -D warnings
 
 - [ ] Task: Validate Linux build in local Docker container
   - [x] Pull `quay.io/centos/centos:stream9` image
   - [x] dnf deps install works with `--allowerasing` (verified in first Docker run before I/O failure)
   - [x] Cross-compile `cargo check --target x86_64-unknown-linux-gnu` passes clean
-  - [ ] Full Docker build test (Docker Desktop I/O errors — needs restart)
+  - [ ] Full Docker build test (Docker Desktop storage corruption — needs manual data reset)
 
-- [x] Task: Production-grade cross-platform run.sh
+- [x] Task: Production-grade cross-platform run.sh <!-- 4101c70 -->
   - [x] Rewrite `run.sh` with platform detection (macOS/Linux)
   - [x] macOS: .app bundle with Retina HiDPI support
   - [x] Linux: direct binary execution
   - [x] Proper argument parsing (release, --clean, --no-log, --help)
 
-- [x] Task: Repo hygiene
+- [x] Task: Repo hygiene <!-- 4101c70 -->
   - [x] Create `.gitignore` (target/, .DS_Store, node_modules/, screenshots)
   - [x] Add Cargo.toml metadata (license, repository, authors, rust-version)
-  - [x] Fix clippy warnings (33 -> 10)
+  - [x] Fix clippy warnings (33 -> 0 with -D warnings)
   - [x] Remove stale root-level planning docs
+  - [x] Add Source Code Pro font files to repository <!-- da95d0c -->
 
 - [ ] Task: Conductor - User Manual Verification 'Phase 6: Local Docker Validation & Repo Polish' (Protocol in workflow.md)
