@@ -314,7 +314,7 @@ impl IcedLayer {
     /// Run the iced UI lifecycle and present onto the given texture view.
     pub fn render(&mut self, view: &wgpu::TextureView, state: &UiState) -> Vec<UiMessage> {
         let bounds = self.viewport.logical_size();
-        let scale = self.viewport.scale_factor() as f32;
+        let scale = self.viewport.scale_factor();
 
         let widget = Self::view(state, scale);
 

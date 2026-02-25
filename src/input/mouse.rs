@@ -106,6 +106,7 @@ impl MouseSelectionState {
     /// `pixel_x`, `pixel_y`: mouse position relative to the pane's content area
     /// (already adjusted for padding and tab bar).
     /// `display_offset`: current scroll offset (0 = at bottom, N = N lines into history).
+    #[allow(clippy::too_many_arguments)]
     pub fn on_mouse_press(
         &mut self,
         pixel_x: f32,
@@ -203,6 +204,7 @@ impl MouseSelectionState {
 
     /// Handle mouse drag (cursor moved while button held).
     /// `display_offset`: current scroll offset.
+    #[allow(clippy::too_many_arguments)]
     pub fn on_mouse_drag(
         &mut self,
         pixel_x: f32,
@@ -310,6 +312,7 @@ impl MouseSelectionState {
 
     /// Handle shift+click to extend selection.
     /// `display_offset`: current scroll offset.
+    #[allow(clippy::too_many_arguments)]
     pub fn on_shift_click(
         &mut self,
         pixel_x: f32,
@@ -351,6 +354,7 @@ impl MouseSelectionState {
 
     /// Update the drag endpoint at a given pixel position and display_offset.
     /// Used when auto-scrolling or manual scrolling during an active drag.
+    #[allow(clippy::too_many_arguments)]
     pub fn update_drag_endpoint(
         &mut self,
         pixel_x: f32,

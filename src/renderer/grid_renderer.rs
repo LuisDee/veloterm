@@ -213,11 +213,11 @@ pub fn generate_instances(
 
     // Bug A fix: precompute last occupied column per row (rightmost non-space)
     let mut last_occupied: Vec<Option<usize>> = vec![None; rows];
-    for r in 0..rows {
+    for (r, occupied) in last_occupied.iter_mut().enumerate().take(rows) {
         let row_start = r * cols;
         for c in (0..cols).rev() {
             if cells.get(row_start + c).is_some_and(|cell| cell.ch != ' ') {
-                last_occupied[r] = Some(c);
+                *occupied = Some(c);
                 break;
             }
         }

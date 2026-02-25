@@ -258,6 +258,7 @@ pub struct ScrollbarThumb {
 /// `display_offset` is the current scroll position (0 = bottom).
 ///
 /// Returns `None` when there's no scrollback history.
+#[allow(clippy::too_many_arguments)]
 pub fn scrollbar_thumb_rect(
     pane_x: f32,
     pane_y: f32,
@@ -325,6 +326,7 @@ pub enum ScrollbarHit {
 /// Hit-test a click position against the scrollbar region.
 ///
 /// Returns whether the click hit the track, the thumb, or nothing.
+#[allow(clippy::too_many_arguments)]
 pub fn scrollbar_hit_test(
     click_x: f32,
     click_y: f32,

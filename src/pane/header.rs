@@ -84,6 +84,7 @@ pub fn generate_pane_header_quads(
 
 /// Generate text cells for a single pane header.
 /// Layout: [badge] [title] ... [status_dot] [shell_label]
+#[allow(clippy::too_many_arguments)]
 pub fn generate_pane_header_text(
     pane_rect: Rect,
     pane_index: usize,

@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 
 /// Custom user event for the winit event loop.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum UserEvent {
     /// A valid config reload was detected.
     ConfigReloaded(Config, ConfigDelta),

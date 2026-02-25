@@ -2,7 +2,6 @@
 //!
 //! Provides platform-specific functions for Linux, mirroring the API surface
 //! of `platform::macos`. Functions that have no Linux equivalent are no-ops.
-#![cfg(target_os = "linux")]
 
 use std::fs;
 
