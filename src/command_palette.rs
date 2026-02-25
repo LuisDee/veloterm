@@ -518,24 +518,36 @@ mod tests {
 
     // ── Keybinding detection tests ──────────────────────────────
 
+    /// Platform-appropriate trigger modifier for command palette.
+    #[cfg(target_os = "macos")]
+    fn trigger_mods() -> winit::keyboard::ModifiersState {
+        winit::keyboard::ModifiersState::SUPER | winit::keyboard::ModifiersState::SHIFT
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn trigger_mods() -> winit::keyboard::ModifiersState {
+        winit::keyboard::ModifiersState::CONTROL | winit::keyboard::ModifiersState::SHIFT
+    }
+
     #[test]
     fn should_open_palette_cmd_shift_p() {
-        use winit::keyboard::{Key, ModifiersState};
-        let mods = ModifiersState::SUPER | ModifiersState::SHIFT;
-        assert!(should_open_palette(&Key::Character("P".into()), mods));
+        use winit::keyboard::Key;
+        assert!(should_open_palette(&Key::Character("P".into()), trigger_mods()));
     }
 
     #[test]
     fn should_open_palette_cmd_shift_p_lowercase() {
-        use winit::keyboard::{Key, ModifiersState};
-        let mods = ModifiersState::SUPER | ModifiersState::SHIFT;
-        assert!(should_open_palette(&Key::Character("p".into()), mods));
+        use winit::keyboard::Key;
+        assert!(should_open_palette(&Key::Character("p".into()), trigger_mods()));
     }
 
     #[test]
     fn should_not_open_palette_without_shift() {
         use winit::keyboard::{Key, ModifiersState};
+        #[cfg(target_os = "macos")]
         let mods = ModifiersState::SUPER;
+        #[cfg(not(target_os = "macos"))]
+        let mods = ModifiersState::CONTROL;
         assert!(!should_open_palette(&Key::Character("p".into()), mods));
     }
 
@@ -548,8 +560,7 @@ mod tests {
 
     #[test]
     fn should_not_open_palette_wrong_key() {
-        use winit::keyboard::{Key, ModifiersState};
-        let mods = ModifiersState::SUPER | ModifiersState::SHIFT;
-        assert!(!should_open_palette(&Key::Character("x".into()), mods));
+        use winit::keyboard::Key;
+        assert!(!should_open_palette(&Key::Character("x".into()), trigger_mods()));
     }
 }
