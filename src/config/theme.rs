@@ -190,8 +190,8 @@ pub mod layout {
     pub const SIDEBAR_MAX_WIDTH: f32 = 300.0;
     pub const TERMINAL_PAD_TOP: f32 = 16.0;
     pub const TERMINAL_PAD_BOTTOM: f32 = 16.0;
-    pub const TERMINAL_PAD_LEFT: f32 = 22.0;
-    pub const TERMINAL_PAD_RIGHT: f32 = 22.0;
+    pub const TERMINAL_PAD_LEFT: f32 = 10.0;
+    pub const TERMINAL_PAD_RIGHT: f32 = 10.0;
     pub const SIDEBAR_PAD_HORIZONTAL: f32 = 6.0;
     pub const SIDEBAR_HEADER_PAD_TOP: f32 = 14.0;
     pub const SIDEBAR_HEADER_PAD_BOTTOM: f32 = 8.0;

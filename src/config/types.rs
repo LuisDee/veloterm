@@ -243,8 +243,8 @@ impl Default for RawPaddingConfig {
         Self {
             top: 16.0,
             bottom: 16.0,
-            left: 22.0,
-            right: 22.0,
+            left: 10.0,
+            right: 10.0,
         }
     }
 }
@@ -416,8 +416,8 @@ impl Default for PaddingConfig {
         Self {
             top: 16.0,
             bottom: 16.0,
-            left: 22.0,
-            right: 22.0,
+            left: 10.0,
+            right: 10.0,
         }
     }
 }
@@ -633,8 +633,8 @@ display_family = "Georgia"
 # Terminal content padding in pixels
 top = 16.0
 bottom = 16.0
-left = 22.0
-right = 22.0
+left = 10.0
+right = 10.0
 
 [colors]
 # Theme: "warm_dark", "midnight", "ember", "dusk", or "light"
@@ -775,8 +775,8 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.padding.top, 16.0);
         assert_eq!(config.padding.bottom, 16.0);
-        assert_eq!(config.padding.left, 22.0);
-        assert_eq!(config.padding.right, 22.0);
+        assert_eq!(config.padding.left, 10.0);
+        assert_eq!(config.padding.right, 10.0);
     }
 
     #[test]

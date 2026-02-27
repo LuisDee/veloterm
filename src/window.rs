@@ -152,6 +152,8 @@ pub struct App {
     hovering_close_button: Option<usize>,
     /// Whether the tracks icon in the header bar is hovered.
     hovering_tracks_icon: bool,
+    /// Whether the sidebar toggle button in the header bar is hovered.
+    hovering_sidebar_btn: bool,
     /// Conductor dashboard state (loaded once at startup if conductor dir found).
     conductor_state: Option<crate::conductor::ConductorState>,
     /// Pre-created iced image handle for the tracks icon (stable Id across frames).
@@ -162,6 +164,9 @@ pub struct App {
     context_menu_position: (f32, f32),
     /// Whether the focused pane has selection (for context menu Copy item).
     context_menu_has_selection: bool,
+    /// Whether a divider drag is in progress. When true, PTY/terminal resizes
+    /// are deferred until drag ends to avoid flooding shells with SIGWINCH.
+    is_dragging_divider: bool,
 }
 
 impl App {
@@ -202,6 +207,7 @@ impl App {
             hovering_new_tab: false,
             hovering_close_button: None,
             hovering_tracks_icon: false,
+            hovering_sidebar_btn: false,
             conductor_state: {
                 let project_dir = std::env::var("VELOTERM_PROJECT_DIR").ok()
                     .map(std::path::PathBuf::from);
@@ -217,6 +223,7 @@ impl App {
             context_menu_visible: false,
             context_menu_position: (0.0, 0.0),
             context_menu_has_selection: false,
+            is_dragging_divider: false,
         }
     }
 
@@ -966,7 +973,13 @@ impl App {
     }
 
     /// Resize all pane terminals and PTYs to match their current layout rects.
+    /// When `is_dragging_divider` is true, PTY/terminal resize is deferred to
+    /// avoid flooding shells with SIGWINCH during continuous drag.
     fn resize_all_panes(&mut self, width: u32, height: u32) {
+        // During divider drag, skip PTY resize — only update on drag end
+        if self.is_dragging_divider {
+            return;
+        }
         let pgrid = self.pane_grid_bounds(width as f32, height as f32);
         let pane_tree = &self.tab_manager.active_tab().pane_tree;
         let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
@@ -2489,11 +2502,27 @@ impl ApplicationHandler<UserEvent> for App {
                     let content = self.content_bounds(width as f32, height as f32);
                     let pane_tree = &self.tab_manager.active_tab().pane_tree;
                     let layout = pane_tree.calculate_layout(content.width, content.height);
+                    let was_dragging = self.is_dragging_divider;
                     let effect = match btn_state {
-                        ElementState::Pressed => self.interaction.on_mouse_press(&layout),
-                        ElementState::Released => self.interaction.on_mouse_release(),
+                        ElementState::Pressed => {
+                            let e = self.interaction.on_mouse_press(&layout);
+                            // Track divider drag start to defer PTY resize
+                            if matches!(self.interaction.state(), crate::pane::interaction::InteractionState::Dragging { .. }) {
+                                self.is_dragging_divider = true;
+                            }
+                            e
+                        }
+                        ElementState::Released => {
+                            let e = self.interaction.on_mouse_release();
+                            self.is_dragging_divider = false;
+                            e
+                        }
                     };
                     self.apply_interaction_effect(effect);
+                    // Flush deferred PTY resize on drag end
+                    if was_dragging && !self.is_dragging_divider {
+                        self.resize_all_panes(width, height);
+                    }
                 }
             }
             WindowEvent::MouseInput {
@@ -2978,6 +3007,7 @@ impl ApplicationHandler<UserEvent> for App {
                         hovering_new_tab: self.hovering_new_tab,
                         hovering_close_button: self.hovering_close_button,
                         is_tracks_hovered: self.hovering_tracks_icon,
+                        is_sidebar_btn_hovered: self.hovering_sidebar_btn,
                         conductor_available: self.conductor_state.is_some(),
                         conductor: if self.input_mode == InputMode::Conductor {
                             self.conductor_state.as_ref().map(|s| s.snapshot())
@@ -3133,6 +3163,12 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                             UiMessage::CloseButtonHovered(tab_idx) => {
                                 self.hovering_close_button = tab_idx;
+                            }
+                            UiMessage::SidebarBtnEnter => {
+                                self.hovering_sidebar_btn = true;
+                            }
+                            UiMessage::SidebarBtnExit => {
+                                self.hovering_sidebar_btn = false;
                             }
                             UiMessage::TracksIconEnter => {
                                 self.hovering_tracks_icon = true;

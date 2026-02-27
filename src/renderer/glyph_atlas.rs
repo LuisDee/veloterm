@@ -55,7 +55,7 @@ const EXTRA_CHARS: &[char] = &[
     '\u{00B7}', // · MIDDLE DOT (separator)
     '\u{00D7}', // × MULTIPLICATION SIGN (tab close)
     '\u{2026}', // … HORIZONTAL ELLIPSIS
-    '\u{276F}', // ❯ HEAVY RIGHT-POINTING ANGLE QUOTATION MARK (starship prompt)
+    '\u{276F}', // ❯ HEAVY RIGHT-POINTING ANGLE QUOTATION MARK (shell prompts)
     '\u{2714}', // ✔ HEAVY CHECK MARK
     '\u{2718}', // ✘ HEAVY BALLOT X
     '\u{279C}', // ➜ HEAVY ROUND-TIPPED RIGHTWARDS ARROW

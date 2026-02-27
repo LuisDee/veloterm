@@ -52,6 +52,9 @@ pub enum UiMessage {
     RenameTabCommit(usize, String),
     NewTabHovered(bool),
     CloseButtonHovered(Option<usize>),
+    // Sidebar toggle button hover
+    SidebarBtnEnter,
+    SidebarBtnExit,
     // Conductor dashboard
     ConductorToggled,
     TracksIconEnter,
@@ -182,6 +185,8 @@ pub struct UiState<'a> {
     pub tracks_icon_handle: Option<iced_core::image::Handle>,
     /// Whether the tracks icon in the header bar is hovered.
     pub is_tracks_hovered: bool,
+    /// Whether the sidebar toggle button in the header bar is hovered.
+    pub is_sidebar_btn_hovered: bool,
     /// Context menu overlay state (non-macOS only).
     pub context_menu_visible: bool,
     /// Context menu position in physical pixels.
@@ -515,6 +520,28 @@ impl IcedLayer {
         let border_subtle = to_iced_color(&theme.border_subtle);
 
         let height = CHROME_BAR_HEIGHT / scale;
+        let bg_hover = to_iced_color(&theme.bg_hover);
+        let bg_raised = to_iced_color(&theme.bg_raised);
+
+        // Sidebar toggle button (hamburger icon ☰)
+        let sidebar_icon_color = if state.sidebar_visible { accent } else { text_secondary };
+        let sidebar_label = text("\u{2630}").size(14.0).color(sidebar_icon_color).font(DM_SANS);
+        let sidebar_btn_bg = if state.is_sidebar_btn_hovered { bg_hover } else { bg_raised };
+        let sidebar_btn = container(sidebar_label)
+            .padding(iced_core::Padding::from([4.0 / scale, 8.0 / scale]))
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(sidebar_btn_bg)),
+                border: iced_core::Border {
+                    color: border_subtle,
+                    width: 0.0,
+                    radius: (4.0 / scale).into(),
+                },
+                ..Default::default()
+            });
+        let sidebar_click = MouseArea::new(sidebar_btn)
+            .on_press(UiMessage::ToggleSidebar)
+            .on_enter(UiMessage::SidebarBtnEnter)
+            .on_exit(UiMessage::SidebarBtnExit);
 
         // Centered: sparkle ✦ in accent_orange (14px) + "VeloTerm" in text_secondary (DM Sans 12.5px)
         let sparkle = text("\u{2726}").size(14.0).color(accent).font(DM_SANS);
@@ -554,13 +581,14 @@ impl IcedLayer {
                 .on_press(UiMessage::ConductorToggled)
                 .on_enter(UiMessage::TracksIconEnter)
                 .on_exit(UiMessage::TracksIconExit);
-            row![hspace(), center_content, hspace(), tracks_click]
+            row![sidebar_click, hspace(), center_content, hspace(), tracks_click]
                 .align_y(iced_core::Alignment::Center)
                 .padding(iced_core::Padding::from([0.0, 8.0 / scale]))
                 .into()
         } else {
-            row![hspace(), center_content, hspace()]
+            row![sidebar_click, hspace(), center_content, hspace()]
                 .align_y(iced_core::Alignment::Center)
+                .padding(iced_core::Padding::from([0.0, 8.0 / scale]))
                 .into()
         };
 
@@ -648,11 +676,13 @@ impl IcedLayer {
                 }
             }
 
-            // Active pane focus indicator: 2px orange top-line when split
+            // Active pane focus indicator: 2px orange top-line when split.
+            // Positioned at pane origin — sits within the terminal padding zone
+            // (padding_top >= 10px), so it never overlaps grid content.
             if pane.is_focused && state.panes.len() > 1 {
                 let stripe = container(column![])
                     .width(pw)
-                    .height(2.0)
+                    .height(2.0 / scale)
                     .style(move |_: &iced_core::Theme| container::Style {
                         background: Some(iced_core::Background::Color(accent)),
                         ..Default::default()
@@ -2212,6 +2242,7 @@ mod tests {
             markdown_file_name: None,
             tracks_icon_handle: None,
             is_tracks_hovered: false,
+            is_sidebar_btn_hovered: false,
             context_menu_visible: false,
             context_menu_position: (0.0, 0.0),
             context_menu_has_selection: false,
@@ -2477,6 +2508,7 @@ mod tests {
             markdown_file_name: None,
             tracks_icon_handle: None,
             is_tracks_hovered: false,
+            is_sidebar_btn_hovered: false,
             context_menu_visible: false,
             context_menu_position: (0.0, 0.0),
             context_menu_has_selection: false,
@@ -2585,6 +2617,7 @@ mod tests {
             markdown_file_name: None,
             tracks_icon_handle: None,
             is_tracks_hovered: false,
+            is_sidebar_btn_hovered: false,
             context_menu_visible: false,
             context_menu_position: (0.0, 0.0),
             context_menu_has_selection: false,
@@ -2980,6 +3013,7 @@ mod tests {
             markdown_file_name: None,
             tracks_icon_handle: None,
             is_tracks_hovered: false,
+            is_sidebar_btn_hovered: false,
             context_menu_visible: false,
             context_menu_position: (0.0, 0.0),
             context_menu_has_selection: false,

@@ -163,7 +163,7 @@ impl PtySession {
         cmd.env("TERM", "xterm-256color");
         // Advertise 24-bit color support to CLI tools (bat, delta, ls --color, etc.)
         cmd.env("COLORTERM", "truecolor");
-        // Identify the terminal emulator to shell integration scripts (starship, etc.)
+        // Identify the terminal emulator to shell integration scripts (Powerlevel10k, etc.)
         cmd.env("TERM_PROGRAM", "VeloTerm");
         if let Some(dir) = cwd {
             cmd.cwd(dir);

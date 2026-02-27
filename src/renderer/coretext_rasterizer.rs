@@ -126,7 +126,7 @@ impl CoreTextRasterizer {
             self.font.draw_glyphs(&glyphs, &positions, ctx.clone());
         } else {
             // System font fallback for characters not in the primary font
-            // (e.g. ❯ U+276F from starship prompt, Nerd Font icons, etc.)
+            // (e.g. ❯ U+276F from shell prompts, Nerd Font icons, etc.)
             unsafe {
                 let ch_str = CFString::new(&ch.to_string());
                 let range = CFRange { location: 0, length: 1 };

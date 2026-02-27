@@ -233,6 +233,10 @@ impl ScrollState {
 /// Scrollbar width in physical pixels.
 const SCROLLBAR_WIDTH: f32 = 6.0;
 
+/// Extra hit-test margin on the left side of the scrollbar in physical pixels.
+/// Makes the scrollbar easier to click, especially on Linux at scale=1.0.
+const SCROLLBAR_HIT_MARGIN: f32 = 6.0;
+
 /// Minimum thumb height in physical pixels.
 const MIN_THUMB_HEIGHT: f32 = 20.0;
 
@@ -342,8 +346,8 @@ pub fn scrollbar_hit_test(
     let pad_right = padding[3];
     let bar_x = pane_x + pane_w - pad_right - SCROLLBAR_WIDTH;
 
-    // Check if click is in the scrollbar column
-    if click_x < bar_x || click_x > bar_x + SCROLLBAR_WIDTH {
+    // Check if click is in the scrollbar column (with extra hit margin on the left)
+    if click_x < bar_x - SCROLLBAR_HIT_MARGIN || click_x > bar_x + SCROLLBAR_WIDTH {
         return ScrollbarHit::None;
     }
 
