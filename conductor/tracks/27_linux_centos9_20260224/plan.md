@@ -123,11 +123,11 @@
   - [x] All tests pass (1362 on macOS, 1364 on Linux)
   - [x] Clippy clean with -D warnings
 
-- [ ] Task: Validate Linux build in local Docker container
+- [x] Task: Validate Linux build in local Docker container <!-- dd31abb -->
   - [x] Pull `quay.io/centos/centos:stream9` image
-  - [x] dnf deps install works with `--allowerasing` (verified in first Docker run before I/O failure)
+  - [x] dnf deps install works with `--allowerasing`
   - [x] Cross-compile `cargo check --target x86_64-unknown-linux-gnu` passes clean
-  - [ ] Full Docker build test (Docker Desktop storage corruption — needs manual data reset)
+  - [x] Full Docker build test: cargo check, 1364 tests passed, clippy clean
 
 - [x] Task: Production-grade cross-platform run.sh <!-- 4101c70 -->
   - [x] Rewrite `run.sh` with platform detection (macOS/Linux)
