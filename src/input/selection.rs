@@ -309,7 +309,7 @@ pub fn selected_text_lines(cells: &[GridCell], selection: &Selection, cols: usiz
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::theme::{Color, color_new};
+    use crate::config::theme::color_new;
 
     /// Helper: create a row of cells from a string, padded to `cols` with spaces.
     fn make_row(text: &str, cols: usize) -> Vec<GridCell> {

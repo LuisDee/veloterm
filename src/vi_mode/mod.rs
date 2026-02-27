@@ -1605,7 +1605,7 @@ mod tests {
     // ── Yank text extraction ────────────────────────────────────────
 
     fn make_cells(lines: &[&str], cols: usize) -> Vec<GridCell> {
-        use crate::config::theme::{Color, color_new};
+        use crate::config::theme::color_new;
         let fg = color_new(1.0, 1.0, 1.0, 1.0);
         let bg = color_new(0.0, 0.0, 0.0, 1.0);
         let mut cells = Vec::new();

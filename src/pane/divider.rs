@@ -15,6 +15,10 @@ pub struct DividerInfo {
     /// Index of this divider's split node in pre-order tree walk.
     /// Used to identify the split node for ratio updates during drag.
     pub split_index: usize,
+    /// Bounds of the parent split node that owns this divider.
+    /// Used for correct ratio computation during drag — the ratio is relative
+    /// to these bounds, not the root window bounds.
+    pub parent_bounds: Rect,
 }
 
 /// Width of the divider bar in pixels.
@@ -28,6 +32,9 @@ pub const HIT_TEST_MARGIN: f32 = 8.0;
 /// thin axis (perpendicular to the divider line).
 pub fn hit_test_divider(point: (f32, f32), dividers: &[DividerInfo], margin: f32) -> Option<usize> {
     let (px, py) = point;
+    let mut closest = None;
+    let mut min_distance = f32::INFINITY;
+    
     for (i, divider) in dividers.iter().enumerate() {
         let r = &divider.rect;
         let expanded = match divider.direction {
@@ -41,10 +48,18 @@ pub fn hit_test_divider(point: (f32, f32), dividers: &[DividerInfo], margin: f32
             }
         };
         if expanded.contains_point(px, py) {
-            return Some(i);
+            // Calculate distance to the divider centerline
+            let distance = match divider.direction {
+                SplitDirection::Vertical => (px - r.x).abs(),
+                SplitDirection::Horizontal => (py - r.y).abs(),
+            };
+            if distance < min_distance {
+                min_distance = distance;
+                closest = Some(i);
+            }
         }
     }
-    None
+    closest
 }
 
 /// A UI overlay quad: a colored rectangle at a pixel position.
@@ -162,6 +177,7 @@ fn collect_dividers(
                 rect: divider_rect,
                 direction: *direction,
                 split_index: current_index,
+                parent_bounds: bounds,
             });
 
             // Recurse into children with their sub-bounds

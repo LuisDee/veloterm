@@ -489,7 +489,7 @@ impl MouseSelectionState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::theme::{Color, color_new};
+    use crate::config::theme::color_new;
     use std::time::Duration;
 
     fn make_cells(text: &str, cols: usize) -> Vec<GridCell> {

@@ -98,18 +98,10 @@ impl PaneInteraction {
             InteractionState::Dragging { divider_index, .. } => {
                 let divider_index = *divider_index;
                 if let Some(divider) = self.dividers.get(divider_index) {
-                    // Compute new ratio based on cursor position along the split axis.
-                    // We need the parent bounds — approximate from divider rect.
-                    // The divider rect tells us the axis; we use window-relative coords.
                     let new_ratio = match divider.direction {
                         SplitDirection::Vertical => {
-                            // Approximate: cursor_x / window_width. We use divider.rect.height
-                            // as a proxy for window height, and we know the window from the
-                            // divider spanning the full height.
-                            // Actually we need the parent bounds width. For now, hardcode
-                            // using a stored bounds.
-                            let parent_width = self.layout_bounds.width;
-                            let parent_x = self.layout_bounds.x;
+                            let parent_width = divider.parent_bounds.width;
+                            let parent_x = divider.parent_bounds.x;
                             super::clamp_ratio(
                                 (x - parent_x) / parent_width,
                                 parent_width,
@@ -117,8 +109,8 @@ impl PaneInteraction {
                             )
                         }
                         SplitDirection::Horizontal => {
-                            let parent_height = self.layout_bounds.height;
-                            let parent_y = self.layout_bounds.y;
+                            let parent_height = divider.parent_bounds.height;
+                            let parent_y = divider.parent_bounds.y;
                             super::clamp_ratio(
                                 (y - parent_y) / parent_height,
                                 parent_height,
@@ -451,5 +443,64 @@ mod tests {
             InteractionState::Hovering { divider_index: 0 }
         );
         assert_eq!(effect, InteractionEffect::None);
+    }
+
+    // ── Nested pane drag uses parent bounds ─────────────────────────
+
+    #[test]
+    fn nested_drag_uses_parent_bounds_not_root() {
+        // [A | [B / C]] — dragging the horizontal divider in the right half
+        // should compute ratio relative to the right half, not the whole window.
+        let bounds = Rect::new(0.0, 0.0, 1280.0, 720.0);
+        let root = PaneNode::split(
+            SplitDirection::Vertical,
+            0.5,
+            PaneNode::leaf(PaneId(1)),
+            PaneNode::split(
+                SplitDirection::Horizontal,
+                0.5,
+                PaneNode::leaf(PaneId(2)),
+                PaneNode::leaf(PaneId(3)),
+            ),
+        );
+        let mut interaction = PaneInteraction::new();
+        interaction.update_layout(&root, bounds, 20.0);
+        let layout = root.calculate_layout(bounds, 20.0);
+
+        // The horizontal divider (index 1) is in the right half (x=644, width=636).
+        // Its midpoint Y is at ~360. Hover near it.
+        let div_y;
+        let div_x;
+        let target_y;
+        {
+            let dividers = interaction.dividers();
+            assert_eq!(dividers.len(), 2);
+            let h_div = &dividers[1];
+
+
+            assert_eq!(h_div.direction, SplitDirection::Horizontal);
+            // parent_bounds should be the right half, not the full window
+            assert!(h_div.parent_bounds.x > 0.0, "parent_bounds.x should be > 0 for nested split");
+            assert!(h_div.parent_bounds.width < bounds.width, "parent_bounds.width should be < window width");
+
+            // Drag the horizontal divider: hover, press, drag to 75% of right-half height
+            div_y = h_div.rect.y + 1.0;
+            div_x = h_div.rect.x + 1.0;
+            target_y = h_div.parent_bounds.y + h_div.parent_bounds.height * 0.75;
+        } // dividers borrow ends here
+        
+        interaction.on_cursor_moved(div_x, div_y);
+        interaction.on_mouse_press(&layout);
+
+        // Drag to 75% of the right half's height
+        let effect = interaction.on_cursor_moved(div_x, target_y);
+        match effect {
+            InteractionEffect::UpdateRatio { new_ratio, .. } => {
+                // Should be ~0.75, NOT ~0.75 * (right_half_height / window_height)
+                assert!(new_ratio > 0.7, "ratio should be ~0.75, got {new_ratio}");
+                assert!(new_ratio < 0.8, "ratio should be ~0.75, got {new_ratio}");
+            }
+            _ => panic!("expected UpdateRatio, got {:?}", effect),
+        }
     }
 }
