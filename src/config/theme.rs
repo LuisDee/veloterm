@@ -285,22 +285,22 @@ pub const DARK: TerminalTheme = TerminalTheme {
 
     // ANSI palette
     ansi: [
-        rgb(25, 25, 24),      // 0  Black
-        rgb(196, 91, 91),     // 1  Red
-        rgb(120, 140, 93),    // 2  Green
-        rgb(201, 168, 76),    // 3  Yellow
-        rgb(106, 155, 204),   // 4  Blue
-        rgb(196, 167, 231),   // 5  Magenta
-        rgb(125, 175, 168),   // 6  Cyan
-        rgb(176, 174, 165),   // 7  White (default fg)
-        rgb(74, 73, 69),      // 8  Bright Black (comments)
-        rgb(217, 114, 107),   // 9  Bright Red
-        rgb(143, 168, 109),   // 10 Bright Green
-        rgb(212, 185, 94),    // 11 Bright Yellow
-        rgb(130, 176, 217),   // 12 Bright Blue
-        rgb(209, 184, 238),   // 13 Bright Magenta
-        rgb(143, 194, 187),   // 14 Bright Cyan
-        rgb(232, 230, 220),   // 15 Bright White (bold fg)
+        rgb(24, 24, 24),      // 0  Black       #181818
+        rgb(172, 66, 66),     // 1  Red         #ac4242
+        rgb(144, 169, 89),    // 2  Green       #90a959
+        rgb(244, 191, 117),   // 3  Yellow      #f4bf75
+        rgb(106, 159, 181),   // 4  Blue        #6a9fb5
+        rgb(170, 117, 159),   // 5  Magenta     #aa759f
+        rgb(117, 181, 170),   // 6  Cyan        #75b5aa
+        rgb(216, 216, 216),   // 7  White       #d8d8d8
+        rgb(107, 107, 107),   // 8  Bright Black #6b6b6b
+        rgb(197, 85, 85),     // 9  Bright Red  #c55555
+        rgb(170, 196, 116),   // 10 Bright Green #aac474
+        rgb(254, 202, 136),   // 11 Bright Yellow #feca88
+        rgb(130, 184, 200),   // 12 Bright Blue #82b8c8
+        rgb(194, 140, 184),   // 13 Bright Magenta #c28cb8
+        rgb(147, 211, 195),   // 14 Bright Cyan #93d3c3
+        rgb(248, 248, 248),   // 15 Bright White #f8f8f8
     ],
 };
 

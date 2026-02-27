@@ -976,10 +976,6 @@ impl App {
     /// When `is_dragging_divider` is true, PTY/terminal resize is deferred to
     /// avoid flooding shells with SIGWINCH during continuous drag.
     fn resize_all_panes(&mut self, width: u32, height: u32) {
-        // During divider drag, skip PTY resize — only update on drag end
-        if self.is_dragging_divider {
-            return;
-        }
         let pgrid = self.pane_grid_bounds(width as f32, height as f32);
         let pane_tree = &self.tab_manager.active_tab().pane_tree;
         let layout = pane_tree.calculate_layout(pgrid.width, pgrid.height);
@@ -990,8 +986,12 @@ impl App {
                     pane_id, cols, rows, renderer.cell_width(), renderer.cell_height(), rect.width, rect.height);
             }
             if let Some(state) = self.pane_states.get_mut(pane_id) {
+                // Always resize terminal grid for correct visual rendering
                 state.terminal.resize(cols as usize, rows as usize);
-                let _ = state.pty.resize(cols, rows);
+                // Defer PTY resize during divider drag to avoid SIGWINCH flood
+                if !self.is_dragging_divider {
+                    let _ = state.pty.resize(cols, rows);
+                }
             }
         }
     }
