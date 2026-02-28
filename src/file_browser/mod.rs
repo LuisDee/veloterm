@@ -1,11 +1,15 @@
 // File browser overlay — state management for the project file browser.
 
+pub mod preview;
 pub mod tree;
 pub mod view;
 pub mod watcher;
 
 use crate::input::InputMode;
+use preview::{FilePreview, PreviewViewState};
 use std::path::PathBuf;
+use syntect::highlighting::ThemeSet;
+use syntect::parsing::SyntaxSet;
 use tree::{FileTree, TreeNavAction, TreeNavResult, VisibleRow};
 use view::{BreadcrumbData, FileTreeViewState};
 
@@ -40,6 +44,14 @@ pub struct FileBrowserState {
     pub view_state: FileTreeViewState,
     /// Breadcrumb data for the current root.
     pub breadcrumb: Option<BreadcrumbData>,
+    /// Currently loaded file preview (None = empty state).
+    pub preview: Option<FilePreview>,
+    /// Preview panel scroll/wrap state.
+    pub preview_view: PreviewViewState,
+    /// Shared syntax set for highlighting (loaded once).
+    pub syntax_set: SyntaxSet,
+    /// Shared theme set for highlighting (loaded once).
+    pub theme_set: ThemeSet,
 }
 
 impl FileBrowserState {
@@ -51,6 +63,10 @@ impl FileBrowserState {
             visible_rows: Vec::new(),
             view_state: FileTreeViewState::new(),
             breadcrumb: None,
+            preview: None,
+            preview_view: PreviewViewState::new(),
+            syntax_set: SyntaxSet::load_defaults_newlines(),
+            theme_set: ThemeSet::load_defaults(),
         }
     }
 
@@ -116,6 +132,21 @@ impl FileBrowserState {
     /// Navigate to a breadcrumb segment path.
     pub fn navigate_to_breadcrumb(&mut self, path: PathBuf) {
         self.open(path);
+    }
+
+    /// Load a file preview for the given path.
+    /// Resets preview scroll state.
+    pub fn load_preview(&mut self, path: &std::path::Path) {
+        self.preview_view = PreviewViewState::new();
+        match FilePreview::load(path, &self.syntax_set, &self.theme_set) {
+            Ok(preview) => {
+                self.preview = Some(preview);
+            }
+            Err(e) => {
+                log::warn!("Failed to load preview for {}: {e}", path.display());
+                self.preview = None;
+            }
+        }
     }
 }
 
