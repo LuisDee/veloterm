@@ -68,6 +68,17 @@ pub enum UiMessage {
     ContextMenuAction(crate::context_menu::ContextMenuAction),
     /// Dismiss the context menu overlay (click outside or Escape).
     ContextMenuDismiss,
+    // Overlay toggle (from toolbar icons)
+    ToggleFileBrowser,
+    ToggleGitReview,
+    // Overlay icon hover state
+    FileBrowserIconEnter,
+    FileBrowserIconExit,
+    GitReviewIconEnter,
+    GitReviewIconExit,
+    // Split panel resize
+    OverlaySplitResize(f32),
+    OverlaySplitReset,
     Noop,
 }
 
@@ -128,6 +139,13 @@ pub struct DividerDisplay {
     pub height: f32,
     pub is_hovered: bool,
     pub is_dragging: bool,
+}
+
+/// Which overlay is currently active.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActiveOverlay {
+    FileBrowser,
+    GitReview,
 }
 
 /// State snapshot passed to the iced widget tree each frame.
@@ -193,6 +211,18 @@ pub struct UiState<'a> {
     pub context_menu_position: (f32, f32),
     /// Whether the focused pane has an active selection (affects Copy item).
     pub context_menu_has_selection: bool,
+    /// Active overlay type (None = no overlay, showing terminal panes).
+    pub active_overlay: Option<ActiveOverlay>,
+    /// File browser split ratio (only used when overlay is FileBrowser).
+    pub file_browser_split_ratio: f32,
+    /// Git review split ratio (only used when overlay is GitReview).
+    pub git_review_split_ratio: f32,
+    /// Which panel is focused in the active overlay.
+    pub overlay_focused_panel: crate::file_browser::OverlayPanel,
+    /// Whether the File Browser toolbar icon is hovered.
+    pub is_file_browser_icon_hovered: bool,
+    /// Whether the Git Review toolbar icon is hovered.
+    pub is_git_review_icon_hovered: bool,
 }
 
 /// Holds iced rendering state: renderer, viewport, event queue, and UI cache.
@@ -393,9 +423,12 @@ impl IcedLayer {
                 .into()
         };
 
-        // If conductor dashboard is active, replace content area with it
+        // If conductor dashboard is active, replace content area with it.
+        // If an overlay is active, replace content area with the overlay split panel.
         let content: IcedElement<'a> = if state.conductor.is_some() {
             Self::conductor_dashboard(state, scale)
+        } else if let Some(overlay) = state.active_overlay {
+            Self::overlay_content(state, scale, overlay)
         } else {
             base_content
         };
@@ -551,6 +584,54 @@ impl IcedLayer {
             .spacing(6.0 / scale)
             .align_y(iced_core::Alignment::Center);
 
+        // File Browser icon (folder)
+        let fb_active = matches!(state.active_overlay, Some(ActiveOverlay::FileBrowser));
+        let fb_color = if fb_active { accent } else { text_secondary };
+        let fb_label = text("\u{25A3}").size(14.0).color(fb_color).font(DM_SANS);
+        let fb_btn_bg = if state.is_file_browser_icon_hovered { bg_hover } else { bg_raised };
+        let fb_btn = container(fb_label)
+            .padding(iced_core::Padding::from([4.0 / scale, 8.0 / scale]))
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(fb_btn_bg)),
+                border: iced_core::Border {
+                    color: border_subtle,
+                    width: 0.0,
+                    radius: (4.0 / scale).into(),
+                },
+                ..Default::default()
+            });
+        let fb_click = MouseArea::new(fb_btn)
+            .on_press(UiMessage::ToggleFileBrowser)
+            .on_enter(UiMessage::FileBrowserIconEnter)
+            .on_exit(UiMessage::FileBrowserIconExit);
+
+        // Git Review icon (branch)
+        let gr_active = matches!(state.active_overlay, Some(ActiveOverlay::GitReview));
+        let gr_color = if gr_active { accent } else { text_secondary };
+        let gr_label = text("\u{2387}").size(14.0).color(gr_color).font(DM_SANS);
+        let gr_btn_bg = if state.is_git_review_icon_hovered { bg_hover } else { bg_raised };
+        let gr_btn = container(gr_label)
+            .padding(iced_core::Padding::from([4.0 / scale, 8.0 / scale]))
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(gr_btn_bg)),
+                border: iced_core::Border {
+                    color: border_subtle,
+                    width: 0.0,
+                    radius: (4.0 / scale).into(),
+                },
+                ..Default::default()
+            });
+        let gr_click = MouseArea::new(gr_btn)
+            .on_press(UiMessage::ToggleGitReview)
+            .on_enter(UiMessage::GitReviewIconEnter)
+            .on_exit(UiMessage::GitReviewIconExit);
+
+        // Build right-side icon group
+        let mut right_icons: Row<'a, UiMessage, iced_core::Theme, iced_wgpu::Renderer> = Row::new()
+            .spacing(4.0 / scale)
+            .align_y(iced_core::Alignment::Center);
+        right_icons = right_icons.push(fb_click).push(gr_click);
+
         let content: IcedElement<'a> = if state.conductor_available {
             let icon_opacity = if state.conductor.is_some() { 1.0 } else { 0.6 };
             let icon_size = 20.0 / scale;
@@ -581,12 +662,13 @@ impl IcedLayer {
                 .on_press(UiMessage::ConductorToggled)
                 .on_enter(UiMessage::TracksIconEnter)
                 .on_exit(UiMessage::TracksIconExit);
-            row![sidebar_click, hspace(), center_content, hspace(), tracks_click]
+            right_icons = right_icons.push(tracks_click);
+            row![sidebar_click, hspace(), center_content, hspace(), right_icons]
                 .align_y(iced_core::Alignment::Center)
                 .padding(iced_core::Padding::from([0.0, 8.0 / scale]))
                 .into()
         } else {
-            row![sidebar_click, hspace(), center_content, hspace()]
+            row![sidebar_click, hspace(), center_content, hspace(), right_icons]
                 .align_y(iced_core::Alignment::Center)
                 .padding(iced_core::Padding::from([0.0, 8.0 / scale]))
                 .into()
@@ -1639,6 +1721,74 @@ impl IcedLayer {
             .into()
     }
 
+    /// Overlay content — SplitPanel with placeholder left/right content.
+    fn overlay_content<'a>(state: &'a UiState, scale: f32, overlay: ActiveOverlay) -> IcedElement<'a> {
+        let theme = state.theme;
+        let bg_surface = to_iced_color(&theme.bg_surface);
+        let text_secondary = to_iced_color(&theme.text_secondary);
+        let accent = to_iced_color(&theme.accent_orange);
+
+        let (left_label, right_label, ratio) = match overlay {
+            ActiveOverlay::FileBrowser => (
+                "File Browser",
+                "Select a file to preview",
+                state.file_browser_split_ratio,
+            ),
+            ActiveOverlay::GitReview => (
+                "Changed Files",
+                "Select a file to view changes",
+                state.git_review_split_ratio,
+            ),
+        };
+
+        let focused = state.overlay_focused_panel;
+        let left_border_color = if focused == crate::file_browser::OverlayPanel::Left { accent } else { bg_surface };
+        let right_border_color = if focused == crate::file_browser::OverlayPanel::Right { accent } else { bg_surface };
+
+        let left_panel: IcedElement<'a> = container(
+            text(left_label).size(14.0 / scale).color(text_secondary).font(DM_SANS)
+        )
+            .width(iced_core::Length::Fill)
+            .height(iced_core::Length::Fill)
+            .align_x(iced_core::alignment::Horizontal::Center)
+            .align_y(iced_core::alignment::Vertical::Center)
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(bg_surface)),
+                border: iced_core::Border {
+                    color: left_border_color,
+                    width: 2.0 / scale,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into();
+
+        let right_panel: IcedElement<'a> = container(
+            text(right_label).size(14.0 / scale).color(text_secondary).font(DM_SANS)
+        )
+            .width(iced_core::Length::Fill)
+            .height(iced_core::Length::Fill)
+            .align_x(iced_core::alignment::Horizontal::Center)
+            .align_y(iced_core::alignment::Vertical::Center)
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(bg_surface)),
+                border: iced_core::Border {
+                    color: right_border_color,
+                    width: 2.0 / scale,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into();
+
+        let split: crate::split_panel::SplitPanel<'a, UiMessage> =
+            crate::split_panel::SplitPanel::new(left_panel, right_panel, ratio)
+                .on_resize(UiMessage::OverlaySplitResize)
+                .on_reset(UiMessage::OverlaySplitReset);
+
+        split.into()
+    }
+
     /// Conductor dashboard overlay — track progress viewer.
     fn conductor_dashboard<'a>(state: &'a UiState, scale: f32) -> IcedElement<'a> {
         let theme = state.theme;
@@ -2246,6 +2396,12 @@ mod tests {
             context_menu_visible: false,
             context_menu_position: (0.0, 0.0),
             context_menu_has_selection: false,
+            active_overlay: None,
+            file_browser_split_ratio: 0.5,
+            git_review_split_ratio: 0.5,
+            overlay_focused_panel: crate::file_browser::OverlayPanel::default(),
+            is_file_browser_icon_hovered: false,
+            is_git_review_icon_hovered: false,
         }
     }
 
@@ -2512,6 +2668,12 @@ mod tests {
             context_menu_visible: false,
             context_menu_position: (0.0, 0.0),
             context_menu_has_selection: false,
+            active_overlay: None,
+            file_browser_split_ratio: 0.5,
+            git_review_split_ratio: 0.5,
+            overlay_focused_panel: crate::file_browser::OverlayPanel::default(),
+            is_file_browser_icon_hovered: false,
+            is_git_review_icon_hovered: false,
             };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
@@ -2621,6 +2783,12 @@ mod tests {
             context_menu_visible: false,
             context_menu_position: (0.0, 0.0),
             context_menu_has_selection: false,
+            active_overlay: None,
+            file_browser_split_ratio: 0.5,
+            git_review_split_ratio: 0.5,
+            overlay_focused_panel: crate::file_browser::OverlayPanel::default(),
+            is_file_browser_icon_hovered: false,
+            is_git_review_icon_hovered: false,
             };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
@@ -3017,6 +3185,12 @@ mod tests {
             context_menu_visible: false,
             context_menu_position: (0.0, 0.0),
             context_menu_has_selection: false,
+            active_overlay: None,
+            file_browser_split_ratio: 0.5,
+            git_review_split_ratio: 0.5,
+            overlay_focused_panel: crate::file_browser::OverlayPanel::default(),
+            is_file_browser_icon_hovered: false,
+            is_git_review_icon_hovered: false,
         };
         assert!(!state.context_menu_visible);
         assert_eq!(state.context_menu_position, (0.0, 0.0));

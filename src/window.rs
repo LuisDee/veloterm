@@ -15,8 +15,9 @@ use crate::config::types::{Config, ConfigDelta};
 use crate::config::watcher::UserEvent;
 use crate::header_bar::CHROME_BAR_HEIGHT;
 use crate::input::{
-    match_app_command, match_pane_command, match_tab_command, match_search_command,
-    should_open_search, AppCommand, InputMode, PaneCommand, SearchCommand, TabCommand,
+    match_app_command, match_overlay_command, match_pane_command, match_tab_command,
+    match_search_command, should_open_search, AppCommand, InputMode, OverlayCommand,
+    PaneCommand, SearchCommand, TabCommand,
 };
 use crate::link::opener::open_link;
 use crate::link::LinkDetector;
@@ -24,7 +25,7 @@ use crate::search::SearchState;
 use crate::pane::header::PANE_HEADER_HEIGHT;
 use crate::pane::interaction::{CursorType, InteractionEffect, PaneInteraction};
 use crate::pane::{PaneId, Rect, SplitDirection};
-use crate::renderer::iced_layer::{DividerDisplay, MinimapPane, PaneInfo, SidebarTabInfo, TabInfo, UiMessage, UiState};
+use crate::renderer::iced_layer::{ActiveOverlay, DividerDisplay, MinimapPane, PaneInfo, SidebarTabInfo, TabInfo, UiMessage, UiState};
 use crate::renderer::PaneRenderDescriptor;
 use crate::status_bar::STATUS_BAR_HEIGHT;
 use crate::tab::TabManager;
@@ -167,6 +168,14 @@ pub struct App {
     /// Whether a divider drag is in progress. When true, PTY/terminal resizes
     /// are deferred until drag ends to avoid flooding shells with SIGWINCH.
     is_dragging_divider: bool,
+    /// File browser overlay state. Some = state exists (may or may not be visible).
+    file_browser_state: Option<crate::file_browser::FileBrowserState>,
+    /// Git review overlay state. Some = state exists (may or may not be visible).
+    git_review_state: Option<crate::git_review::GitReviewState>,
+    /// Whether the File Browser toolbar icon is hovered.
+    hovering_file_browser_icon: bool,
+    /// Whether the Git Review toolbar icon is hovered.
+    hovering_git_review_icon: bool,
 }
 
 impl App {
@@ -224,6 +233,10 @@ impl App {
             context_menu_position: (0.0, 0.0),
             context_menu_has_selection: false,
             is_dragging_divider: false,
+            file_browser_state: None,
+            git_review_state: None,
+            hovering_file_browser_icon: false,
+            hovering_git_review_icon: false,
         }
     }
 
@@ -1932,6 +1945,32 @@ impl ApplicationHandler<UserEvent> for App {
                         return;
                     }
 
+                    // Check for overlay toggle (Ctrl+E, Ctrl+G — no Shift)
+                    if let Some(overlay_cmd) = match_overlay_command(&event.logical_key, self.modifiers) {
+                        match overlay_cmd {
+                            OverlayCommand::ToggleFileBrowser => {
+                                self.input_mode = crate::file_browser::toggle_file_browser(self.input_mode);
+                                if self.input_mode == InputMode::FileBrowser {
+                                    if self.file_browser_state.is_none() {
+                                        self.file_browser_state = Some(crate::file_browser::FileBrowserState::new());
+                                    }
+                                }
+                            }
+                            OverlayCommand::ToggleGitReview => {
+                                self.input_mode = crate::git_review::toggle_git_review(self.input_mode);
+                                if self.input_mode == InputMode::GitReview {
+                                    if self.git_review_state.is_none() {
+                                        self.git_review_state = Some(crate::git_review::GitReviewState::new());
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+
                     // Check for search toggle (Ctrl+Shift+F) — works in any mode
                     if should_open_search(&event.logical_key, self.modifiers) {
                         if self.input_mode == InputMode::Search {
@@ -2007,6 +2046,35 @@ impl ApplicationHandler<UserEvent> for App {
                         } else {
                             // No conductor state, exit mode
                             self.input_mode = InputMode::Normal;
+                        }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+
+                    // In overlay mode (FileBrowser / GitReview), intercept keys
+                    if self.input_mode == InputMode::FileBrowser
+                        || self.input_mode == InputMode::GitReview
+                    {
+                        match &event.logical_key {
+                            Key::Named(NamedKey::Escape) => {
+                                self.input_mode = InputMode::Normal;
+                            }
+                            Key::Named(NamedKey::Tab) => {
+                                // Toggle panel focus
+                                let state = if self.input_mode == InputMode::FileBrowser {
+                                    self.file_browser_state.as_mut()
+                                        .map(|s| &mut s.focused_panel)
+                                } else {
+                                    self.git_review_state.as_mut()
+                                        .map(|s| &mut s.focused_panel)
+                                };
+                                if let Some(panel) = state {
+                                    *panel = panel.toggle();
+                                }
+                            }
+                            _ => {} // Consume all other keys
                         }
                         if let Some(window) = &self.window {
                             window.request_redraw();
@@ -3034,6 +3102,26 @@ impl ApplicationHandler<UserEvent> for App {
                         context_menu_visible: self.context_menu_visible,
                         context_menu_position: self.context_menu_position,
                         context_menu_has_selection: self.context_menu_has_selection,
+                        active_overlay: match self.input_mode {
+                            InputMode::FileBrowser => Some(ActiveOverlay::FileBrowser),
+                            InputMode::GitReview => Some(ActiveOverlay::GitReview),
+                            _ => None,
+                        },
+                        file_browser_split_ratio: self.file_browser_state.as_ref()
+                            .map(|s| s.split_ratio).unwrap_or(0.5),
+                        git_review_split_ratio: self.git_review_state.as_ref()
+                            .map(|s| s.split_ratio).unwrap_or(0.5),
+                        overlay_focused_panel: match self.input_mode {
+                            InputMode::FileBrowser => self.file_browser_state.as_ref()
+                                .map(|s| s.focused_panel)
+                                .unwrap_or_default(),
+                            InputMode::GitReview => self.git_review_state.as_ref()
+                                .map(|s| s.focused_panel)
+                                .unwrap_or_default(),
+                            _ => crate::file_browser::OverlayPanel::default(),
+                        },
+                        is_file_browser_icon_hovered: self.hovering_file_browser_icon,
+                        is_git_review_icon_hovered: self.hovering_git_review_icon,
                     };
 
                     let mut iced_msgs = Vec::new();
@@ -3220,6 +3308,64 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                             UiMessage::ContextMenuDismiss => {
                                 self.context_menu_visible = false;
+                            }
+                            UiMessage::ToggleFileBrowser => {
+                                self.input_mode = crate::file_browser::toggle_file_browser(self.input_mode);
+                                if self.input_mode == InputMode::FileBrowser {
+                                    if self.file_browser_state.is_none() {
+                                        self.file_browser_state = Some(crate::file_browser::FileBrowserState::new());
+                                    }
+                                }
+                            }
+                            UiMessage::ToggleGitReview => {
+                                self.input_mode = crate::git_review::toggle_git_review(self.input_mode);
+                                if self.input_mode == InputMode::GitReview {
+                                    if self.git_review_state.is_none() {
+                                        self.git_review_state = Some(crate::git_review::GitReviewState::new());
+                                    }
+                                }
+                            }
+                            UiMessage::FileBrowserIconEnter => {
+                                self.hovering_file_browser_icon = true;
+                            }
+                            UiMessage::FileBrowserIconExit => {
+                                self.hovering_file_browser_icon = false;
+                            }
+                            UiMessage::GitReviewIconEnter => {
+                                self.hovering_git_review_icon = true;
+                            }
+                            UiMessage::GitReviewIconExit => {
+                                self.hovering_git_review_icon = false;
+                            }
+                            UiMessage::OverlaySplitResize(ratio) => {
+                                match self.input_mode {
+                                    InputMode::FileBrowser => {
+                                        if let Some(s) = &mut self.file_browser_state {
+                                            s.split_ratio = ratio;
+                                        }
+                                    }
+                                    InputMode::GitReview => {
+                                        if let Some(s) = &mut self.git_review_state {
+                                            s.split_ratio = ratio;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            UiMessage::OverlaySplitReset => {
+                                match self.input_mode {
+                                    InputMode::FileBrowser => {
+                                        if let Some(s) = &mut self.file_browser_state {
+                                            s.split_ratio = 0.5;
+                                        }
+                                    }
+                                    InputMode::GitReview => {
+                                        if let Some(s) = &mut self.git_review_state {
+                                            s.split_ratio = 0.5;
+                                        }
+                                    }
+                                    _ => {}
+                                }
                             }
                             UiMessage::Noop => {}
                         }
