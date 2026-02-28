@@ -67,14 +67,85 @@ pub enum OverlayCommand {
     ToggleGitReview,
 }
 
+/// Parse a keybinding string like "ctrl+e", "ctrl+shift+b" into (Key, ModifiersState).
+/// Returns None if the string cannot be parsed.
+pub fn parse_keybinding(s: &str) -> Option<(Key, ModifiersState)> {
+    let parts: Vec<&str> = s.split('+').collect();
+    if parts.is_empty() {
+        return None;
+    }
+
+    let mut mods = ModifiersState::empty();
+    let mut key_part = None;
+
+    for part in &parts {
+        match part.to_lowercase().as_str() {
+            "ctrl" | "control" => mods |= ModifiersState::CONTROL,
+            "shift" => mods |= ModifiersState::SHIFT,
+            "alt" => mods |= ModifiersState::ALT,
+            "super" | "cmd" | "meta" => mods |= ModifiersState::SUPER,
+            other => {
+                if key_part.is_some() {
+                    return None; // multiple key parts
+                }
+                key_part = Some(other.to_string());
+            }
+        }
+    }
+
+    let key_str = key_part?;
+    let key = match key_str.as_str() {
+        "space" => Key::Named(NamedKey::Space),
+        "enter" | "return" => Key::Named(NamedKey::Enter),
+        "tab" => Key::Named(NamedKey::Tab),
+        "escape" | "esc" => Key::Named(NamedKey::Escape),
+        "backspace" => Key::Named(NamedKey::Backspace),
+        "delete" => Key::Named(NamedKey::Delete),
+        "home" => Key::Named(NamedKey::Home),
+        "end" => Key::Named(NamedKey::End),
+        "pageup" => Key::Named(NamedKey::PageUp),
+        "pagedown" => Key::Named(NamedKey::PageDown),
+        "up" | "arrowup" => Key::Named(NamedKey::ArrowUp),
+        "down" | "arrowdown" => Key::Named(NamedKey::ArrowDown),
+        "left" | "arrowleft" => Key::Named(NamedKey::ArrowLeft),
+        "right" | "arrowright" => Key::Named(NamedKey::ArrowRight),
+        other if other.len() == 1 => Key::Character(other.into()),
+        _ => return None, // unknown key
+    };
+
+    Some((key, mods))
+}
+
 /// Check if a key event matches an overlay toggle shortcut.
 ///
+/// If custom bindings are provided, checks them first. Falls back to defaults:
 /// - Ctrl+E (Ctrl only, no Shift) -> ToggleFileBrowser
 /// - Ctrl+G (Ctrl only, no Shift) -> ToggleGitReview
 pub fn match_overlay_command(
     logical_key: &Key,
     modifiers: ModifiersState,
+    bindings: &HashMap<String, String>,
 ) -> Option<OverlayCommand> {
+    // Check custom bindings first
+    let commands = [
+        ("toggle_file_browser", OverlayCommand::ToggleFileBrowser),
+        ("toggle_git_review", OverlayCommand::ToggleGitReview),
+    ];
+
+    for (action_name, cmd) in &commands {
+        if let Some(binding_str) = bindings.get(*action_name) {
+            if let Some((key, mods)) = parse_keybinding(binding_str) {
+                if *logical_key == key && modifiers == mods {
+                    return Some(*cmd);
+                }
+            }
+        }
+    }
+
+    // If custom bindings are defined for an action, skip the default for that action
+    let file_browser_custom = bindings.contains_key("toggle_file_browser");
+    let git_review_custom = bindings.contains_key("toggle_git_review");
+
     // Only Ctrl held, no Shift (to avoid conflict with Ctrl+Shift+E = SplitHorizontal)
     if !modifiers.control_key() || modifiers.shift_key() {
         return None;
@@ -83,8 +154,8 @@ pub fn match_overlay_command(
         Key::Character(s) => {
             let lower = s.to_lowercase();
             match lower.as_str() {
-                "e" => Some(OverlayCommand::ToggleFileBrowser),
-                "g" => Some(OverlayCommand::ToggleGitReview),
+                "e" if !file_browser_custom => Some(OverlayCommand::ToggleFileBrowser),
+                "g" if !git_review_custom => Some(OverlayCommand::ToggleGitReview),
                 _ => None,
             }
         }
@@ -1376,40 +1447,108 @@ mod tests {
 
     // ── Overlay command matching ────────────────────────────────────
 
+    fn empty_bindings() -> HashMap<String, String> {
+        HashMap::new()
+    }
+
     #[test]
     fn overlay_cmd_ctrl_e_toggles_file_browser() {
-        let result = match_overlay_command(&Key::Character("e".into()), ModifiersState::CONTROL);
+        let result = match_overlay_command(&Key::Character("e".into()), ModifiersState::CONTROL, &empty_bindings());
         assert_eq!(result, Some(OverlayCommand::ToggleFileBrowser));
     }
 
     #[test]
     fn overlay_cmd_ctrl_g_toggles_git_review() {
-        let result = match_overlay_command(&Key::Character("g".into()), ModifiersState::CONTROL);
+        let result = match_overlay_command(&Key::Character("g".into()), ModifiersState::CONTROL, &empty_bindings());
         assert_eq!(result, Some(OverlayCommand::ToggleGitReview));
     }
 
     #[test]
     fn overlay_cmd_ctrl_shift_e_does_not_match() {
-        let result = match_overlay_command(&Key::Character("E".into()), ctrl_shift());
+        let result = match_overlay_command(&Key::Character("E".into()), ctrl_shift(), &empty_bindings());
         assert_eq!(result, None);
     }
 
     #[test]
     fn overlay_cmd_ctrl_shift_g_does_not_match() {
-        let result = match_overlay_command(&Key::Character("G".into()), ctrl_shift());
+        let result = match_overlay_command(&Key::Character("G".into()), ctrl_shift(), &empty_bindings());
         assert_eq!(result, None);
     }
 
     #[test]
     fn overlay_cmd_no_modifier_does_not_match() {
-        let result = match_overlay_command(&Key::Character("e".into()), no_mods());
+        let result = match_overlay_command(&Key::Character("e".into()), no_mods(), &empty_bindings());
         assert_eq!(result, None);
     }
 
     #[test]
     fn overlay_cmd_ctrl_only_other_keys_no_match() {
-        assert_eq!(match_overlay_command(&Key::Character("x".into()), ModifiersState::CONTROL), None);
-        assert_eq!(match_overlay_command(&Key::Character("a".into()), ModifiersState::CONTROL), None);
+        assert_eq!(match_overlay_command(&Key::Character("x".into()), ModifiersState::CONTROL, &empty_bindings()), None);
+        assert_eq!(match_overlay_command(&Key::Character("a".into()), ModifiersState::CONTROL, &empty_bindings()), None);
+    }
+
+    // -- Custom binding tests --
+
+    #[test]
+    fn overlay_cmd_custom_binding_file_browser() {
+        let mut bindings = HashMap::new();
+        bindings.insert("toggle_file_browser".to_string(), "ctrl+b".to_string());
+        // Custom Ctrl+B should work
+        let result = match_overlay_command(&Key::Character("b".into()), ModifiersState::CONTROL, &bindings);
+        assert_eq!(result, Some(OverlayCommand::ToggleFileBrowser));
+        // Default Ctrl+E should NOT work when overridden
+        let result = match_overlay_command(&Key::Character("e".into()), ModifiersState::CONTROL, &bindings);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn overlay_cmd_custom_binding_git_review() {
+        let mut bindings = HashMap::new();
+        bindings.insert("toggle_git_review".to_string(), "ctrl+r".to_string());
+        let result = match_overlay_command(&Key::Character("r".into()), ModifiersState::CONTROL, &bindings);
+        assert_eq!(result, Some(OverlayCommand::ToggleGitReview));
+    }
+
+    #[test]
+    fn overlay_cmd_default_when_no_custom() {
+        let result = match_overlay_command(&Key::Character("e".into()), ModifiersState::CONTROL, &empty_bindings());
+        assert_eq!(result, Some(OverlayCommand::ToggleFileBrowser));
+    }
+
+    #[test]
+    fn overlay_cmd_invalid_binding_uses_default() {
+        let mut bindings = HashMap::new();
+        bindings.insert("toggle_file_browser".to_string(), "invalid".to_string());
+        // Invalid binding: the custom binding won't match, but the default is also suppressed
+        // since a custom binding IS defined. This is intentional — bad config = no binding.
+        let result = match_overlay_command(&Key::Character("e".into()), ModifiersState::CONTROL, &bindings);
+        assert_eq!(result, None);
+    }
+
+    // -- parse_keybinding tests --
+
+    #[test]
+    fn parse_keybinding_ctrl_e() {
+        let (key, mods) = parse_keybinding("ctrl+e").unwrap();
+        assert_eq!(key, Key::Character("e".into()));
+        assert_eq!(mods, ModifiersState::CONTROL);
+    }
+
+    #[test]
+    fn parse_keybinding_ctrl_shift_b() {
+        let (key, mods) = parse_keybinding("ctrl+shift+b").unwrap();
+        assert_eq!(key, Key::Character("b".into()));
+        assert_eq!(mods, ModifiersState::CONTROL | ModifiersState::SHIFT);
+    }
+
+    #[test]
+    fn parse_keybinding_invalid_returns_none() {
+        assert!(parse_keybinding("invalid").is_none());
+    }
+
+    #[test]
+    fn parse_keybinding_empty_returns_none() {
+        assert!(parse_keybinding("").is_none());
     }
 
     #[test]

@@ -1946,7 +1946,7 @@ impl ApplicationHandler<UserEvent> for App {
                     }
 
                     // Check for overlay toggle (Ctrl+E, Ctrl+G — no Shift)
-                    if let Some(overlay_cmd) = match_overlay_command(&event.logical_key, self.modifiers) {
+                    if let Some(overlay_cmd) = match_overlay_command(&event.logical_key, self.modifiers, &self.app_config.keys.bindings) {
                         match overlay_cmd {
                             OverlayCommand::ToggleFileBrowser => {
                                 self.input_mode = crate::file_browser::toggle_file_browser(self.input_mode);
