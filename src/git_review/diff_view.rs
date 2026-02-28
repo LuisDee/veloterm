@@ -226,6 +226,199 @@ pub fn total_row_count(diff: &FileDiff) -> usize {
     diff.hunks.iter().map(|h| h.rows.len()).sum()
 }
 
+/// Synchronized scroll state for the diff view.
+#[derive(Debug, Clone)]
+pub struct DiffScrollState {
+    /// Vertical scroll offset in pixels.
+    pub vertical_offset: f32,
+    /// Horizontal scroll offset in pixels (both panes scroll together).
+    pub horizontal_offset: f32,
+    /// Total content height in pixels.
+    pub content_height: f32,
+    /// Viewport height in pixels.
+    pub viewport_height: f32,
+    /// Viewport width for one pane in pixels.
+    pub pane_width: f32,
+    /// Maximum content width across all lines in pixels.
+    pub max_content_width: f32,
+}
+
+impl DiffScrollState {
+    pub fn new() -> Self {
+        Self {
+            vertical_offset: 0.0,
+            horizontal_offset: 0.0,
+            content_height: 0.0,
+            viewport_height: 0.0,
+            pane_width: 0.0,
+            max_content_width: 0.0,
+        }
+    }
+
+    /// Update dimensions when diff or viewport changes.
+    pub fn update_dimensions(
+        &mut self,
+        content_height: f32,
+        viewport_height: f32,
+        pane_width: f32,
+        max_content_width: f32,
+    ) {
+        self.content_height = content_height;
+        self.viewport_height = viewport_height;
+        self.pane_width = pane_width;
+        self.max_content_width = max_content_width;
+        self.clamp();
+    }
+
+    /// Scroll vertically by a delta (positive = down).
+    pub fn scroll_vertical(&mut self, delta: f32) {
+        self.vertical_offset += delta;
+        self.clamp();
+    }
+
+    /// Scroll horizontally by a delta (positive = right).
+    pub fn scroll_horizontal(&mut self, delta: f32) {
+        self.horizontal_offset += delta;
+        self.clamp();
+    }
+
+    /// Reset scroll to top-left.
+    pub fn reset(&mut self) {
+        self.vertical_offset = 0.0;
+        self.horizontal_offset = 0.0;
+    }
+
+    /// Maximum vertical scroll offset.
+    pub fn max_vertical(&self) -> f32 {
+        (self.content_height - self.viewport_height).max(0.0)
+    }
+
+    /// Maximum horizontal scroll offset.
+    pub fn max_horizontal(&self) -> f32 {
+        (self.max_content_width - self.pane_width + GUTTER_WIDTH + INDICATOR_WIDTH).max(0.0)
+    }
+
+    /// Scrollbar thumb position as fraction (0.0..1.0).
+    pub fn vertical_thumb_position(&self) -> f32 {
+        let max = self.max_vertical();
+        if max <= 0.0 {
+            0.0
+        } else {
+            self.vertical_offset / max
+        }
+    }
+
+    /// Scrollbar thumb size as fraction of viewport vs content (0.0..1.0).
+    pub fn vertical_thumb_size(&self) -> f32 {
+        if self.content_height <= 0.0 {
+            1.0
+        } else {
+            (self.viewport_height / self.content_height).min(1.0)
+        }
+    }
+
+    /// Whether scrolling is needed (content larger than viewport).
+    pub fn needs_vertical_scroll(&self) -> bool {
+        self.content_height > self.viewport_height
+    }
+
+    fn clamp(&mut self) {
+        self.vertical_offset = self.vertical_offset.max(0.0).min(self.max_vertical());
+        self.horizontal_offset = self.horizontal_offset.max(0.0).min(self.max_horizontal());
+    }
+}
+
+/// Build a FileDiff for a fully added file (all lines on right, left empty).
+pub fn diff_for_added_file(path: &str, content: &str) -> FileDiff {
+    let lines: Vec<&str> = content.lines().collect();
+    let rows = lines
+        .iter()
+        .enumerate()
+        .map(|(i, line)| AlignedRow {
+            left: None,
+            right: Some(crate::git_review::diff::DiffLine {
+                content: line.to_string(),
+                line_number: Some(i + 1),
+                change_type: ChangeType::Added,
+            }),
+        })
+        .collect();
+
+    FileDiff {
+        path: path.to_string(),
+        hunks: vec![DiffHunk {
+            header: format!("@@ -0,0 +1,{} @@", lines.len()),
+            old_start: 0,
+            new_start: 1,
+            rows,
+        }],
+        diff_type: DiffType::Added,
+    }
+}
+
+/// Build a FileDiff for a fully deleted file (all lines on left, right empty).
+pub fn diff_for_deleted_file(path: &str, content: &str) -> FileDiff {
+    let lines: Vec<&str> = content.lines().collect();
+    let rows = lines
+        .iter()
+        .enumerate()
+        .map(|(i, line)| AlignedRow {
+            left: Some(crate::git_review::diff::DiffLine {
+                content: line.to_string(),
+                line_number: Some(i + 1),
+                change_type: ChangeType::Deleted,
+            }),
+            right: None,
+        })
+        .collect();
+
+    FileDiff {
+        path: path.to_string(),
+        hunks: vec![DiffHunk {
+            header: format!("@@ -1,{} +0,0 @@", lines.len()),
+            old_start: 1,
+            new_start: 0,
+            rows,
+        }],
+        diff_type: DiffType::Deleted,
+    }
+}
+
+/// Build a display message for a binary file diff.
+pub fn binary_file_message(
+    old_size: Option<u64>,
+    new_size: Option<u64>,
+) -> String {
+    match (old_size, new_size) {
+        (Some(old), Some(new)) => {
+            format!(
+                "Binary file changed ({} → {})",
+                format_file_size(old),
+                format_file_size(new)
+            )
+        }
+        (None, Some(new)) => format!("Binary file added ({})", format_file_size(new)),
+        (Some(old), None) => format!("Binary file deleted ({})", format_file_size(old)),
+        (None, None) => "Binary file changed".to_string(),
+    }
+}
+
+/// Format a file size in human-readable form.
+pub fn format_file_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
+}
+
+/// Build header for renamed files.
+pub fn renamed_file_header(from: &str, to: &str) -> String {
+    format!("{} → {}", from, to)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -644,5 +837,226 @@ mod tests {
             assert_eq!(old_size, Some(1024));
             assert_eq!(new_size, Some(2048));
         }
+    }
+
+    // -- DiffScrollState --
+
+    #[test]
+    fn scroll_state_defaults() {
+        let s = DiffScrollState::new();
+        assert!((s.vertical_offset - 0.0).abs() < f32::EPSILON);
+        assert!((s.horizontal_offset - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn scroll_state_vertical_scroll() {
+        let mut s = DiffScrollState::new();
+        s.update_dimensions(1000.0, 200.0, 400.0, 300.0);
+        s.scroll_vertical(100.0);
+        assert!((s.vertical_offset - 100.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn scroll_state_clamps_vertical_max() {
+        let mut s = DiffScrollState::new();
+        s.update_dimensions(1000.0, 200.0, 400.0, 300.0);
+        s.scroll_vertical(2000.0);
+        assert!((s.vertical_offset - 800.0).abs() < f32::EPSILON); // max = 1000 - 200
+    }
+
+    #[test]
+    fn scroll_state_clamps_vertical_min() {
+        let mut s = DiffScrollState::new();
+        s.update_dimensions(1000.0, 200.0, 400.0, 300.0);
+        s.scroll_vertical(-100.0);
+        assert!((s.vertical_offset - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn scroll_state_no_scroll_when_content_fits() {
+        let mut s = DiffScrollState::new();
+        s.update_dimensions(100.0, 200.0, 400.0, 300.0);
+        assert!(!s.needs_vertical_scroll());
+        s.scroll_vertical(50.0);
+        assert!((s.vertical_offset - 0.0).abs() < f32::EPSILON); // clamped to 0
+    }
+
+    #[test]
+    fn scroll_state_horizontal_scroll() {
+        let mut s = DiffScrollState::new();
+        s.update_dimensions(1000.0, 200.0, 200.0, 600.0);
+        s.scroll_horizontal(100.0);
+        assert!((s.horizontal_offset - 100.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn scroll_state_horizontal_clamp() {
+        let mut s = DiffScrollState::new();
+        s.update_dimensions(1000.0, 200.0, 400.0, 300.0);
+        s.scroll_horizontal(5000.0);
+        // Should clamp to max_horizontal
+        assert!(s.horizontal_offset <= s.max_horizontal() + f32::EPSILON);
+    }
+
+    #[test]
+    fn scroll_state_reset() {
+        let mut s = DiffScrollState::new();
+        s.update_dimensions(1000.0, 200.0, 400.0, 600.0);
+        s.scroll_vertical(100.0);
+        s.scroll_horizontal(50.0);
+        s.reset();
+        assert!((s.vertical_offset - 0.0).abs() < f32::EPSILON);
+        assert!((s.horizontal_offset - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn scroll_thumb_position_at_start() {
+        let mut s = DiffScrollState::new();
+        s.update_dimensions(1000.0, 200.0, 400.0, 300.0);
+        assert!((s.vertical_thumb_position() - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn scroll_thumb_position_at_end() {
+        let mut s = DiffScrollState::new();
+        s.update_dimensions(1000.0, 200.0, 400.0, 300.0);
+        s.scroll_vertical(800.0);
+        assert!((s.vertical_thumb_position() - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn scroll_thumb_size_full_viewport() {
+        let mut s = DiffScrollState::new();
+        s.update_dimensions(100.0, 200.0, 400.0, 300.0);
+        assert!((s.vertical_thumb_size() - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn scroll_thumb_size_partial() {
+        let mut s = DiffScrollState::new();
+        s.update_dimensions(1000.0, 200.0, 400.0, 300.0);
+        assert!((s.vertical_thumb_size() - 0.2).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn scroll_needs_vertical() {
+        let mut s = DiffScrollState::new();
+        s.update_dimensions(1000.0, 200.0, 400.0, 300.0);
+        assert!(s.needs_vertical_scroll());
+    }
+
+    // -- diff_for_added_file --
+
+    #[test]
+    fn added_file_all_lines_on_right() {
+        let diff = diff_for_added_file("new.rs", "fn main() {\n    println!(\"hello\");\n}");
+        assert_eq!(diff.diff_type, DiffType::Added);
+        assert_eq!(diff.hunks.len(), 1);
+        assert_eq!(diff.hunks[0].rows.len(), 3);
+        for row in &diff.hunks[0].rows {
+            assert!(row.left.is_none());
+            assert!(row.right.is_some());
+            assert_eq!(row.right.as_ref().unwrap().change_type, ChangeType::Added);
+        }
+    }
+
+    #[test]
+    fn added_file_line_numbers_sequential() {
+        let diff = diff_for_added_file("f.txt", "a\nb\nc");
+        let rows = &diff.hunks[0].rows;
+        assert_eq!(rows[0].right.as_ref().unwrap().line_number, Some(1));
+        assert_eq!(rows[1].right.as_ref().unwrap().line_number, Some(2));
+        assert_eq!(rows[2].right.as_ref().unwrap().line_number, Some(3));
+    }
+
+    #[test]
+    fn added_file_hunk_header() {
+        let diff = diff_for_added_file("f.txt", "a\nb");
+        assert_eq!(diff.hunks[0].header, "@@ -0,0 +1,2 @@");
+    }
+
+    // -- diff_for_deleted_file --
+
+    #[test]
+    fn deleted_file_all_lines_on_left() {
+        let diff = diff_for_deleted_file("old.rs", "line1\nline2\nline3");
+        assert_eq!(diff.diff_type, DiffType::Deleted);
+        assert_eq!(diff.hunks.len(), 1);
+        assert_eq!(diff.hunks[0].rows.len(), 3);
+        for row in &diff.hunks[0].rows {
+            assert!(row.left.is_some());
+            assert!(row.right.is_none());
+            assert_eq!(row.left.as_ref().unwrap().change_type, ChangeType::Deleted);
+        }
+    }
+
+    #[test]
+    fn deleted_file_line_numbers() {
+        let diff = diff_for_deleted_file("f.txt", "x\ny");
+        let rows = &diff.hunks[0].rows;
+        assert_eq!(rows[0].left.as_ref().unwrap().line_number, Some(1));
+        assert_eq!(rows[1].left.as_ref().unwrap().line_number, Some(2));
+    }
+
+    #[test]
+    fn deleted_file_hunk_header() {
+        let diff = diff_for_deleted_file("f.txt", "a\nb\nc");
+        assert_eq!(diff.hunks[0].header, "@@ -1,3 +0,0 @@");
+    }
+
+    // -- binary_file_message --
+
+    #[test]
+    fn binary_message_both_sizes() {
+        let msg = binary_file_message(Some(1024), Some(2048));
+        assert!(msg.contains("1.0 KB"));
+        assert!(msg.contains("2.0 KB"));
+    }
+
+    #[test]
+    fn binary_message_added() {
+        let msg = binary_file_message(None, Some(512));
+        assert!(msg.contains("added"));
+        assert!(msg.contains("512 B"));
+    }
+
+    #[test]
+    fn binary_message_deleted() {
+        let msg = binary_file_message(Some(1048576), None);
+        assert!(msg.contains("deleted"));
+        assert!(msg.contains("1.0 MB"));
+    }
+
+    #[test]
+    fn binary_message_no_sizes() {
+        let msg = binary_file_message(None, None);
+        assert_eq!(msg, "Binary file changed");
+    }
+
+    // -- format_file_size --
+
+    #[test]
+    fn format_size_bytes() {
+        assert_eq!(format_file_size(100), "100 B");
+    }
+
+    #[test]
+    fn format_size_kb() {
+        assert_eq!(format_file_size(1024), "1.0 KB");
+    }
+
+    #[test]
+    fn format_size_mb() {
+        assert_eq!(format_file_size(1048576), "1.0 MB");
+    }
+
+    // -- renamed_file_header --
+
+    #[test]
+    fn renamed_header_format() {
+        assert_eq!(
+            renamed_file_header("old/path.rs", "new/path.rs"),
+            "old/path.rs → new/path.rs"
+        );
     }
 }
