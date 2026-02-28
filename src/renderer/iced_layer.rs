@@ -79,6 +79,21 @@ pub enum UiMessage {
     // Split panel resize
     OverlaySplitResize(f32),
     OverlaySplitReset,
+    // File browser interactions
+    FileBrowserRowClicked(usize),
+    FileBrowserRowHovered(usize),
+    FileBrowserRowUnhovered,
+    FileBrowserScroll(f32),
+    // Git review interactions
+    GitReviewFileClicked(usize),
+    GitReviewStageFile,
+    GitReviewUnstageFile,
+    GitReviewDiscardFile,
+    GitReviewStageAll,
+    GitReviewUnstageAll,
+    GitReviewCommit,
+    GitReviewScroll(f32),
+    GitReviewCommitMsgChanged(String),
     Noop,
 }
 
@@ -223,6 +238,83 @@ pub struct UiState<'a> {
     pub is_file_browser_icon_hovered: bool,
     /// Whether the Git Review toolbar icon is hovered.
     pub is_git_review_icon_hovered: bool,
+    // ── File Browser content ──
+    /// Visible file tree rows for rendering.
+    pub file_browser_rows: Vec<FileBrowserRow>,
+    /// Breadcrumb path text.
+    pub file_browser_breadcrumb: String,
+    /// Preview file name (None = empty state).
+    pub file_browser_preview_name: Option<String>,
+    /// Preview lines (plain text, no syntax highlighting in iced).
+    pub file_browser_preview_lines: Vec<String>,
+    /// Whether the preview was truncated.
+    pub file_browser_preview_truncated: bool,
+    /// Preview scroll offset.
+    pub file_browser_preview_scroll: f32,
+    // ── Git Review content ──
+    /// Flat list items for the file list panel.
+    pub git_review_list_items: Vec<GitReviewListItem>,
+    /// Diff header text (e.g. "src/main.rs (Modified)").
+    pub git_review_diff_header: Option<String>,
+    /// Flattened diff rows for the right panel.
+    pub git_review_diff_rows: Vec<GitReviewDiffRow>,
+    /// Error message to display.
+    pub git_review_error: Option<String>,
+    /// Whether the commit button should be enabled.
+    pub git_review_can_commit: bool,
+    /// Current commit message.
+    pub git_review_commit_message: String,
+    /// Diff scroll offset.
+    pub git_review_diff_scroll: f32,
+}
+
+/// A file browser row for rendering.
+#[derive(Debug, Clone)]
+pub struct FileBrowserRow {
+    pub index: usize,
+    pub depth: usize,
+    pub name: String,
+    pub icon: String,
+    pub chevron: Option<String>,
+    pub is_selected: bool,
+    pub is_hovered: bool,
+}
+
+/// A git review list item for rendering.
+#[derive(Debug, Clone)]
+pub struct GitReviewListItem {
+    pub kind: GitReviewItemKind,
+    pub label: String,
+    pub is_selected: bool,
+    pub section: Option<String>,
+    pub status_label: Option<String>,
+}
+
+/// Kind of git review list item.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitReviewItemKind {
+    SectionHeader,
+    FileEntry,
+}
+
+/// A single diff row for rendering.
+#[derive(Debug, Clone)]
+pub struct GitReviewDiffRow {
+    pub kind: DiffRowKind,
+    pub left_num: Option<String>,
+    pub right_num: Option<String>,
+    pub left_text: String,
+    pub right_text: String,
+}
+
+/// Kind of diff row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiffRowKind {
+    HunkHeader,
+    Context,
+    Added,
+    Removed,
+    Modified,
 }
 
 /// Holds iced rendering state: renderer, viewport, event queue, and UI cache.
@@ -1721,65 +1813,23 @@ impl IcedLayer {
             .into()
     }
 
-    /// Overlay content — SplitPanel with placeholder left/right content.
+    /// Overlay content — SplitPanel with file browser or git review.
     fn overlay_content<'a>(state: &'a UiState, scale: f32, overlay: ActiveOverlay) -> IcedElement<'a> {
-        let theme = state.theme;
-        let bg_surface = to_iced_color(&theme.bg_surface);
-        let text_secondary = to_iced_color(&theme.text_secondary);
-        let accent = to_iced_color(&theme.accent_orange);
-
-        let (left_label, right_label, ratio) = match overlay {
-            ActiveOverlay::FileBrowser => (
-                "File Browser",
-                "Select a file to preview",
-                state.file_browser_split_ratio,
-            ),
-            ActiveOverlay::GitReview => (
-                "Changed Files",
-                "Select a file to view changes",
-                state.git_review_split_ratio,
-            ),
+        let ratio = match overlay {
+            ActiveOverlay::FileBrowser => state.file_browser_split_ratio,
+            ActiveOverlay::GitReview => state.git_review_split_ratio,
         };
 
-        let focused = state.overlay_focused_panel;
-        let left_border_color = if focused == crate::file_browser::OverlayPanel::Left { accent } else { bg_surface };
-        let right_border_color = if focused == crate::file_browser::OverlayPanel::Right { accent } else { bg_surface };
-
-        let left_panel: IcedElement<'a> = container(
-            text(left_label).size(14.0 / scale).color(text_secondary).font(DM_SANS)
-        )
-            .width(iced_core::Length::Fill)
-            .height(iced_core::Length::Fill)
-            .align_x(iced_core::alignment::Horizontal::Center)
-            .align_y(iced_core::alignment::Vertical::Center)
-            .style(move |_: &iced_core::Theme| container::Style {
-                background: Some(iced_core::Background::Color(bg_surface)),
-                border: iced_core::Border {
-                    color: left_border_color,
-                    width: 2.0 / scale,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
-            .into();
-
-        let right_panel: IcedElement<'a> = container(
-            text(right_label).size(14.0 / scale).color(text_secondary).font(DM_SANS)
-        )
-            .width(iced_core::Length::Fill)
-            .height(iced_core::Length::Fill)
-            .align_x(iced_core::alignment::Horizontal::Center)
-            .align_y(iced_core::alignment::Vertical::Center)
-            .style(move |_: &iced_core::Theme| container::Style {
-                background: Some(iced_core::Background::Color(bg_surface)),
-                border: iced_core::Border {
-                    color: right_border_color,
-                    width: 2.0 / scale,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
-            .into();
+        let (left_panel, right_panel) = match overlay {
+            ActiveOverlay::FileBrowser => (
+                Self::file_browser_left(state, scale),
+                Self::file_browser_right(state, scale),
+            ),
+            ActiveOverlay::GitReview => (
+                Self::git_review_left(state, scale),
+                Self::git_review_right(state, scale),
+            ),
+        };
 
         let split: crate::split_panel::SplitPanel<'a, UiMessage> =
             crate::split_panel::SplitPanel::new(left_panel, right_panel, ratio)
@@ -1787,6 +1837,600 @@ impl IcedLayer {
                 .on_reset(UiMessage::OverlaySplitReset);
 
         split.into()
+    }
+
+    /// File browser left panel — breadcrumb + file tree rows.
+    fn file_browser_left<'a>(state: &'a UiState, scale: f32) -> IcedElement<'a> {
+        let theme = state.theme;
+        let bg_surface = to_iced_color(&theme.bg_surface);
+        let bg_raised = to_iced_color(&theme.bg_raised);
+        let text_primary = to_iced_color(&theme.text_primary);
+        let text_secondary = to_iced_color(&theme.text_secondary);
+        let text_muted = to_iced_color(&theme.text_muted);
+        let accent = to_iced_color(&theme.accent_orange);
+        let border_color = to_iced_color(&theme.border_visible);
+        let focused = state.overlay_focused_panel == crate::file_browser::OverlayPanel::Left;
+        let panel_border = if focused { accent } else { bg_surface };
+
+        // Breadcrumb bar
+        let breadcrumb: IcedElement<'a> = container(
+            text(&state.file_browser_breadcrumb)
+                .size(12.0 / scale)
+                .color(text_muted)
+                .font(DM_SANS)
+        )
+        .width(iced_core::Length::Fill)
+        .padding(iced_core::Padding::from([6.0 / scale, 10.0 / scale]))
+        .style(move |_: &iced_core::Theme| container::Style {
+            background: Some(iced_core::Background::Color(bg_raised)),
+            border: iced_core::Border {
+                color: border_color,
+                width: 0.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        })
+        .into();
+
+        // File tree rows
+        let mut rows_col = iced_widget::Column::new().spacing(0.0);
+        for row in &state.file_browser_rows {
+            let idx = row.index;
+            let depth = row.depth;
+            let is_sel = row.is_selected;
+            let is_hov = row.is_hovered;
+
+            // Build row content: indent + chevron + icon + name
+            let indent_w = depth as f32 * 18.0 / scale;
+            let indent = iced_widget::Space::new().width(indent_w);
+
+            let mut row_items: Vec<IcedElement<'a>> = vec![indent.into()];
+
+            if let Some(chev) = &row.chevron {
+                row_items.push(
+                    text(chev.as_str())
+                        .size(12.0 / scale)
+                        .color(text_muted)
+                        .font(JETBRAINS_MONO)
+                        .into(),
+                );
+                row_items.push(iced_widget::Space::new().width(2.0 / scale).into());
+            } else {
+                // Spacer for alignment
+                row_items.push(iced_widget::Space::new().width(14.0 / scale).into());
+            }
+
+            row_items.push(
+                text(row.icon.as_str())
+                    .size(13.0 / scale)
+                    .color(text_secondary)
+                    .into(),
+            );
+            row_items.push(iced_widget::Space::new().width(6.0 / scale).into());
+            row_items.push(
+                text(row.name.as_str())
+                    .size(13.0 / scale)
+                    .color(if is_sel { accent } else { text_primary })
+                    .font(DM_SANS)
+                    .into(),
+            );
+
+            let row_content = Row::with_children(row_items)
+                .align_y(iced_core::Alignment::Center);
+
+            let row_bg = if is_sel {
+                iced_core::Color { a: 0.2, ..accent }
+            } else if is_hov {
+                bg_raised
+            } else {
+                bg_surface
+            };
+
+            let row_container: IcedElement<'a> = container(row_content)
+                .width(iced_core::Length::Fill)
+                .height(28.0 / scale)
+                .padding(iced_core::Padding::from([0.0, 8.0 / scale]))
+                .style(move |_: &iced_core::Theme| container::Style {
+                    background: Some(iced_core::Background::Color(row_bg)),
+                    ..Default::default()
+                })
+                .into();
+
+            let clickable = MouseArea::new(row_container)
+                .on_press(UiMessage::FileBrowserRowClicked(idx))
+                .on_enter(UiMessage::FileBrowserRowHovered(idx))
+                .on_exit(UiMessage::FileBrowserRowUnhovered);
+
+            rows_col = rows_col.push(clickable);
+        }
+
+        let scrollable_tree = pin(rows_col)
+            .width(iced_core::Length::Fill)
+            .height(iced_core::Length::Fill);
+
+        let content = column![breadcrumb, scrollable_tree];
+
+        container(content)
+            .width(iced_core::Length::Fill)
+            .height(iced_core::Length::Fill)
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(bg_surface)),
+                border: iced_core::Border {
+                    color: panel_border,
+                    width: 2.0 / scale,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
+    /// File browser right panel — file preview.
+    fn file_browser_right<'a>(state: &'a UiState, scale: f32) -> IcedElement<'a> {
+        let theme = state.theme;
+        let bg_surface = to_iced_color(&theme.bg_surface);
+        let bg_deep = to_iced_color(&theme.bg_deep);
+        let text_primary = to_iced_color(&theme.text_primary);
+        let text_secondary = to_iced_color(&theme.text_secondary);
+        let text_muted = to_iced_color(&theme.text_muted);
+        let accent = to_iced_color(&theme.accent_orange);
+        let border_color = to_iced_color(&theme.border_visible);
+        let focused = state.overlay_focused_panel == crate::file_browser::OverlayPanel::Right;
+        let panel_border = if focused { accent } else { bg_surface };
+
+        let content: IcedElement<'a> = match &state.file_browser_preview_name {
+            None => {
+                // Empty state
+                container(
+                    text("Select a file to preview")
+                        .size(14.0 / scale)
+                        .color(text_muted)
+                        .font(DM_SANS),
+                )
+                .width(iced_core::Length::Fill)
+                .height(iced_core::Length::Fill)
+                .align_x(iced_core::alignment::Horizontal::Center)
+                .align_y(iced_core::alignment::Vertical::Center)
+                .into()
+            }
+            Some(name) => {
+                // File header
+                let header: IcedElement<'a> = container(
+                    text(name.as_str())
+                        .size(12.0 / scale)
+                        .color(text_secondary)
+                        .font(DM_SANS),
+                )
+                .width(iced_core::Length::Fill)
+                .padding(iced_core::Padding::from([6.0 / scale, 10.0 / scale]))
+                .style(move |_: &iced_core::Theme| container::Style {
+                    background: Some(iced_core::Background::Color(bg_deep)),
+                    border: iced_core::Border {
+                        color: border_color,
+                        width: 0.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                })
+                .into();
+
+                // Preview lines
+                let mut lines_col = iced_widget::Column::new().spacing(0.0);
+                for (i, line) in state.file_browser_preview_lines.iter().enumerate() {
+                    let line_num = text(format!("{:>4} ", i + 1))
+                        .size(12.0 / scale)
+                        .color(text_muted)
+                        .font(JETBRAINS_MONO);
+                    let line_text = text(line.as_str())
+                        .size(12.0 / scale)
+                        .color(text_primary)
+                        .font(JETBRAINS_MONO);
+                    let line_row = row![line_num, line_text];
+                    lines_col = lines_col.push(line_row);
+                }
+
+                if state.file_browser_preview_truncated {
+                    lines_col = lines_col.push(
+                        text("... (file truncated)")
+                            .size(11.0 / scale)
+                            .color(text_muted)
+                            .font(DM_SANS),
+                    );
+                }
+
+                let scrollable = pin(lines_col)
+                    .width(iced_core::Length::Fill)
+                    .height(iced_core::Length::Fill);
+
+                column![header, scrollable].into()
+            }
+        };
+
+        container(content)
+            .width(iced_core::Length::Fill)
+            .height(iced_core::Length::Fill)
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(bg_surface)),
+                border: iced_core::Border {
+                    color: panel_border,
+                    width: 2.0 / scale,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
+    /// Git review left panel — file list with sections.
+    fn git_review_left<'a>(state: &'a UiState, scale: f32) -> IcedElement<'a> {
+        let theme = state.theme;
+        let bg_surface = to_iced_color(&theme.bg_surface);
+        let bg_raised = to_iced_color(&theme.bg_raised);
+        let bg_deep = to_iced_color(&theme.bg_deep);
+        let text_primary = to_iced_color(&theme.text_primary);
+        let text_secondary = to_iced_color(&theme.text_secondary);
+        let text_muted = to_iced_color(&theme.text_muted);
+        let accent = to_iced_color(&theme.accent_orange);
+        let accent_green = to_iced_color(&theme.accent_green);
+        let accent_red = to_iced_color(&theme.accent_red);
+        let border_color = to_iced_color(&theme.border_visible);
+        let focused = state.overlay_focused_panel == crate::file_browser::OverlayPanel::Left;
+        let panel_border = if focused { accent } else { bg_surface };
+
+        // Error message
+        let error_widget: Option<IcedElement<'a>> = state.git_review_error.as_ref().map(|err| {
+            container(
+                text(err.as_str())
+                    .size(12.0 / scale)
+                    .color(accent_red)
+                    .font(DM_SANS),
+            )
+            .width(iced_core::Length::Fill)
+            .padding(iced_core::Padding::from([4.0 / scale, 10.0 / scale]))
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(iced_core::Color { a: 0.1, ..accent_red })),
+                ..Default::default()
+            })
+            .into()
+        });
+
+        // File list
+        let mut list_col = iced_widget::Column::new().spacing(0.0);
+
+        if state.git_review_list_items.is_empty() && state.git_review_error.is_none() {
+            list_col = list_col.push(
+                container(
+                    text("No changes")
+                        .size(13.0 / scale)
+                        .color(text_muted)
+                        .font(DM_SANS),
+                )
+                .width(iced_core::Length::Fill)
+                .padding(iced_core::Padding::from([20.0 / scale, 10.0 / scale]))
+                .align_x(iced_core::alignment::Horizontal::Center),
+            );
+        }
+
+        for (flat_idx, item) in state.git_review_list_items.iter().enumerate() {
+            match item.kind {
+                GitReviewItemKind::SectionHeader => {
+                    let header_row: IcedElement<'a> = container(
+                        text(item.label.as_str())
+                            .size(12.0 / scale)
+                            .color(text_secondary)
+                            .font(DM_SANS),
+                    )
+                    .width(iced_core::Length::Fill)
+                    .padding(iced_core::Padding::from([6.0 / scale, 10.0 / scale]))
+                    .style(move |_: &iced_core::Theme| container::Style {
+                        background: Some(iced_core::Background::Color(bg_deep)),
+                        ..Default::default()
+                    })
+                    .into();
+
+                    let clickable = MouseArea::new(header_row)
+                        .on_press(UiMessage::GitReviewFileClicked(flat_idx));
+                    list_col = list_col.push(clickable);
+                }
+                GitReviewItemKind::FileEntry => {
+                    let is_sel = item.is_selected;
+
+                    // Status badge color
+                    let status_color = match item.status_label.as_deref() {
+                        Some("A") => accent_green,
+                        Some("D") => accent_red,
+                        Some("M") => accent,
+                        Some("?") => text_muted,
+                        _ => text_secondary,
+                    };
+
+                    let status_text = text(item.status_label.as_deref().unwrap_or(""))
+                        .size(12.0 / scale)
+                        .color(status_color)
+                        .font(JETBRAINS_MONO);
+
+                    let file_text = text(item.label.as_str())
+                        .size(13.0 / scale)
+                        .color(if is_sel { accent } else { text_primary })
+                        .font(DM_SANS);
+
+                    let entry_row = row![
+                        iced_widget::Space::new().width(10.0 / scale),
+                        status_text,
+                        iced_widget::Space::new().width(8.0 / scale),
+                        file_text,
+                    ]
+                    .align_y(iced_core::Alignment::Center);
+
+                    let row_bg = if is_sel {
+                        iced_core::Color { a: 0.2, ..accent }
+                    } else {
+                        bg_surface
+                    };
+
+                    let entry_container: IcedElement<'a> = container(entry_row)
+                        .width(iced_core::Length::Fill)
+                        .height(28.0 / scale)
+                        .style(move |_: &iced_core::Theme| container::Style {
+                            background: Some(iced_core::Background::Color(row_bg)),
+                            ..Default::default()
+                        })
+                        .into();
+
+                    let clickable = MouseArea::new(entry_container)
+                        .on_press(UiMessage::GitReviewFileClicked(flat_idx));
+                    list_col = list_col.push(clickable);
+                }
+            }
+        }
+
+        let scrollable_list = pin(list_col)
+            .width(iced_core::Length::Fill)
+            .height(iced_core::Length::Fill);
+
+        // Commit area at bottom
+        let commit_input: IcedElement<'a> = text_input("Commit message...", &state.git_review_commit_message)
+            .on_input(UiMessage::GitReviewCommitMsgChanged)
+            .size(12.0 / scale)
+            .font(DM_SANS)
+            .into();
+
+        let commit_btn_bg = if state.git_review_can_commit {
+            accent_green
+        } else {
+            bg_raised
+        };
+        let commit_btn_text_color = if state.git_review_can_commit {
+            iced_core::Color::WHITE
+        } else {
+            text_muted
+        };
+
+        let commit_btn: IcedElement<'a> = container(
+            text("Commit")
+                .size(12.0 / scale)
+                .color(commit_btn_text_color)
+                .font(DM_SANS),
+        )
+        .padding(iced_core::Padding::from([4.0 / scale, 12.0 / scale]))
+        .style(move |_: &iced_core::Theme| container::Style {
+            background: Some(iced_core::Background::Color(commit_btn_bg)),
+            border: iced_core::Border::default().rounded(4.0 / scale),
+            ..Default::default()
+        })
+        .into();
+
+        let commit_click = if state.git_review_can_commit {
+            MouseArea::new(commit_btn).on_press(UiMessage::GitReviewCommit)
+        } else {
+            MouseArea::new(commit_btn)
+        };
+
+        let commit_area: IcedElement<'a> = container(
+            column![
+                commit_input,
+                iced_widget::Space::new().height(4.0 / scale),
+                commit_click,
+            ],
+        )
+        .width(iced_core::Length::Fill)
+        .padding(iced_core::Padding::from([6.0 / scale, 8.0 / scale]))
+        .style(move |_: &iced_core::Theme| container::Style {
+            background: Some(iced_core::Background::Color(bg_deep)),
+            border: iced_core::Border {
+                color: border_color,
+                width: 0.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        })
+        .into();
+
+        let mut content_col: iced_widget::Column<'a, UiMessage, iced_core::Theme, iced_wgpu::Renderer> = iced_widget::Column::new();
+        if let Some(err) = error_widget {
+            content_col = content_col.push(err);
+        }
+        content_col = content_col.push(scrollable_list);
+        content_col = content_col.push(commit_area);
+
+        container(content_col)
+            .width(iced_core::Length::Fill)
+            .height(iced_core::Length::Fill)
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(bg_surface)),
+                border: iced_core::Border {
+                    color: panel_border,
+                    width: 2.0 / scale,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
+    /// Git review right panel — diff view.
+    fn git_review_right<'a>(state: &'a UiState, scale: f32) -> IcedElement<'a> {
+        let theme = state.theme;
+        let bg_surface = to_iced_color(&theme.bg_surface);
+        let bg_deep = to_iced_color(&theme.bg_deep);
+        let text_primary = to_iced_color(&theme.text_primary);
+        let text_secondary = to_iced_color(&theme.text_secondary);
+        let text_muted = to_iced_color(&theme.text_muted);
+        let accent = to_iced_color(&theme.accent_orange);
+        let accent_green = to_iced_color(&theme.accent_green);
+        let accent_red = to_iced_color(&theme.accent_red);
+        let border_color = to_iced_color(&theme.border_visible);
+        let focused = state.overlay_focused_panel == crate::file_browser::OverlayPanel::Right;
+        let panel_border = if focused { accent } else { bg_surface };
+
+        let content: IcedElement<'a> = if state.git_review_diff_rows.is_empty() {
+            // Empty state
+            container(
+                text("Select a file to view changes")
+                    .size(14.0 / scale)
+                    .color(text_muted)
+                    .font(DM_SANS),
+            )
+            .width(iced_core::Length::Fill)
+            .height(iced_core::Length::Fill)
+            .align_x(iced_core::alignment::Horizontal::Center)
+            .align_y(iced_core::alignment::Vertical::Center)
+            .into()
+        } else {
+            // Diff header
+            let header_text = state.git_review_diff_header.as_deref().unwrap_or("");
+            let header: IcedElement<'a> = container(
+                text(header_text)
+                    .size(12.0 / scale)
+                    .color(text_secondary)
+                    .font(DM_SANS),
+            )
+            .width(iced_core::Length::Fill)
+            .padding(iced_core::Padding::from([6.0 / scale, 10.0 / scale]))
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(bg_deep)),
+                border: iced_core::Border {
+                    color: border_color,
+                    width: 0.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into();
+
+            // Diff rows
+            let mut diff_col = iced_widget::Column::new().spacing(0.0);
+
+            for diff_row in &state.git_review_diff_rows {
+                let row_element: IcedElement<'a> = match diff_row.kind {
+                    DiffRowKind::HunkHeader => {
+                        container(
+                            text(diff_row.left_text.as_str())
+                                .size(11.0 / scale)
+                                .color(text_muted)
+                                .font(JETBRAINS_MONO),
+                        )
+                        .width(iced_core::Length::Fill)
+                        .height(22.0 / scale)
+                        .padding(iced_core::Padding::from([2.0 / scale, 10.0 / scale]))
+                        .style(move |_: &iced_core::Theme| container::Style {
+                            background: Some(iced_core::Background::Color(
+                                iced_core::Color::from_rgba(0.15, 0.15, 0.2, 1.0),
+                            )),
+                            ..Default::default()
+                        })
+                        .into()
+                    }
+                    _ => {
+                        let (row_bg, indicator_color) = match diff_row.kind {
+                            DiffRowKind::Added => (
+                                iced_core::Color::from_rgba(0.0, 0.4, 0.0, 0.15),
+                                accent_green,
+                            ),
+                            DiffRowKind::Removed => (
+                                iced_core::Color::from_rgba(0.6, 0.0, 0.0, 0.15),
+                                accent_red,
+                            ),
+                            DiffRowKind::Modified => (
+                                iced_core::Color::from_rgba(0.6, 0.5, 0.0, 0.15),
+                                accent,
+                            ),
+                            _ => (iced_core::Color::TRANSPARENT, iced_core::Color::TRANSPARENT),
+                        };
+
+                        let indicator: IcedElement<'a> = container(column![])
+                            .width(3.0 / scale)
+                            .height(iced_core::Length::Fill)
+                            .style(move |_: &iced_core::Theme| container::Style {
+                                background: Some(iced_core::Background::Color(indicator_color)),
+                                ..Default::default()
+                            })
+                            .into();
+
+                        let left_num = text(diff_row.left_num.as_deref().unwrap_or("   "))
+                            .size(11.0 / scale)
+                            .color(text_muted)
+                            .font(JETBRAINS_MONO);
+                        let left_text = text(diff_row.left_text.as_str())
+                            .size(11.0 / scale)
+                            .color(text_primary)
+                            .font(JETBRAINS_MONO);
+
+                        let right_num = text(diff_row.right_num.as_deref().unwrap_or("   "))
+                            .size(11.0 / scale)
+                            .color(text_muted)
+                            .font(JETBRAINS_MONO);
+                        let right_text = text(diff_row.right_text.as_str())
+                            .size(11.0 / scale)
+                            .color(text_primary)
+                            .font(JETBRAINS_MONO);
+
+                        let line_row = row![
+                            indicator,
+                            iced_widget::Space::new().width(2.0 / scale),
+                            left_num,
+                            iced_widget::Space::new().width(4.0 / scale),
+                            left_text,
+                            iced_widget::Space::new().width(12.0 / scale),
+                            right_num,
+                            iced_widget::Space::new().width(4.0 / scale),
+                            right_text,
+                        ]
+                        .align_y(iced_core::Alignment::Center);
+
+                        container(line_row)
+                            .width(iced_core::Length::Fill)
+                            .height(20.0 / scale)
+                            .style(move |_: &iced_core::Theme| container::Style {
+                                background: Some(iced_core::Background::Color(row_bg)),
+                                ..Default::default()
+                            })
+                            .into()
+                    }
+                };
+                diff_col = diff_col.push(row_element);
+            }
+
+            let scrollable_diff = pin(diff_col)
+                .width(iced_core::Length::Fill)
+                .height(iced_core::Length::Fill);
+
+            column![header, scrollable_diff].into()
+        };
+
+        container(content)
+            .width(iced_core::Length::Fill)
+            .height(iced_core::Length::Fill)
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(bg_surface)),
+                border: iced_core::Border {
+                    color: panel_border,
+                    width: 2.0 / scale,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
     }
 
     /// Conductor dashboard overlay — track progress viewer.
@@ -2402,6 +3046,19 @@ mod tests {
             overlay_focused_panel: crate::file_browser::OverlayPanel::default(),
             is_file_browser_icon_hovered: false,
             is_git_review_icon_hovered: false,
+            file_browser_rows: Vec::new(),
+            file_browser_breadcrumb: String::new(),
+            file_browser_preview_name: None,
+            file_browser_preview_lines: Vec::new(),
+            file_browser_preview_truncated: false,
+            file_browser_preview_scroll: 0.0,
+            git_review_list_items: Vec::new(),
+            git_review_diff_header: None,
+            git_review_diff_rows: Vec::new(),
+            git_review_error: None,
+            git_review_can_commit: false,
+            git_review_commit_message: String::new(),
+            git_review_diff_scroll: 0.0,
         }
     }
 
@@ -2674,6 +3331,19 @@ mod tests {
             overlay_focused_panel: crate::file_browser::OverlayPanel::default(),
             is_file_browser_icon_hovered: false,
             is_git_review_icon_hovered: false,
+file_browser_rows: Vec::new(),
+            file_browser_breadcrumb: String::new(),
+            file_browser_preview_name: None,
+            file_browser_preview_lines: Vec::new(),
+            file_browser_preview_truncated: false,
+            file_browser_preview_scroll: 0.0,
+            git_review_list_items: Vec::new(),
+            git_review_diff_header: None,
+            git_review_diff_rows: Vec::new(),
+            git_review_error: None,
+            git_review_can_commit: false,
+            git_review_commit_message: String::new(),
+            git_review_diff_scroll: 0.0,
             };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
@@ -2789,6 +3459,19 @@ mod tests {
             overlay_focused_panel: crate::file_browser::OverlayPanel::default(),
             is_file_browser_icon_hovered: false,
             is_git_review_icon_hovered: false,
+file_browser_rows: Vec::new(),
+            file_browser_breadcrumb: String::new(),
+            file_browser_preview_name: None,
+            file_browser_preview_lines: Vec::new(),
+            file_browser_preview_truncated: false,
+            file_browser_preview_scroll: 0.0,
+            git_review_list_items: Vec::new(),
+            git_review_diff_header: None,
+            git_review_diff_rows: Vec::new(),
+            git_review_error: None,
+            git_review_can_commit: false,
+            git_review_commit_message: String::new(),
+            git_review_diff_scroll: 0.0,
             };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
@@ -3191,6 +3874,19 @@ mod tests {
             overlay_focused_panel: crate::file_browser::OverlayPanel::default(),
             is_file_browser_icon_hovered: false,
             is_git_review_icon_hovered: false,
+file_browser_rows: Vec::new(),
+            file_browser_breadcrumb: String::new(),
+            file_browser_preview_name: None,
+            file_browser_preview_lines: Vec::new(),
+            file_browser_preview_truncated: false,
+            file_browser_preview_scroll: 0.0,
+            git_review_list_items: Vec::new(),
+            git_review_diff_header: None,
+            git_review_diff_rows: Vec::new(),
+            git_review_error: None,
+            git_review_can_commit: false,
+            git_review_commit_message: String::new(),
+            git_review_diff_scroll: 0.0,
         };
         assert!(!state.context_menu_visible);
         assert_eq!(state.context_menu_position, (0.0, 0.0));

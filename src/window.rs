@@ -486,6 +486,132 @@ impl App {
         }
     }
 
+    /// Get the CWD from the active pane's shell state, falling back to HOME.
+    fn active_pane_cwd(&self) -> std::path::PathBuf {
+        let focused = self.tab_manager.active_tab().pane_tree.focused_pane_id();
+        if let Some(state) = self.pane_states.get(&focused) {
+            if let Some(cwd) = state.terminal.shell_state().cwd.as_ref() {
+                return std::path::PathBuf::from(cwd);
+            }
+        }
+        std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+    }
+
+    /// Build file browser row data for iced rendering.
+    fn build_file_browser_rows(&self) -> Vec<crate::renderer::iced_layer::FileBrowserRow> {
+        let state = match &self.file_browser_state {
+            Some(s) => s,
+            None => return Vec::new(),
+        };
+        state.visible_rows.iter().enumerate().map(|(vis_idx, row)| {
+            use crate::file_browser::view;
+            let is_selected = state.view_state.nav.selected_visible_row == Some(vis_idx);
+            let is_hovered = state.view_state.hovered_row == Some(vis_idx);
+            let chevron = if row.has_children {
+                Some(view::chevron(row.expanded).to_string())
+            } else {
+                None
+            };
+            crate::renderer::iced_layer::FileBrowserRow {
+                index: vis_idx,
+                depth: row.depth,
+                name: row.name.clone(),
+                icon: view::row_icon(row).to_string(),
+                chevron,
+                is_selected,
+                is_hovered,
+            }
+        }).collect()
+    }
+
+    /// Build git review list items for iced rendering.
+    fn build_git_review_list_items(&self) -> Vec<crate::renderer::iced_layer::GitReviewListItem> {
+        let state = match &self.git_review_state {
+            Some(s) => s,
+            None => return Vec::new(),
+        };
+        let status = match &state.git_status {
+            Some(s) => s,
+            None => return Vec::new(),
+        };
+        use crate::git_review::view::{build_list_items, ListItem};
+        use crate::renderer::iced_layer::{GitReviewItemKind, GitReviewListItem};
+        let items = build_list_items(status, &state.section_state, state.selected);
+        items.iter().map(|item| match item {
+            ListItem::SectionHeader { label, collapsed, section, .. } => {
+                GitReviewListItem {
+                    kind: GitReviewItemKind::SectionHeader,
+                    label: if *collapsed {
+                        format!("\u{25B8} {}", label)
+                    } else {
+                        format!("\u{25BE} {}", label)
+                    },
+                    is_selected: false,
+                    section: Some(format!("{:?}", section)),
+                    status_label: None,
+                }
+            }
+            ListItem::FileEntry { display_name, status_label, selected, section, .. } => {
+                GitReviewListItem {
+                    kind: GitReviewItemKind::FileEntry,
+                    label: display_name.clone(),
+                    is_selected: *selected,
+                    section: Some(format!("{:?}", section)),
+                    status_label: Some(status_label.clone()),
+                }
+            }
+        }).collect()
+    }
+
+    /// Build git review diff rows for iced rendering.
+    fn build_git_review_diff_rows(&self) -> Vec<crate::renderer::iced_layer::GitReviewDiffRow> {
+        let state = match &self.git_review_state {
+            Some(s) => s,
+            None => return Vec::new(),
+        };
+        let diff = match state.current_diff() {
+            Some(d) => d,
+            None => return Vec::new(),
+        };
+        use crate::git_review::diff::ChangeType;
+        use crate::git_review::diff_view::{flatten_diff, FlatRow, gutter_char_width, max_line_number, format_line_number};
+        use crate::renderer::iced_layer::{DiffRowKind, GitReviewDiffRow};
+        let flat = flatten_diff(diff);
+        let max_ln = max_line_number(diff);
+        let gutter_w = gutter_char_width(max_ln);
+        flat.iter().map(|row| match row {
+            FlatRow::HunkHeader { header, .. } => GitReviewDiffRow {
+                kind: DiffRowKind::HunkHeader,
+                left_num: None,
+                right_num: None,
+                left_text: header.clone(),
+                right_text: String::new(),
+            },
+            FlatRow::AlignedRow { row, .. } => {
+                let kind = match (&row.left, &row.right) {
+                    (Some(l), Some(r)) => {
+                        if l.change_type == ChangeType::Context { DiffRowKind::Context }
+                        else { DiffRowKind::Modified }
+                    }
+                    (Some(_), None) => DiffRowKind::Removed,
+                    (None, Some(_)) => DiffRowKind::Added,
+                    (None, None) => DiffRowKind::Context,
+                };
+                GitReviewDiffRow {
+                    kind,
+                    left_num: row.left.as_ref().and_then(|l| l.line_number)
+                        .map(|n| format_line_number(Some(n), gutter_w)),
+                    right_num: row.right.as_ref().and_then(|r| r.line_number)
+                        .map(|n| format_line_number(Some(n), gutter_w)),
+                    left_text: row.left.as_ref().map(|l| l.content.clone()).unwrap_or_default(),
+                    right_text: row.right.as_ref().map(|r| r.content.clone()).unwrap_or_default(),
+                }
+            }
+        }).collect()
+    }
+
     fn handle_context_menu_action(
         &mut self,
         action: crate::context_menu::ContextMenuAction,
@@ -1951,17 +2077,21 @@ impl ApplicationHandler<UserEvent> for App {
                             OverlayCommand::ToggleFileBrowser => {
                                 self.input_mode = crate::file_browser::toggle_file_browser(self.input_mode);
                                 if self.input_mode == InputMode::FileBrowser {
-                                    if self.file_browser_state.is_none() {
-                                        self.file_browser_state = Some(crate::file_browser::FileBrowserState::new());
-                                    }
+                                    let cwd = self.active_pane_cwd();
+                                    let state = self.file_browser_state.get_or_insert_with(
+                                        crate::file_browser::FileBrowserState::new,
+                                    );
+                                    state.open(cwd);
                                 }
                             }
                             OverlayCommand::ToggleGitReview => {
                                 self.input_mode = crate::git_review::toggle_git_review(self.input_mode);
                                 if self.input_mode == InputMode::GitReview {
-                                    if self.git_review_state.is_none() {
-                                        self.git_review_state = Some(crate::git_review::GitReviewState::new());
-                                    }
+                                    let cwd = self.active_pane_cwd();
+                                    let state = self.git_review_state.get_or_insert_with(
+                                        crate::git_review::GitReviewState::new,
+                                    );
+                                    state.open_from_cwd(&cwd);
                                 }
                             }
                         }
@@ -2074,7 +2204,14 @@ impl ApplicationHandler<UserEvent> for App {
                                     *panel = panel.toggle();
                                 }
                             }
-                            _ => {} // Consume all other keys
+                            _ => {
+                                // Dispatch to overlay-specific keyboard handler
+                                if self.input_mode == InputMode::FileBrowser {
+                                    self.handle_file_browser_key(&event.logical_key);
+                                } else {
+                                    self.handle_git_review_key(&event.logical_key);
+                                }
+                            }
                         }
                         if let Some(window) = &self.window {
                             window.request_redraw();
@@ -3034,6 +3171,54 @@ impl ApplicationHandler<UserEvent> for App {
                     (active_idx, panes, dividers)
                 };
 
+                // Pre-compute overlay content data before borrowing renderer
+                let (fb_rows, fb_breadcrumb, fb_preview_name, fb_preview_lines,
+                     fb_preview_truncated, fb_preview_scroll) =
+                    if self.input_mode == InputMode::FileBrowser {
+                        (
+                            self.build_file_browser_rows(),
+                            self.file_browser_state.as_ref()
+                                .and_then(|s| s.breadcrumb.as_ref())
+                                .map(|b| b.display_text())
+                                .unwrap_or_default(),
+                            self.file_browser_state.as_ref()
+                                .and_then(|s| s.preview.as_ref())
+                                .map(|p| p.metadata.file_name.clone()),
+                            self.file_browser_state.as_ref()
+                                .and_then(|s| s.preview.as_ref())
+                                .map(|p| p.lines.clone())
+                                .unwrap_or_default(),
+                            self.file_browser_state.as_ref()
+                                .and_then(|s| s.preview.as_ref())
+                                .map(|p| p.truncated)
+                                .unwrap_or(false),
+                            self.file_browser_state.as_ref()
+                                .map(|s| s.preview_view.scroll_offset)
+                                .unwrap_or(0.0),
+                        )
+                    } else {
+                        (Vec::new(), String::new(), None, Vec::new(), false, 0.0)
+                    };
+
+                let (gr_list_items, gr_diff_header, gr_diff_rows,
+                     gr_error, gr_can_commit, gr_commit_message, gr_diff_scroll) =
+                    if self.input_mode == InputMode::GitReview {
+                        (
+                            self.build_git_review_list_items(),
+                            self.git_review_state.as_ref().and_then(|s| {
+                                let diff = s.current_diff()?;
+                                Some(crate::git_review::diff_view::diff_type_header(&diff.diff_type, &diff.path))
+                            }),
+                            self.build_git_review_diff_rows(),
+                            self.git_review_state.as_ref().and_then(|s| s.error.clone()),
+                            self.git_review_state.as_ref().map(|s| s.can_commit()).unwrap_or(false),
+                            self.git_review_state.as_ref().map(|s| s.commit_message.clone()).unwrap_or_default(),
+                            self.git_review_state.as_ref().map(|s| s.diff_scroll.vertical_offset).unwrap_or(0.0),
+                        )
+                    } else {
+                        (Vec::new(), None, Vec::new(), None, false, String::new(), 0.0)
+                    };
+
                 if let Some(renderer) = &mut self.renderer {
                     let theme_clone = *renderer.theme();
                     let ui_state = UiState {
@@ -3122,6 +3307,21 @@ impl ApplicationHandler<UserEvent> for App {
                         },
                         is_file_browser_icon_hovered: self.hovering_file_browser_icon,
                         is_git_review_icon_hovered: self.hovering_git_review_icon,
+                        // File browser content (pre-computed above)
+                        file_browser_rows: fb_rows,
+                        file_browser_breadcrumb: fb_breadcrumb,
+                        file_browser_preview_name: fb_preview_name,
+                        file_browser_preview_lines: fb_preview_lines,
+                        file_browser_preview_truncated: fb_preview_truncated,
+                        file_browser_preview_scroll: fb_preview_scroll,
+                        // Git review content (pre-computed above)
+                        git_review_list_items: gr_list_items,
+                        git_review_diff_header: gr_diff_header,
+                        git_review_diff_rows: gr_diff_rows,
+                        git_review_error: gr_error,
+                        git_review_can_commit: gr_can_commit,
+                        git_review_commit_message: gr_commit_message,
+                        git_review_diff_scroll: gr_diff_scroll,
                     };
 
                     let mut iced_msgs = Vec::new();
@@ -3312,17 +3512,21 @@ impl ApplicationHandler<UserEvent> for App {
                             UiMessage::ToggleFileBrowser => {
                                 self.input_mode = crate::file_browser::toggle_file_browser(self.input_mode);
                                 if self.input_mode == InputMode::FileBrowser {
-                                    if self.file_browser_state.is_none() {
-                                        self.file_browser_state = Some(crate::file_browser::FileBrowserState::new());
-                                    }
+                                    let cwd = self.active_pane_cwd();
+                                    let state = self.file_browser_state.get_or_insert_with(
+                                        crate::file_browser::FileBrowserState::new,
+                                    );
+                                    state.open(cwd);
                                 }
                             }
                             UiMessage::ToggleGitReview => {
                                 self.input_mode = crate::git_review::toggle_git_review(self.input_mode);
                                 if self.input_mode == InputMode::GitReview {
-                                    if self.git_review_state.is_none() {
-                                        self.git_review_state = Some(crate::git_review::GitReviewState::new());
-                                    }
+                                    let cwd = self.active_pane_cwd();
+                                    let state = self.git_review_state.get_or_insert_with(
+                                        crate::git_review::GitReviewState::new,
+                                    );
+                                    state.open_from_cwd(&cwd);
                                 }
                             }
                             UiMessage::FileBrowserIconEnter => {
@@ -3367,6 +3571,84 @@ impl ApplicationHandler<UserEvent> for App {
                                     _ => {}
                                 }
                             }
+                            // File browser interactions
+                            UiMessage::FileBrowserRowClicked(idx) => {
+                                if let Some(state) = &mut self.file_browser_state {
+                                    if let Some(path) = state.handle_row_click(idx, 500.0) {
+                                        state.load_preview(&path);
+                                    }
+                                }
+                            }
+                            UiMessage::FileBrowserRowHovered(idx) => {
+                                if let Some(state) = &mut self.file_browser_state {
+                                    state.view_state.hovered_row = Some(idx);
+                                }
+                            }
+                            UiMessage::FileBrowserRowUnhovered => {
+                                if let Some(state) = &mut self.file_browser_state {
+                                    state.view_state.hovered_row = None;
+                                }
+                            }
+                            UiMessage::FileBrowserScroll(delta) => {
+                                if let Some(state) = &mut self.file_browser_state {
+                                    let total = state.visible_rows.len();
+                                    state.view_state.scroll_by(delta, total, 500.0);
+                                }
+                            }
+                            // Git review interactions
+                            UiMessage::GitReviewFileClicked(flat_idx) => {
+                                self.handle_git_review_flat_click(flat_idx);
+                            }
+                            UiMessage::GitReviewStageFile => {
+                                if let Some(state) = &mut self.git_review_state {
+                                    if let Some(path) = state.selected_path().map(|p| p.to_path_buf()) {
+                                        state.stage_file(&path);
+                                    }
+                                }
+                            }
+                            UiMessage::GitReviewUnstageFile => {
+                                if let Some(state) = &mut self.git_review_state {
+                                    if let Some(path) = state.selected_path().map(|p| p.to_path_buf()) {
+                                        state.unstage_file(&path);
+                                    }
+                                }
+                            }
+                            UiMessage::GitReviewDiscardFile => {
+                                if let Some(state) = &mut self.git_review_state {
+                                    if let Some(path) = state.selected_path().map(|p| p.to_path_buf()) {
+                                        if state.discard_confirm.as_ref() == Some(&path) {
+                                            state.discard_file(&path);
+                                        } else {
+                                            state.discard_confirm = Some(path);
+                                        }
+                                    }
+                                }
+                            }
+                            UiMessage::GitReviewStageAll => {
+                                if let Some(state) = &mut self.git_review_state {
+                                    state.stage_all();
+                                }
+                            }
+                            UiMessage::GitReviewUnstageAll => {
+                                if let Some(state) = &mut self.git_review_state {
+                                    state.unstage_all();
+                                }
+                            }
+                            UiMessage::GitReviewCommit => {
+                                if let Some(state) = &mut self.git_review_state {
+                                    state.commit();
+                                }
+                            }
+                            UiMessage::GitReviewScroll(delta) => {
+                                if let Some(state) = &mut self.git_review_state {
+                                    state.diff_scroll.scroll_vertical(delta);
+                                }
+                            }
+                            UiMessage::GitReviewCommitMsgChanged(msg) => {
+                                if let Some(state) = &mut self.git_review_state {
+                                    state.commit_message = msg;
+                                }
+                            }
                             UiMessage::Noop => {}
                         }
                     }
@@ -3377,6 +3659,206 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
             _ => {}
+        }
+    }
+}
+
+impl App {
+    /// Handle a click on a flat index in the git review list.
+    fn handle_git_review_flat_click(&mut self, flat_idx: usize) {
+        let state = match &mut self.git_review_state {
+            Some(s) => s,
+            None => return,
+        };
+        let status = match &state.git_status {
+            Some(s) => s,
+            None => return,
+        };
+        use crate::git_review::view::{build_list_items, ListItem};
+        let items = build_list_items(status, &state.section_state, state.selected);
+        if let Some(item) = items.get(flat_idx) {
+            match item {
+                ListItem::SectionHeader { section, .. } => {
+                    match section {
+                        crate::git_review::view::Section::Staged => state.section_state.toggle_staged(),
+                        crate::git_review::view::Section::Changed => state.section_state.toggle_changed(),
+                        crate::git_review::view::Section::Untracked => state.section_state.toggle_untracked(),
+                    }
+                }
+                ListItem::FileEntry { section, index, .. } => {
+                    state.selected = Some((*section, *index));
+                    state.compute_selected_diff();
+                }
+            }
+        }
+    }
+
+    /// Handle keyboard input for the file browser overlay.
+    fn handle_file_browser_key(&mut self, key: &Key) {
+        use crate::file_browser::tree::TreeNavAction;
+        let state = match &mut self.file_browser_state {
+            Some(s) => s,
+            None => return,
+        };
+
+        if state.focused_panel == crate::file_browser::OverlayPanel::Left {
+            match key {
+                Key::Named(NamedKey::ArrowDown) => {
+                    let result = state.handle_nav_action(TreeNavAction::Down, 500.0);
+                    if let Some(path) = result {
+                        state.load_preview(&path);
+                    }
+                }
+                Key::Named(NamedKey::ArrowUp) => {
+                    let result = state.handle_nav_action(TreeNavAction::Up, 500.0);
+                    if let Some(path) = result {
+                        state.load_preview(&path);
+                    }
+                }
+                Key::Named(NamedKey::ArrowRight) | Key::Named(NamedKey::Enter) => {
+                    let result = state.handle_nav_action(TreeNavAction::Right, 500.0);
+                    if let Some(path) = result {
+                        state.load_preview(&path);
+                    }
+                }
+                Key::Named(NamedKey::ArrowLeft) => {
+                    let result = state.handle_nav_action(TreeNavAction::Left, 500.0);
+                    if let Some(path) = result {
+                        state.load_preview(&path);
+                    }
+                }
+                Key::Named(NamedKey::Home) => {
+                    state.view_state.nav.selected_visible_row = Some(0);
+                    state.view_state.ensure_selected_visible(state.visible_rows.len(), 500.0);
+                }
+                Key::Named(NamedKey::End) => {
+                    if !state.visible_rows.is_empty() {
+                        state.view_state.nav.selected_visible_row = Some(state.visible_rows.len() - 1);
+                        state.view_state.ensure_selected_visible(state.visible_rows.len(), 500.0);
+                    }
+                }
+                _ => {} // Consume other keys
+            }
+        } else {
+            // Right panel (preview): scroll
+            match key {
+                Key::Named(NamedKey::ArrowDown) => {
+                    let total = state.preview.as_ref().map(|p| p.lines.len()).unwrap_or(0);
+                    state.preview_view.scroll_by(20.0, total, 500.0);
+                }
+                Key::Named(NamedKey::ArrowUp) => {
+                    let total = state.preview.as_ref().map(|p| p.lines.len()).unwrap_or(0);
+                    state.preview_view.scroll_by(-20.0, total, 500.0);
+                }
+                Key::Named(NamedKey::PageDown) => {
+                    let total = state.preview.as_ref().map(|p| p.lines.len()).unwrap_or(0);
+                    state.preview_view.scroll_by(200.0, total, 500.0);
+                }
+                Key::Named(NamedKey::PageUp) => {
+                    let total = state.preview.as_ref().map(|p| p.lines.len()).unwrap_or(0);
+                    state.preview_view.scroll_by(-200.0, total, 500.0);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Handle keyboard input for the git review overlay.
+    fn handle_git_review_key(&mut self, key: &Key) {
+        let state = match &mut self.git_review_state {
+            Some(s) => s,
+            None => return,
+        };
+
+        if state.focused_panel == crate::file_browser::OverlayPanel::Left {
+            match key {
+                Key::Named(NamedKey::ArrowDown) => {
+                    state.navigate(1);
+                    state.compute_selected_diff();
+                }
+                Key::Named(NamedKey::ArrowUp) => {
+                    state.navigate(-1);
+                    state.compute_selected_diff();
+                }
+                Key::Named(NamedKey::Enter) => {
+                    // Focus diff panel for the selected file
+                    if state.selected.is_some() {
+                        state.compute_selected_diff();
+                        state.focused_panel = crate::file_browser::OverlayPanel::Right;
+                    }
+                }
+                Key::Named(NamedKey::Home) => {
+                    state.navigate_home();
+                    state.compute_selected_diff();
+                }
+                Key::Named(NamedKey::End) => {
+                    state.navigate_end();
+                    state.compute_selected_diff();
+                }
+                Key::Character(ref s) => {
+                    match s.as_str() {
+                        "s" => {
+                            if let Some(path) = state.selected_path().map(|p| p.to_path_buf()) {
+                                state.stage_file(&path);
+                            }
+                        }
+                        "u" => {
+                            if let Some(path) = state.selected_path().map(|p| p.to_path_buf()) {
+                                state.unstage_file(&path);
+                            }
+                        }
+                        "d" => {
+                            if let Some(path) = state.selected_path().map(|p| p.to_path_buf()) {
+                                if state.discard_confirm.as_ref() == Some(&path) {
+                                    // Second press: confirm discard
+                                    state.discard_file(&path);
+                                } else {
+                                    // First press: set confirmation pending
+                                    state.discard_confirm = Some(path);
+                                }
+                            }
+                        }
+                        "S" => {
+                            state.stage_all();
+                        }
+                        "U" => {
+                            state.unstage_all();
+                        }
+                        "c" => {
+                            if state.can_commit() {
+                                state.commit();
+                            }
+                        }
+                        "j" => {
+                            state.navigate(1);
+                            state.compute_selected_diff();
+                        }
+                        "k" => {
+                            state.navigate(-1);
+                            state.compute_selected_diff();
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            // Right panel (diff): scroll
+            match key {
+                Key::Named(NamedKey::ArrowDown) => {
+                    state.diff_scroll.scroll_vertical(20.0);
+                }
+                Key::Named(NamedKey::ArrowUp) => {
+                    state.diff_scroll.scroll_vertical(-20.0);
+                }
+                Key::Named(NamedKey::PageDown) => {
+                    state.diff_scroll.scroll_vertical(200.0);
+                }
+                Key::Named(NamedKey::PageUp) => {
+                    state.diff_scroll.scroll_vertical(-200.0);
+                }
+                _ => {}
+            }
         }
     }
 }
