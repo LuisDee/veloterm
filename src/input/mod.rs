@@ -24,6 +24,10 @@ pub enum InputMode {
     Conductor,
     /// Markdown preview overlay — viewing rendered markdown.
     MarkdownPreview,
+    /// File browser overlay — browsing project files.
+    FileBrowser,
+    /// Git review overlay — reviewing git changes.
+    GitReview,
 }
 
 /// A search-mode command resulting from a key event.
@@ -54,6 +58,38 @@ pub fn should_open_search(
         return false;
     }
     matches!(logical_key, Key::Character(s) if s.to_lowercase() == "f")
+}
+
+/// An overlay command triggered by a keybinding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverlayCommand {
+    ToggleFileBrowser,
+    ToggleGitReview,
+}
+
+/// Check if a key event matches an overlay toggle shortcut.
+///
+/// - Ctrl+E (Ctrl only, no Shift) -> ToggleFileBrowser
+/// - Ctrl+G (Ctrl only, no Shift) -> ToggleGitReview
+pub fn match_overlay_command(
+    logical_key: &Key,
+    modifiers: ModifiersState,
+) -> Option<OverlayCommand> {
+    // Only Ctrl held, no Shift (to avoid conflict with Ctrl+Shift+E = SplitHorizontal)
+    if !modifiers.control_key() || modifiers.shift_key() {
+        return None;
+    }
+    match logical_key {
+        Key::Character(s) => {
+            let lower = s.to_lowercase();
+            match lower.as_str() {
+                "e" => Some(OverlayCommand::ToggleFileBrowser),
+                "g" => Some(OverlayCommand::ToggleGitReview),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Process a key event while in Search mode.
@@ -1336,5 +1372,53 @@ mod tests {
     fn app_cmd_clear_scrollback_no_match_without_modifier() {
         let result = match_app_command(&Key::Character("k".into()), no_mods());
         assert_eq!(result, None);
+    }
+
+    // ── Overlay command matching ────────────────────────────────────
+
+    #[test]
+    fn overlay_cmd_ctrl_e_toggles_file_browser() {
+        let result = match_overlay_command(&Key::Character("e".into()), ModifiersState::CONTROL);
+        assert_eq!(result, Some(OverlayCommand::ToggleFileBrowser));
+    }
+
+    #[test]
+    fn overlay_cmd_ctrl_g_toggles_git_review() {
+        let result = match_overlay_command(&Key::Character("g".into()), ModifiersState::CONTROL);
+        assert_eq!(result, Some(OverlayCommand::ToggleGitReview));
+    }
+
+    #[test]
+    fn overlay_cmd_ctrl_shift_e_does_not_match() {
+        let result = match_overlay_command(&Key::Character("E".into()), ctrl_shift());
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn overlay_cmd_ctrl_shift_g_does_not_match() {
+        let result = match_overlay_command(&Key::Character("G".into()), ctrl_shift());
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn overlay_cmd_no_modifier_does_not_match() {
+        let result = match_overlay_command(&Key::Character("e".into()), no_mods());
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn overlay_cmd_ctrl_only_other_keys_no_match() {
+        assert_eq!(match_overlay_command(&Key::Character("x".into()), ModifiersState::CONTROL), None);
+        assert_eq!(match_overlay_command(&Key::Character("a".into()), ModifiersState::CONTROL), None);
+    }
+
+    #[test]
+    fn input_mode_has_file_browser_variant() {
+        assert_ne!(InputMode::FileBrowser, InputMode::Normal);
+    }
+
+    #[test]
+    fn input_mode_has_git_review_variant() {
+        assert_ne!(InputMode::GitReview, InputMode::Normal);
     }
 }

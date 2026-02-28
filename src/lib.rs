@@ -2,6 +2,8 @@ pub mod command_palette;
 pub mod conductor;
 pub mod config;
 pub mod context_menu;
+pub mod file_browser;
+pub mod git_review;
 pub mod header_bar;
 pub mod hotkey;
 pub mod input;
