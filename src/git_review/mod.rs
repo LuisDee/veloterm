@@ -2,6 +2,7 @@
 
 pub mod operations;
 pub mod status;
+pub mod view;
 
 use crate::file_browser::OverlayPanel;
 use crate::input::InputMode;
