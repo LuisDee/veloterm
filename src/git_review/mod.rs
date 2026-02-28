@@ -1,5 +1,7 @@
 // Git review overlay — state management for the git change review panel.
 
+pub mod status;
+
 use crate::file_browser::OverlayPanel;
 use crate::input::InputMode;
 

@@ -68,6 +68,9 @@ libc = "0.2.180"
 # Global hotkey registration
 global-hotkey = "0.6"
 
+# Git operations
+git2 = "0.19"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.23"
 core-text = "20.1"
