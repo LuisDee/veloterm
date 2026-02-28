@@ -2,6 +2,7 @@
 
 pub mod diff;
 pub mod diff_view;
+pub mod hunk_staging;
 pub mod hunk_state;
 pub mod inline_diff;
 pub mod operations;
