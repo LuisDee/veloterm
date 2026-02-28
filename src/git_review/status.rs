@@ -10,6 +10,7 @@ pub enum FileStatus {
     Deleted,
     Renamed { from: PathBuf },
     Untracked,
+    Conflicted,
 }
 
 impl FileStatus {
@@ -21,6 +22,7 @@ impl FileStatus {
             Self::Deleted => "D",
             Self::Renamed { .. } => "R",
             Self::Untracked => "?",
+            Self::Conflicted => "C",
         }
     }
 }
@@ -32,6 +34,7 @@ pub struct StatusEntry {
     pub status: FileStatus,
     pub display_name: String,
     pub display_dir: Option<String>,
+    pub is_submodule: bool,
 }
 
 impl StatusEntry {
@@ -50,6 +53,7 @@ impl StatusEntry {
             status,
             display_name,
             display_dir,
+            is_submodule: false,
         }
     }
 }
@@ -117,6 +121,11 @@ impl GitStatus {
 pub fn categorize_status(
     flags: git2::Status,
 ) -> (Option<FileStatus>, Option<FileStatus>) {
+    // Conflicted files are special — they appear in both index and workdir
+    if flags.contains(git2::Status::CONFLICTED) {
+        return (None, Some(FileStatus::Conflicted));
+    }
+
     let index = if flags.contains(git2::Status::INDEX_NEW) {
         Some(FileStatus::Added)
     } else if flags.contains(git2::Status::INDEX_MODIFIED) {
@@ -176,6 +185,38 @@ impl SectionState {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    // -- FileStatus::Conflicted tests --
+
+    #[test]
+    fn file_status_conflicted_label() {
+        assert_eq!(FileStatus::Conflicted.label(), "C");
+    }
+
+    #[test]
+    fn file_status_conflicted_ne_modified() {
+        assert_ne!(FileStatus::Conflicted, FileStatus::Modified);
+    }
+
+    #[test]
+    fn status_entry_is_submodule_default_false() {
+        let entry = StatusEntry::from_path(Path::new("lib/sub"), FileStatus::Modified);
+        assert!(!entry.is_submodule);
+    }
+
+    #[test]
+    fn status_entry_submodule_flag() {
+        let mut entry = StatusEntry::from_path(Path::new("lib/sub"), FileStatus::Modified);
+        entry.is_submodule = true;
+        assert!(entry.is_submodule);
+    }
+
+    #[test]
+    fn categorize_conflicted_status() {
+        let (idx, wd) = categorize_status(git2::Status::CONFLICTED);
+        assert_eq!(idx, None);
+        assert_eq!(wd, Some(FileStatus::Conflicted));
+    }
 
     // -- FileStatus label tests --
 

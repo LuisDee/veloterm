@@ -90,6 +90,18 @@ impl GitReviewState {
         }
     }
 
+    /// Reset cached state while preserving layout settings.
+    /// Clears: cached_diff, commit_message, selected, error, discard_confirm, diff_scroll
+    /// Preserves: split_ratio, focused_panel, repo_path
+    pub fn reset(&mut self) {
+        self.cached_diff = None;
+        self.commit_message.clear();
+        self.selected = None;
+        self.error = None;
+        self.discard_confirm = None;
+        self.diff_scroll = DiffScrollState::new();
+    }
+
     /// Refresh the git status from the stored repo path.
     pub fn refresh_status(&mut self) {
         let repo_path = match &self.repo_path {
@@ -307,6 +319,33 @@ impl GitReviewState {
     /// Invalidate the diff cache (e.g. after staging/unstaging).
     pub fn invalidate_diff_cache(&mut self) {
         self.cached_diff = None;
+    }
+
+    /// Navigate to the first entry.
+    pub fn navigate_home(&mut self) {
+        if let Some(status) = &self.git_status {
+            // Find the first entry in any non-empty section
+            if !status.staged.is_empty() {
+                self.selected = Some((Section::Staged, 0));
+            } else if !status.changed.is_empty() {
+                self.selected = Some((Section::Changed, 0));
+            } else if !status.untracked.is_empty() {
+                self.selected = Some((Section::Untracked, 0));
+            }
+        }
+    }
+
+    /// Navigate to the last entry.
+    pub fn navigate_end(&mut self) {
+        if let Some(status) = &self.git_status {
+            if !status.untracked.is_empty() {
+                self.selected = Some((Section::Untracked, status.untracked.len() - 1));
+            } else if !status.changed.is_empty() {
+                self.selected = Some((Section::Changed, status.changed.len() - 1));
+            } else if !status.staged.is_empty() {
+                self.selected = Some((Section::Staged, status.staged.len() - 1));
+            }
+        }
     }
 
     /// Get the path of the currently selected file, if any.
@@ -780,6 +819,94 @@ mod tests {
     fn current_diff_none_when_no_selection() {
         let state = GitReviewState::new();
         assert!(state.current_diff().is_none());
+    }
+
+    // -- Empty repo handling --
+
+    #[test]
+    fn empty_repo_shows_message_not_error() {
+        // A git init repo with no commits should not produce an error
+        let (dir, _repo) = setup_test_repo();
+        let mut state = GitReviewState::new();
+        state.open_from_cwd(dir.path());
+        assert!(state.repo_path.is_some());
+        assert!(state.error.is_none());
+        let status = state.git_status.as_ref().unwrap();
+        assert!(status.is_empty());
+    }
+
+    // -- reset() tests --
+
+    #[test]
+    fn reset_clears_cached_data() {
+        let mut state = GitReviewState::new();
+        state.cached_diff = Some(CachedDiff {
+            path: PathBuf::from("test.rs"),
+            section: Section::Changed,
+            diff: diff::FileDiff {
+                path: "test.rs".to_string(),
+                hunks: vec![],
+                diff_type: diff::DiffType::Modified,
+            },
+        });
+        state.commit_message = "wip".to_string();
+        state.selected = Some((Section::Changed, 0));
+        state.error = Some("something".to_string());
+
+        state.reset();
+
+        assert!(state.cached_diff.is_none());
+        assert!(state.commit_message.is_empty());
+        assert!(state.selected.is_none());
+        assert!(state.error.is_none());
+    }
+
+    #[test]
+    fn reset_preserves_layout() {
+        let mut state = GitReviewState::new();
+        state.split_ratio = 0.3;
+        state.focused_panel = OverlayPanel::Right;
+        state.repo_path = Some(PathBuf::from("/tmp/repo"));
+
+        state.reset();
+
+        assert!((state.split_ratio - 0.3).abs() < f32::EPSILON);
+        assert_eq!(state.focused_panel, OverlayPanel::Right);
+        assert!(state.repo_path.is_some());
+    }
+
+    // -- navigate_home / navigate_end --
+
+    #[test]
+    fn navigate_home_selects_first() {
+        let (dir, _repo) = setup_test_repo();
+        let mut state = GitReviewState::new();
+        state.open_from_cwd(dir.path());
+
+        std::fs::write(dir.path().join("a.txt"), "a").unwrap();
+        std::fs::write(dir.path().join("z.txt"), "z").unwrap();
+        state.refresh_status();
+
+        // Navigate to some entry first
+        state.navigate(1);
+        state.navigate(1);
+
+        state.navigate_home();
+        assert_eq!(state.selected, Some((Section::Untracked, 0)));
+    }
+
+    #[test]
+    fn navigate_end_selects_last() {
+        let (dir, _repo) = setup_test_repo();
+        let mut state = GitReviewState::new();
+        state.open_from_cwd(dir.path());
+
+        std::fs::write(dir.path().join("a.txt"), "a").unwrap();
+        std::fs::write(dir.path().join("z.txt"), "z").unwrap();
+        state.refresh_status();
+
+        state.navigate_end();
+        assert_eq!(state.selected, Some((Section::Untracked, 1)));
     }
 
     #[test]
