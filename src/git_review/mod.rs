@@ -2,6 +2,7 @@
 
 pub mod diff;
 pub mod diff_view;
+pub mod inline_diff;
 pub mod operations;
 pub mod status;
 pub mod view;
