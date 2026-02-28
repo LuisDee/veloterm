@@ -1,6 +1,7 @@
 // File browser overlay — state management for the project file browser.
 
 pub mod tree;
+pub mod view;
 
 use crate::input::InputMode;
 
