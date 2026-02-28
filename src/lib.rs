@@ -17,6 +17,7 @@ pub mod scroll;
 pub mod search;
 pub mod session;
 pub mod shell_integration;
+pub mod split_panel;
 pub mod status_bar;
 pub mod tab;
 pub mod terminal;
