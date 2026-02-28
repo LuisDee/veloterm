@@ -151,21 +151,11 @@ pub fn categorize_status(
 }
 
 /// Section collapse state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SectionState {
     pub staged_collapsed: bool,
     pub changed_collapsed: bool,
     pub untracked_collapsed: bool,
-}
-
-impl Default for SectionState {
-    fn default() -> Self {
-        Self {
-            staged_collapsed: false,
-            changed_collapsed: false,
-            untracked_collapsed: false,
-        }
-    }
 }
 
 impl SectionState {
