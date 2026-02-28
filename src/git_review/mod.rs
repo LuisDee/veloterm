@@ -1,6 +1,7 @@
 // Git review overlay — state management for the git change review panel.
 
 pub mod diff;
+pub mod diff_view;
 pub mod operations;
 pub mod status;
 pub mod view;
