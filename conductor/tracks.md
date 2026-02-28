@@ -138,3 +138,39 @@ _Link: [./conductor/tracks/26_ui_chrome_redesign_20260209/](./conductor/tracks/2
 
 ### [x] Track 27: Linux CentOS 9 Port (L)
 _Link: [./conductor/tracks/27_linux_centos9_20260224/](./conductor/tracks/27_linux_centos9_20260224/)_
+
+---
+
+## Wave 15 — Overlay Foundation (COMPLETE)
+
+### [x] Track 28: Overlay Foundation (M)
+_Link: [./conductor/tracks/28_overlay_foundation_20260228/](./conductor/tracks/28_overlay_foundation_20260228/)_
+
+---
+
+## Wave 16 — Overlay Panes (COMPLETE)
+
+### [x] Track 29: File Browser Navigation (M)
+_Link: [./conductor/tracks/29_file_browser_nav_20260228/](./conductor/tracks/29_file_browser_nav_20260228/)_
+
+### [x] Track 30: File Browser Viewer (M)
+_Link: [./conductor/tracks/30_file_browser_viewer_20260228/](./conductor/tracks/30_file_browser_viewer_20260228/)_
+
+### [x] Track 31: File Browser Polish (S)
+_Link: [./conductor/tracks/31_file_browser_polish_20260228/](./conductor/tracks/31_file_browser_polish_20260228/)_
+
+### [x] Track 32: Git Review Files (M)
+_Link: [./conductor/tracks/32_git_review_files_20260228/](./conductor/tracks/32_git_review_files_20260228/)_
+
+### [x] Track 33: Git Review Diff (M)
+_Link: [./conductor/tracks/33_git_review_diff_20260228/](./conductor/tracks/33_git_review_diff_20260228/)_
+
+### [x] Track 34: Git Review Polish (S)
+_Link: [./conductor/tracks/34_git_review_polish_20260228/](./conductor/tracks/34_git_review_polish_20260228/)_
+
+---
+
+## Wave 17 — Overlay Final Polish (COMPLETE)
+
+### [x] Track 35: Overlay Final Polish (S)
+_Link: [./conductor/tracks/35_overlay_final_polish_20260228/](./conductor/tracks/35_overlay_final_polish_20260228/)_
