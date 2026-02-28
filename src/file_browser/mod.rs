@@ -1,5 +1,6 @@
 // File browser overlay — state management for the project file browser.
 
+pub mod actions;
 pub mod git_status;
 pub mod preview;
 pub mod search;
