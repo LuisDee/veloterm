@@ -165,6 +165,9 @@ impl PtySession {
         cmd.env("COLORTERM", "truecolor");
         // Identify the terminal emulator to shell integration scripts (Powerlevel10k, etc.)
         cmd.env("TERM_PROGRAM", "VeloTerm");
+        // Remove RUST_LOG so it doesn't leak into the user's shell and cause
+        // debug output from other Rust tools (fnm, ripgrep, etc.)
+        cmd.env_remove("RUST_LOG");
         if let Some(dir) = cwd {
             cmd.cwd(dir);
         }
