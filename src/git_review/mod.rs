@@ -2,9 +2,11 @@
 
 pub mod diff;
 pub mod diff_view;
+pub mod hunk_state;
 pub mod inline_diff;
 pub mod operations;
 pub mod status;
+pub mod syntax_highlight;
 pub mod view;
 
 use std::path::{Path, PathBuf};
