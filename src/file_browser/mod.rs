@@ -1,5 +1,7 @@
 // File browser overlay — state management for the project file browser.
 
+pub mod tree;
+
 use crate::input::InputMode;
 
 /// Which panel has focus in a split overlay.
