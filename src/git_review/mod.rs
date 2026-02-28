@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 use crate::file_browser::OverlayPanel;
 use crate::input::InputMode;
 
-use self::status::{GitStatus, SectionState};
+use self::diff::FileDiff;
+use self::diff_view::DiffScrollState;
+use self::status::{FileStatus, GitStatus, SectionState};
 use self::view::Section;
 
 /// State for the Git Review overlay.
@@ -34,6 +36,21 @@ pub struct GitReviewState {
     pub error: Option<String>,
     /// Whether a discard confirmation is pending, and for which path.
     pub discard_confirm: Option<PathBuf>,
+    /// Cached diff for the currently selected file.
+    pub cached_diff: Option<CachedDiff>,
+    /// Scroll state for the diff view.
+    pub diff_scroll: DiffScrollState,
+}
+
+/// A cached diff tied to a specific file path and section.
+#[derive(Debug, Clone)]
+pub struct CachedDiff {
+    /// The path this diff was computed for.
+    pub path: PathBuf,
+    /// Which section the file was in when the diff was computed.
+    pub section: Section,
+    /// The computed diff result.
+    pub diff: FileDiff,
 }
 
 impl GitReviewState {
@@ -48,6 +65,8 @@ impl GitReviewState {
             repo_path: None,
             error: None,
             discard_confirm: None,
+            cached_diff: None,
+            diff_scroll: DiffScrollState::new(),
         }
     }
 
@@ -99,6 +118,7 @@ impl GitReviewState {
                     self.error = Some(format!("Stage failed: {}", e));
                     return;
                 }
+                self.invalidate_diff_cache();
                 self.refresh_status_from_repo(&repo);
             }
         }
@@ -112,6 +132,7 @@ impl GitReviewState {
                     self.error = Some(format!("Unstage failed: {}", e));
                     return;
                 }
+                self.invalidate_diff_cache();
                 self.refresh_status_from_repo(&repo);
             }
         }
@@ -126,6 +147,7 @@ impl GitReviewState {
                     return;
                 }
                 self.discard_confirm = None;
+                self.invalidate_diff_cache();
                 self.refresh_status_from_repo(&repo);
             }
         }
@@ -139,6 +161,7 @@ impl GitReviewState {
                     self.error = Some(format!("Stage all failed: {}", e));
                     return;
                 }
+                self.invalidate_diff_cache();
                 self.refresh_status_from_repo(&repo);
             }
         }
@@ -152,6 +175,7 @@ impl GitReviewState {
                     self.error = Some(format!("Unstage all failed: {}", e));
                     return;
                 }
+                self.invalidate_diff_cache();
                 self.refresh_status_from_repo(&repo);
             }
         }
@@ -181,6 +205,7 @@ impl GitReviewState {
                     Ok(_) => {
                         self.commit_message.clear();
                         self.error = None;
+                        self.invalidate_diff_cache();
                         self.refresh_status_from_repo(&repo);
                         return true;
                     }
@@ -209,6 +234,75 @@ impl GitReviewState {
             self.selected =
                 view::navigate_selection(status, &self.section_state, self.selected, direction);
         }
+    }
+
+    /// Compute and cache the diff for the currently selected file.
+    /// Returns a reference to the cached diff, or None if no file is selected.
+    pub fn compute_selected_diff(&mut self) -> Option<&FileDiff> {
+        let (section, index) = self.selected?;
+        let status = self.git_status.as_ref()?;
+        let entry = match section {
+            Section::Staged => status.staged.get(index),
+            Section::Changed => status.changed.get(index),
+            Section::Untracked => status.untracked.get(index),
+        }?;
+
+        let path = entry.path.clone();
+        let file_status = entry.status.clone();
+
+        // Check if cache is still valid
+        if let Some(cached) = &self.cached_diff {
+            if cached.path == path && cached.section == section {
+                return self.cached_diff.as_ref().map(|c| &c.diff);
+            }
+        }
+
+        // Compute new diff
+        let repo_path = self.repo_path.as_ref()?;
+        let repo = git2::Repository::open(repo_path).ok()?;
+
+        let staged = section == Section::Staged;
+        let untracked = file_status == FileStatus::Untracked;
+
+        match diff::compute_diff(&repo, &path, staged, untracked) {
+            Ok(file_diff) => {
+                self.cached_diff = Some(CachedDiff {
+                    path,
+                    section,
+                    diff: file_diff,
+                });
+                self.diff_scroll.reset();
+                self.cached_diff.as_ref().map(|c| &c.diff)
+            }
+            Err(e) => {
+                self.error = Some(format!("Diff failed: {}", e));
+                self.cached_diff = None;
+                None
+            }
+        }
+    }
+
+    /// Get the cached diff if available and still valid for the current selection.
+    pub fn current_diff(&self) -> Option<&FileDiff> {
+        let (section, index) = self.selected?;
+        let status = self.git_status.as_ref()?;
+        let entry = match section {
+            Section::Staged => status.staged.get(index),
+            Section::Changed => status.changed.get(index),
+            Section::Untracked => status.untracked.get(index),
+        }?;
+
+        let cached = self.cached_diff.as_ref()?;
+        if cached.path == entry.path && cached.section == section {
+            Some(&cached.diff)
+        } else {
+            None
+        }
+    }
+
+    /// Invalidate the diff cache (e.g. after staging/unstaging).
+    pub fn invalidate_diff_cache(&mut self) {
+        self.cached_diff = None;
     }
 
     /// Get the path of the currently selected file, if any.
@@ -249,6 +343,7 @@ mod tests {
         assert!(state.error.is_none());
         assert!(state.selected.is_none());
         assert!(state.discard_confirm.is_none());
+        assert!(state.cached_diff.is_none());
     }
 
     #[test]
@@ -484,5 +579,236 @@ mod tests {
         // Cancel
         state.discard_confirm = None;
         assert!(state.discard_confirm.is_none());
+    }
+
+    // -- Diff integration tests --
+
+    #[test]
+    fn compute_diff_for_untracked_file() {
+        let (dir, _repo) = setup_test_repo();
+        let mut state = GitReviewState::new();
+        state.open_from_cwd(dir.path());
+
+        std::fs::write(dir.path().join("new.txt"), "hello\nworld").unwrap();
+        state.refresh_status();
+
+        // Select the untracked file
+        state.navigate(1);
+        assert_eq!(state.selected, Some((Section::Untracked, 0)));
+
+        // Compute diff
+        let diff = state.compute_selected_diff();
+        assert!(diff.is_some());
+        let diff = diff.unwrap();
+        assert_eq!(diff.diff_type, diff::DiffType::Added);
+        assert!(!diff.hunks.is_empty());
+    }
+
+    #[test]
+    fn compute_diff_for_modified_file() {
+        let (dir, repo) = setup_test_repo();
+        make_initial_commit(dir.path(), &repo);
+
+        let mut state = GitReviewState::new();
+        state.open_from_cwd(dir.path());
+
+        std::fs::write(dir.path().join("initial.txt"), "changed content").unwrap();
+        state.refresh_status();
+
+        state.navigate(1);
+        assert_eq!(state.selected, Some((Section::Changed, 0)));
+
+        let diff = state.compute_selected_diff();
+        assert!(diff.is_some());
+        assert_eq!(diff.unwrap().diff_type, diff::DiffType::Modified);
+    }
+
+    #[test]
+    fn compute_diff_for_staged_file() {
+        let (dir, repo) = setup_test_repo();
+        make_initial_commit(dir.path(), &repo);
+
+        let mut state = GitReviewState::new();
+        state.open_from_cwd(dir.path());
+
+        std::fs::write(dir.path().join("initial.txt"), "staged change").unwrap();
+        state.stage_file(Path::new("initial.txt"));
+
+        state.navigate(1);
+        assert_eq!(state.selected, Some((Section::Staged, 0)));
+
+        let diff = state.compute_selected_diff();
+        assert!(diff.is_some());
+        assert_eq!(diff.unwrap().diff_type, diff::DiffType::Modified);
+    }
+
+    #[test]
+    fn diff_cache_hit() {
+        let (dir, _repo) = setup_test_repo();
+        let mut state = GitReviewState::new();
+        state.open_from_cwd(dir.path());
+
+        std::fs::write(dir.path().join("file.txt"), "content").unwrap();
+        state.refresh_status();
+        state.navigate(1);
+
+        // First compute
+        state.compute_selected_diff();
+        assert!(state.cached_diff.is_some());
+
+        // Second call should use cache (same path and section)
+        let diff = state.current_diff();
+        assert!(diff.is_some());
+    }
+
+    #[test]
+    fn diff_cache_invalidated_on_stage() {
+        let (dir, repo) = setup_test_repo();
+        make_initial_commit(dir.path(), &repo);
+
+        let mut state = GitReviewState::new();
+        state.open_from_cwd(dir.path());
+
+        std::fs::write(dir.path().join("initial.txt"), "modified").unwrap();
+        state.refresh_status();
+        state.navigate(1);
+        state.compute_selected_diff();
+        assert!(state.cached_diff.is_some());
+
+        // Stage invalidates cache
+        state.stage_file(Path::new("initial.txt"));
+        assert!(state.cached_diff.is_none());
+    }
+
+    #[test]
+    fn diff_cache_invalidated_on_unstage() {
+        let (dir, repo) = setup_test_repo();
+        make_initial_commit(dir.path(), &repo);
+
+        let mut state = GitReviewState::new();
+        state.open_from_cwd(dir.path());
+
+        std::fs::write(dir.path().join("initial.txt"), "modified").unwrap();
+        state.stage_file(Path::new("initial.txt"));
+        state.navigate(1);
+        state.compute_selected_diff();
+        assert!(state.cached_diff.is_some());
+
+        state.unstage_file(Path::new("initial.txt"));
+        assert!(state.cached_diff.is_none());
+    }
+
+    #[test]
+    fn diff_cache_invalidated_on_discard() {
+        let (dir, repo) = setup_test_repo();
+        make_initial_commit(dir.path(), &repo);
+
+        let mut state = GitReviewState::new();
+        state.open_from_cwd(dir.path());
+
+        std::fs::write(dir.path().join("initial.txt"), "modified").unwrap();
+        state.refresh_status();
+        state.navigate(1);
+        state.compute_selected_diff();
+        assert!(state.cached_diff.is_some());
+
+        state.discard_file(Path::new("initial.txt"));
+        assert!(state.cached_diff.is_none());
+    }
+
+    #[test]
+    fn diff_cache_invalidated_on_commit() {
+        let (dir, repo) = setup_test_repo();
+        make_initial_commit(dir.path(), &repo);
+
+        let mut state = GitReviewState::new();
+        state.open_from_cwd(dir.path());
+
+        // Modify and stage a tracked file
+        std::fs::write(dir.path().join("initial.txt"), "modified").unwrap();
+        state.stage_file(Path::new("initial.txt"));
+
+        // Select the staged file and compute its diff
+        state.navigate(1);
+        assert_eq!(state.selected, Some((Section::Staged, 0)));
+        state.compute_selected_diff();
+        assert!(state.cached_diff.is_some());
+
+        // Commit should invalidate cache
+        state.commit_message = "test commit".to_string();
+        state.commit();
+        assert!(state.cached_diff.is_none());
+    }
+
+    #[test]
+    fn diff_cache_miss_on_selection_change() {
+        let (dir, _repo) = setup_test_repo();
+        let mut state = GitReviewState::new();
+        state.open_from_cwd(dir.path());
+
+        std::fs::write(dir.path().join("a.txt"), "aaa").unwrap();
+        std::fs::write(dir.path().join("b.txt"), "bbb").unwrap();
+        state.refresh_status();
+
+        // Select first file, compute diff
+        state.navigate(1);
+        state.compute_selected_diff();
+        assert!(state.cached_diff.is_some());
+        assert_eq!(
+            state.cached_diff.as_ref().unwrap().path,
+            PathBuf::from("a.txt")
+        );
+
+        // Select second file — cache should miss
+        state.navigate(1);
+        let diff = state.current_diff();
+        assert!(diff.is_none()); // Cache miss
+
+        // Compute for new file
+        state.compute_selected_diff();
+        assert_eq!(
+            state.cached_diff.as_ref().unwrap().path,
+            PathBuf::from("b.txt")
+        );
+    }
+
+    #[test]
+    fn current_diff_none_when_no_selection() {
+        let state = GitReviewState::new();
+        assert!(state.current_diff().is_none());
+    }
+
+    #[test]
+    fn diff_scroll_resets_on_new_diff() {
+        let (dir, _repo) = setup_test_repo();
+        let mut state = GitReviewState::new();
+        state.open_from_cwd(dir.path());
+
+        std::fs::write(dir.path().join("file.txt"), "line1\nline2\nline3").unwrap();
+        state.refresh_status();
+        state.navigate(1);
+
+        // Scroll down, then compute diff
+        state.diff_scroll.scroll_vertical(100.0);
+        state.compute_selected_diff();
+        // After computing a new diff, scroll should reset
+        assert!((state.diff_scroll.vertical_offset - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn invalidate_diff_cache_explicit() {
+        let mut state = GitReviewState::new();
+        state.cached_diff = Some(CachedDiff {
+            path: PathBuf::from("test.rs"),
+            section: Section::Changed,
+            diff: diff::FileDiff {
+                path: "test.rs".to_string(),
+                hunks: vec![],
+                diff_type: diff::DiffType::Modified,
+            },
+        });
+        assert!(state.cached_diff.is_some());
+        state.invalidate_diff_cache();
+        assert!(state.cached_diff.is_none());
     }
 }
