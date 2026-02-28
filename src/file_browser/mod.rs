@@ -2,6 +2,7 @@
 
 pub mod tree;
 pub mod view;
+pub mod watcher;
 
 use crate::input::InputMode;
 use std::path::PathBuf;
