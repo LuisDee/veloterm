@@ -137,6 +137,18 @@ impl FileBrowserState {
         self.open(path);
     }
 
+    /// Reset state while preserving layout and syntax resources.
+    /// Clears: file_tree, visible_rows, view_state, breadcrumb, preview, preview_view
+    /// Preserves: split_ratio, focused_panel, syntax_set, theme_set
+    pub fn reset(&mut self) {
+        self.file_tree = None;
+        self.visible_rows.clear();
+        self.view_state = FileTreeViewState::new();
+        self.breadcrumb = None;
+        self.preview = None;
+        self.preview_view = PreviewViewState::new();
+    }
+
     /// Load a file preview for the given path.
     /// Resets preview scroll state.
     pub fn load_preview(&mut self, path: &std::path::Path) {
@@ -341,6 +353,38 @@ mod tests {
         let bc = state.breadcrumb.as_ref().unwrap();
         assert_eq!(bc.segments.last().unwrap().0, "subdir");
         assert!(state.visible_rows.len() >= 2); // subdir root + inner.txt
+    }
+
+    // -- reset() tests --
+
+    #[test]
+    fn reset_clears_tree_and_preview() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::write(root.join("test.txt"), "hello").unwrap();
+
+        let mut state = FileBrowserState::new();
+        state.open(root);
+        assert!(state.file_tree.is_some());
+        assert!(!state.visible_rows.is_empty());
+
+        state.reset();
+        assert!(state.file_tree.is_none());
+        assert!(state.visible_rows.is_empty());
+        assert!(state.breadcrumb.is_none());
+        assert!(state.preview.is_none());
+    }
+
+    #[test]
+    fn reset_preserves_layout() {
+        let mut state = FileBrowserState::new();
+        state.split_ratio = 0.7;
+        state.focused_panel = OverlayPanel::Right;
+
+        state.reset();
+
+        assert!((state.split_ratio - 0.7).abs() < f32::EPSILON);
+        assert_eq!(state.focused_panel, OverlayPanel::Right);
     }
 
     #[test]

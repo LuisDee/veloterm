@@ -44,6 +44,7 @@ pub fn row_icon(row: &VisibleRow) -> &'static str {
             }
         }
         NodeType::File { extension, .. } => file_icon(extension.as_deref()),
+        NodeType::Symlink { .. } => "\u{1F517}", // link symbol
     }
 }
 

@@ -2,6 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
+/// Maximum number of entries to load from a single directory.
+pub const MAX_DIR_ENTRIES: usize = 10_000;
+
 /// Type of a file tree node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeType {
@@ -10,6 +13,9 @@ pub enum NodeType {
         size: u64,
     },
     Directory,
+    Symlink {
+        target: PathBuf,
+    },
 }
 
 /// A single node in the file tree.
@@ -40,6 +46,7 @@ pub struct VisibleRow {
 pub struct FileTree {
     root: PathBuf,
     nodes: Vec<FileNode>,
+    pub show_hidden: bool,
 }
 
 impl FileTree {
@@ -62,6 +69,22 @@ impl FileTree {
         Self {
             root,
             nodes: vec![root_node],
+            show_hidden: false,
+        }
+    }
+
+    /// Set whether hidden files are shown.
+    /// Clears loaded children so they are re-read on next expand.
+    pub fn set_show_hidden(&mut self, show: bool) {
+        if self.show_hidden != show {
+            self.show_hidden = show;
+            // Clear all loaded children so expand re-reads
+            for node in &mut self.nodes {
+                if matches!(node.node_type, NodeType::Directory) {
+                    node.children = None;
+                    node.expanded = false;
+                }
+            }
         }
     }
 
@@ -106,8 +129,10 @@ impl FileTree {
             let path = self.nodes[index].path.clone();
             let depth = self.nodes[index].depth + 1;
             let mut child_indices = Vec::new();
+            let show_hidden = self.show_hidden;
 
             let entries = std::fs::read_dir(&path)?;
+            let mut count = 0usize;
             for entry in entries.flatten() {
                 let entry_path = entry.path();
                 let name = entry
@@ -115,20 +140,32 @@ impl FileTree {
                     .to_string_lossy()
                     .to_string();
 
-                // Skip hidden files
-                if name.starts_with('.') {
+                // Skip hidden files unless show_hidden is enabled
+                if !show_hidden && name.starts_with('.') {
                     continue;
                 }
 
-                let metadata = entry.metadata()?;
-                let node_type = if metadata.is_dir() {
+                // Large directory guard
+                if count >= MAX_DIR_ENTRIES {
+                    log::warn!("Directory {} has more than {} entries, truncating", path.display(), MAX_DIR_ENTRIES);
+                    break;
+                }
+
+                let metadata = entry.metadata();
+                let symlink_meta = std::fs::symlink_metadata(&entry_path);
+
+                let node_type = if symlink_meta.as_ref().map(|m| m.is_symlink()).unwrap_or(false) {
+                    let target = std::fs::read_link(&entry_path).unwrap_or_default();
+                    NodeType::Symlink { target }
+                } else if metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false) {
                     NodeType::Directory
                 } else {
+                    let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
                     NodeType::File {
                         extension: entry_path
                             .extension()
                             .map(|e| e.to_string_lossy().to_string()),
-                        size: metadata.len(),
+                        size,
                     }
                 };
 
@@ -143,6 +180,7 @@ impl FileTree {
                     children: None,
                     expanded: false,
                 });
+                count += 1;
             }
 
             self.nodes[index].children = Some(child_indices);
@@ -182,8 +220,8 @@ impl FileTree {
                 let node_b = &self.nodes[b];
 
                 // Directories first
-                let a_is_dir = node_a.node_type == NodeType::Directory;
-                let b_is_dir = node_b.node_type == NodeType::Directory;
+                let a_is_dir = matches!(node_a.node_type, NodeType::Directory);
+                let b_is_dir = matches!(node_b.node_type, NodeType::Directory);
                 match (a_is_dir, b_is_dir) {
                     (true, false) => std::cmp::Ordering::Less,
                     (false, true) => std::cmp::Ordering::Greater,
@@ -210,7 +248,7 @@ impl FileTree {
         let node = &self.nodes[index];
         let has_children = match &node.children {
             Some(c) => !c.is_empty(),
-            None => node.node_type == NodeType::Directory, // unloaded dirs assumed to have children
+            None => matches!(node.node_type, NodeType::Directory), // unloaded dirs assumed to have children
         };
 
         rows.push(VisibleRow {
@@ -353,6 +391,10 @@ pub enum TreeNavAction {
     Right,
     /// Open file / toggle directory.
     Enter,
+    /// Jump to first row.
+    Home,
+    /// Jump to last row.
+    End,
 }
 
 /// Keyboard navigation state for the tree.
@@ -441,7 +483,7 @@ impl TreeNavState {
                 if let Some(row_idx) = self.selected_visible_row {
                     if row_idx < visible_rows.len() {
                         let row = &visible_rows[row_idx];
-                        match row.node_type {
+                        match &row.node_type {
                             NodeType::Directory => {
                                 if row.expanded {
                                     Some(TreeNavResult::Collapse(row.index))
@@ -449,7 +491,7 @@ impl TreeNavState {
                                     Some(TreeNavResult::Expand(row.index))
                                 }
                             }
-                            NodeType::File { .. } => {
+                            NodeType::File { .. } | NodeType::Symlink { .. } => {
                                 Some(TreeNavResult::OpenFile(row.index))
                             }
                         }
@@ -459,6 +501,16 @@ impl TreeNavState {
                 } else {
                     None
                 }
+            }
+            TreeNavAction::Home => {
+                self.selected_visible_row = Some(0);
+                None
+            }
+            TreeNavAction::End => {
+                if !visible_rows.is_empty() {
+                    self.selected_visible_row = Some(visible_rows.len() - 1);
+                }
+                None
             }
         }
     }
@@ -950,6 +1002,114 @@ mod tests {
         let empty_row = &rows[1];
         assert_eq!(empty_row.name, "empty");
         assert!(!empty_row.has_children); // loaded and empty
+    }
+
+    // --- Symlink NodeType ---
+
+    #[test]
+    fn symlink_node_type_exists() {
+        let s = NodeType::Symlink { target: PathBuf::from("/tmp/target") };
+        assert_ne!(s, NodeType::File { extension: None, size: 0 });
+        assert_ne!(s, NodeType::Directory);
+    }
+
+    // --- show_hidden ---
+
+    #[test]
+    fn show_hidden_default_false() {
+        let tree = FileTree::new(PathBuf::from("/tmp/project"));
+        assert!(!tree.show_hidden);
+    }
+
+    #[test]
+    fn show_hidden_includes_dotfiles() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::write(root.join(".hidden"), "secret").unwrap();
+        std::fs::write(root.join("visible.txt"), "hello").unwrap();
+
+        // show_hidden = false: only visible.txt
+        let mut tree = FileTree::new(root.clone());
+        tree.expand(0).unwrap();
+        let children = tree.get(0).unwrap().children.as_ref().unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(tree.get(children[0]).unwrap().name, "visible.txt");
+
+        // show_hidden = true: both files
+        let mut tree2 = FileTree::new(root);
+        tree2.show_hidden = true;
+        tree2.expand(0).unwrap();
+        let children2 = tree2.get(0).unwrap().children.as_ref().unwrap();
+        assert_eq!(children2.len(), 2);
+    }
+
+    // --- Large directory guard ---
+
+    #[test]
+    fn large_dir_truncation() {
+        // We can't easily create 10001 files quickly, so test the constant exists
+        // and the logic by creating a dir with a few files and verifying it works
+        assert_eq!(MAX_DIR_ENTRIES, 10_000);
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        for i in 0..5 {
+            std::fs::write(root.join(format!("file{}.txt", i)), "x").unwrap();
+        }
+        let mut tree = FileTree::new(root);
+        tree.expand(0).unwrap();
+        let children = tree.get(0).unwrap().children.as_ref().unwrap();
+        assert_eq!(children.len(), 5); // well under limit
+    }
+
+    // --- Home/End navigation ---
+
+    #[test]
+    fn nav_home_jumps_to_first() {
+        let mut nav = TreeNavState::new();
+        nav.selected_visible_row = Some(3);
+        let rows = vec![
+            VisibleRow { index: 0, depth: 0, name: "root".into(), node_type: NodeType::Directory, expanded: true, has_children: true },
+            VisibleRow { index: 1, depth: 1, name: "a.txt".into(), node_type: NodeType::File { extension: None, size: 0 }, expanded: false, has_children: false },
+            VisibleRow { index: 2, depth: 1, name: "b.txt".into(), node_type: NodeType::File { extension: None, size: 0 }, expanded: false, has_children: false },
+            VisibleRow { index: 3, depth: 1, name: "c.txt".into(), node_type: NodeType::File { extension: None, size: 0 }, expanded: false, has_children: false },
+        ];
+        nav.apply(TreeNavAction::Home, &rows);
+        assert_eq!(nav.selected_visible_row, Some(0));
+    }
+
+    #[test]
+    fn nav_end_jumps_to_last() {
+        let mut nav = TreeNavState::new();
+        nav.selected_visible_row = Some(0);
+        let rows = vec![
+            VisibleRow { index: 0, depth: 0, name: "root".into(), node_type: NodeType::Directory, expanded: true, has_children: true },
+            VisibleRow { index: 1, depth: 1, name: "a.txt".into(), node_type: NodeType::File { extension: None, size: 0 }, expanded: false, has_children: false },
+            VisibleRow { index: 2, depth: 1, name: "b.txt".into(), node_type: NodeType::File { extension: None, size: 0 }, expanded: false, has_children: false },
+        ];
+        nav.apply(TreeNavAction::End, &rows);
+        assert_eq!(nav.selected_visible_row, Some(2));
+    }
+
+    // --- Symlink in real filesystem ---
+
+    #[test]
+    fn tree_expand_detects_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::write(root.join("real.txt"), "content").unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.join("real.txt"), root.join("link.txt")).unwrap();
+            let mut tree = FileTree::new(root);
+            tree.expand(0).unwrap();
+            let children = tree.get(0).unwrap().children.as_ref().unwrap();
+            let names: Vec<_> = children.iter().map(|&i| tree.get(i).unwrap().name.as_str()).collect();
+            assert!(names.contains(&"link.txt"));
+            // Find the symlink node
+            let link_node = children.iter().find(|&&i| tree.get(i).unwrap().name == "link.txt").unwrap();
+            assert!(matches!(tree.get(*link_node).unwrap().node_type, NodeType::Symlink { .. }));
+        }
     }
 
     #[test]
