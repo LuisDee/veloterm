@@ -3497,8 +3497,15 @@ impl ApplicationHandler<UserEvent> for App {
                             UiMessage::ConductorToggled => {
                                 if self.input_mode == InputMode::Conductor {
                                     self.input_mode = InputMode::Normal;
-                                } else if self.conductor_state.is_some() {
-                                    self.input_mode = InputMode::Conductor;
+                                } else {
+                                    // Re-discover conductor from active pane CWD
+                                    let cwd = self.active_pane_cwd();
+                                    if let Some(dir) = crate::conductor::discover_conductor_dir(&cwd) {
+                                        self.conductor_state = Some(crate::conductor::ConductorState::load(&dir));
+                                    }
+                                    if self.conductor_state.is_some() {
+                                        self.input_mode = InputMode::Conductor;
+                                    }
                                 }
                             }
                             UiMessage::ConductorTrackClicked(idx) => {
