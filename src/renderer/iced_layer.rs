@@ -256,8 +256,8 @@ pub struct UiState<'a> {
     pub file_browser_breadcrumb: String,
     /// Preview file name (None = empty state).
     pub file_browser_preview_name: Option<String>,
-    /// Preview lines (plain text, no syntax highlighting in iced).
-    pub file_browser_preview_lines: Vec<String>,
+    /// Preview lines as styled spans: Vec of lines, each line is Vec of (text, [r,g,b,a]) spans.
+    pub file_browser_preview_lines: Vec<Vec<(String, [f32; 4])>>,
     /// Whether the preview was truncated.
     pub file_browser_preview_truncated: bool,
     /// Preview scroll offset.
@@ -281,6 +281,8 @@ pub struct UiState<'a> {
     pub git_review_diff_scroll: f32,
     /// Current git branch name.
     pub git_review_branch: String,
+    /// Current hunk index (for visual highlighting).
+    pub git_review_current_hunk: usize,
 }
 
 /// A file browser row for rendering.
@@ -325,6 +327,7 @@ pub struct GitReviewDiffRow {
     pub right_num: Option<String>,
     pub left_text: String,
     pub right_text: String,
+    pub hunk_index: usize,
 }
 
 /// Kind of diff row.
@@ -2101,18 +2104,23 @@ impl IcedLayer {
                 })
                 .into();
 
-                // Preview lines
+                // Preview lines with syntax highlighting
                 let mut lines_col = iced_widget::Column::new().spacing(0.0);
-                for (i, line) in state.file_browser_preview_lines.iter().enumerate() {
+                for (i, spans) in state.file_browser_preview_lines.iter().enumerate() {
                     let line_num = text(format!("{:>4} ", i + 1))
                         .size(12.0 / scale)
                         .color(text_muted)
                         .font(JETBRAINS_MONO);
-                    let line_text = text(line.as_str())
-                        .size(12.0 / scale)
-                        .color(text_primary)
-                        .font(JETBRAINS_MONO);
-                    let line_row = row![line_num, line_text];
+                    let mut line_row = iced_widget::Row::new().push(line_num);
+                    for (span_text, color) in spans {
+                        let span_color = iced_core::Color::from_rgba(color[0], color[1], color[2], color[3]);
+                        line_row = line_row.push(
+                            text(span_text.as_str())
+                                .size(12.0 / scale)
+                                .color(span_color)
+                                .font(JETBRAINS_MONO),
+                        );
+                    }
                     lines_col = lines_col.push(line_row);
                 }
 
@@ -2459,22 +2467,33 @@ impl IcedLayer {
             // Diff rows
             let mut diff_col = iced_widget::Column::new().spacing(0.0);
 
+            let current_hunk = state.git_review_current_hunk;
             for diff_row in &state.git_review_diff_rows {
+                let is_current_hunk = diff_row.hunk_index == current_hunk;
                 let row_element: IcedElement<'a> = match diff_row.kind {
                     DiffRowKind::HunkHeader => {
+                        let hunk_bg = if is_current_hunk {
+                            iced_core::Color::from_rgba(0.2, 0.2, 0.3, 1.0)
+                        } else {
+                            iced_core::Color::from_rgba(0.15, 0.15, 0.2, 1.0)
+                        };
+                        let hunk_border_color = if is_current_hunk { accent } else { iced_core::Color::TRANSPARENT };
                         container(
                             text(diff_row.left_text.as_str())
                                 .size(11.0 / scale)
-                                .color(text_muted)
+                                .color(if is_current_hunk { text_secondary } else { text_muted })
                                 .font(JETBRAINS_MONO),
                         )
                         .width(iced_core::Length::Fill)
                         .height(22.0 / scale)
                         .padding(iced_core::Padding::from([2.0 / scale, 10.0 / scale]))
                         .style(move |_: &iced_core::Theme| container::Style {
-                            background: Some(iced_core::Background::Color(
-                                iced_core::Color::from_rgba(0.15, 0.15, 0.2, 1.0),
-                            )),
+                            background: Some(iced_core::Background::Color(hunk_bg)),
+                            border: iced_core::Border {
+                                color: hunk_border_color,
+                                width: if hunk_border_color == iced_core::Color::TRANSPARENT { 0.0 } else { 2.0 },
+                                radius: 0.0.into(),
+                            },
                             ..Default::default()
                         })
                         .into()
@@ -3201,6 +3220,7 @@ mod tests {
             git_review_commit_message: String::new(),
             git_review_diff_scroll: 0.0,
             git_review_branch: String::new(),
+            git_review_current_hunk: 0,
         }
     }
 
@@ -3489,6 +3509,7 @@ mod tests {
             git_review_can_commit: false,
             git_review_commit_message: String::new(),
             git_review_diff_scroll: 0.0,
+            git_review_current_hunk: 0,
             git_review_branch: String::new(),
             };
         let messages = layer.render(&view, &state);
@@ -3621,6 +3642,7 @@ mod tests {
             git_review_can_commit: false,
             git_review_commit_message: String::new(),
             git_review_diff_scroll: 0.0,
+            git_review_current_hunk: 0,
             git_review_branch: String::new(),
             };
         let messages = layer.render(&view, &state);
@@ -4041,6 +4063,7 @@ mod tests {
             git_review_commit_message: String::new(),
             git_review_diff_scroll: 0.0,
             git_review_branch: String::new(),
+            git_review_current_hunk: 0,
         };
         assert!(!state.context_menu_visible);
         assert_eq!(state.context_menu_position, (0.0, 0.0));

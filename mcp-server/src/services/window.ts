@@ -167,9 +167,9 @@ export function pngDimensions(buf: Buffer): { width: number; height: number } {
 export function typeText(pid: number, text: string, pressEnter = false): void {
   focusWindow(pid);
   try {
-    // -w 80 adds 80ms delay between each event for reliable delivery
-    // (30ms still dropped chars on macOS; 80ms is safe)
-    const args = ["-w", "80", `t:${text}`];
+    // -w 150 adds 150ms delay between each event for reliable delivery
+    // (30ms dropped chars, 80ms still dropped on longer strings; 150ms is safe)
+    const args = ["-w", "150", `t:${text}`];
     if (pressEnter) {
       args.push("kp:return");
     }

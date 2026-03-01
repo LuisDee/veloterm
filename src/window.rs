@@ -607,14 +607,15 @@ impl App {
         let max_ln = max_line_number(diff);
         let gutter_w = gutter_char_width(max_ln);
         flat.iter().map(|row| match row {
-            FlatRow::HunkHeader { header, .. } => GitReviewDiffRow {
+            FlatRow::HunkHeader { header, index } => GitReviewDiffRow {
                 kind: DiffRowKind::HunkHeader,
                 left_num: None,
                 right_num: None,
                 left_text: header.clone(),
                 right_text: String::new(),
+                hunk_index: *index,
             },
-            FlatRow::AlignedRow { row, .. } => {
+            FlatRow::AlignedRow { row, hunk_index } => {
                 let kind = match (&row.left, &row.right) {
                     (Some(l), Some(r)) => {
                         if l.change_type == ChangeType::Context { DiffRowKind::Context }
@@ -632,6 +633,7 @@ impl App {
                         .map(|n| format_line_number(Some(n), gutter_w)),
                     left_text: row.left.as_ref().map(|l| l.content.clone()).unwrap_or_default(),
                     right_text: row.right.as_ref().map(|r| r.content.clone()).unwrap_or_default(),
+                    hunk_index: *hunk_index,
                 }
             }
         }).collect()
@@ -3258,7 +3260,27 @@ impl ApplicationHandler<UserEvent> for App {
                                 .map(|p| p.metadata.file_name.clone()),
                             self.file_browser_state.as_ref()
                                 .and_then(|s| s.preview.as_ref())
-                                .map(|p| p.lines.clone())
+                                .map(|p| {
+                                    if p.highlighted_lines.is_empty() {
+                                        // Fallback: no syntax highlighting, use plain text
+                                        p.lines.iter().map(|line| {
+                                            vec![(line.clone(), [1.0, 1.0, 1.0, 1.0])]
+                                        }).collect()
+                                    } else {
+                                        // Use syntax-highlighted spans
+                                        p.highlighted_lines.iter().map(|hl| {
+                                            hl.spans.iter().map(|span| {
+                                                let fg = span.style.foreground;
+                                                (span.text.clone(), [
+                                                    fg.r as f32 / 255.0,
+                                                    fg.g as f32 / 255.0,
+                                                    fg.b as f32 / 255.0,
+                                                    fg.a as f32 / 255.0,
+                                                ])
+                                            }).collect()
+                                        }).collect()
+                                    }
+                                })
                                 .unwrap_or_default(),
                             self.file_browser_state.as_ref()
                                 .and_then(|s| s.preview.as_ref())
@@ -3406,6 +3428,9 @@ impl ApplicationHandler<UserEvent> for App {
                         git_review_branch: self.git_review_state.as_ref()
                             .and_then(|s| s.branch_name.clone())
                             .unwrap_or_default(),
+                        git_review_current_hunk: self.git_review_state.as_ref()
+                            .map(|s| s.current_hunk_index)
+                            .unwrap_or(0),
                     };
 
                     let mut iced_msgs = Vec::new();
