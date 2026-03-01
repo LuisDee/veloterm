@@ -5,7 +5,9 @@
  */
 export declare function findWindowByPid(pid: number): number | null;
 /**
- * Focus the VeloTerm window by PID using System Events.
+ * Focus the VeloTerm window by PID using multiple strategies.
+ * Strategy 1: `open` the .app bundle (most reliable for macOS activation)
+ * Strategy 2: System Events frontmost (fallback)
  */
 export declare function focusWindow(pid: number): void;
 /**

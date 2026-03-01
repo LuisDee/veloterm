@@ -1,6 +1,6 @@
 import { execSync, execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { FOCUS_DELAY_MS, KEY_CODES, SCREENSHOT_PATH } from "../constants.js";
+import { APP_PATH, FOCUS_DELAY_MS, KEY_CODES, SCREENSHOT_PATH } from "../constants.js";
 /**
  * Find window ID for a given PID using JXA (JavaScript for Automation).
  * Uses CGWindowListCopyWindowInfo to match PID → window number.
@@ -53,9 +53,19 @@ export function findWindowByPid(pid) {
     return null;
 }
 /**
- * Focus the VeloTerm window by PID using System Events.
+ * Focus the VeloTerm window by PID using multiple strategies.
+ * Strategy 1: `open` the .app bundle (most reliable for macOS activation)
+ * Strategy 2: System Events frontmost (fallback)
  */
 export function focusWindow(pid) {
+    // Strategy 1: Use `open` on the .app bundle to activate
+    try {
+        execSync(`open "${APP_PATH}"`, { timeout: 5000 });
+    }
+    catch {
+        // App bundle not found or open failed
+    }
+    // Strategy 2: System Events frontmost
     try {
         execSync(`osascript -e 'tell application "System Events" to set frontmost of (first process whose unix id is ${pid}) to true'`, { timeout: 5000 });
     }
@@ -98,8 +108,10 @@ export function typeText(pid, text) {
     const escaped = text.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     execFileSync("osascript", [
         "-e", 'tell application "System Events"',
+        "-e", `tell (first process whose unix id is ${pid})`,
         "-e", "delay 0.2",
         "-e", `keystroke "${escaped}"`,
+        "-e", "end tell",
         "-e", "end tell",
     ], { timeout: 10000 });
 }
@@ -118,8 +130,10 @@ export function pressKey(pid, keyName) {
         : "";
     execFileSync("osascript", [
         "-e", 'tell application "System Events"',
+        "-e", `tell (first process whose unix id is ${pid})`,
         "-e", "delay 0.2",
         "-e", `key code ${entry.code}${modPart}`,
+        "-e", "end tell",
         "-e", "end tell",
     ], { timeout: 10000 });
 }

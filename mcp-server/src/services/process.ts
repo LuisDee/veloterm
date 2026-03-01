@@ -82,6 +82,7 @@ export function createAppBundle(release: boolean): void {
 DIR="$(dirname "$0")"
 export RUST_LOG=info
 export VELOTERM_PROJECT_DIR="${PROJECT_DIR}"
+cd "${PROJECT_DIR}"
 exec "$DIR/veloterm-bin" >> "${RUNTIME_LOG_PATH}" 2>&1
 `;
   const wrapperPath = join(macosDir, "veloterm");
