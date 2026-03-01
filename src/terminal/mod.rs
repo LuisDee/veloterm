@@ -7,6 +7,7 @@ use alacritty_terminal::index::{Column, Line, Point};
 use alacritty_terminal::term::Config;
 use alacritty_terminal::vte::ansi;
 
+use crate::image_protocol::ImageStore;
 use crate::shell_integration::listener::{
     self, EventQueue, QueryResponse, ResponseQueue, TerminalEvent, VeloTermListener,
 };
@@ -39,6 +40,10 @@ pub struct Terminal {
     shell_state: ShellState,
     /// Set to true when a BEL character is received; cleared after reading.
     bell_pending: bool,
+    /// Kitty Graphics Protocol image store.
+    image_store: ImageStore,
+    /// Pending image protocol responses to write back to PTY.
+    image_responses: Vec<String>,
 }
 
 impl Terminal {
@@ -62,6 +67,8 @@ impl Terminal {
             response_queue,
             shell_state: ShellState::new(),
             bell_pending: false,
+            image_store: ImageStore::new(320 * 1024 * 1024), // 320MB default limit
+            image_responses: Vec::new(),
         }
     }
 
@@ -78,7 +85,18 @@ impl Terminal {
         // Process shell events from byte pre-scan
         let current_line = self.cursor_position().0 + self.history_size();
         for event in &shell_events {
-            self.shell_state.handle_event(event, current_line);
+            match event {
+                ShellEvent::KittyGraphics(payload) => {
+                    if let Ok(cmd) = crate::image_protocol::parse_command(payload) {
+                        if let Some(response) = self.image_store.handle_command(cmd) {
+                            self.image_responses.push(response);
+                        }
+                    }
+                }
+                _ => {
+                    self.shell_state.handle_event(event, current_line);
+                }
+            }
         }
 
         // Process title events from the event listener
@@ -237,6 +255,21 @@ impl Terminal {
     /// (DA1, DA2, DSR, OSC 10/11 color queries, XTWINOPS, etc.)
     pub fn drain_query_responses(&mut self) -> Vec<QueryResponse> {
         listener::drain_responses(&self.response_queue)
+    }
+
+    /// Drain pending Kitty Graphics Protocol responses to write back to PTY.
+    pub fn drain_image_responses(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.image_responses)
+    }
+
+    /// Access the image store (for renderer to query placements).
+    pub fn image_store(&self) -> &ImageStore {
+        &self.image_store
+    }
+
+    /// Access the image store mutably.
+    pub fn image_store_mut(&mut self) -> &mut ImageStore {
+        &mut self.image_store
     }
 
     /// Jump viewport to the previous prompt position.
@@ -696,5 +729,97 @@ mod tests {
         term.feed(b"Hello world\r\n");
         let responses = term.drain_query_responses();
         assert!(responses.is_empty(), "Normal text should not produce query responses");
+    }
+
+    // ── Kitty Graphics Protocol integration ──────────────────────
+
+    #[test]
+    fn kitty_query_returns_ok_response() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        // Send a Kitty Graphics query: a=q, i=31, 1x1 RGB24 pixel
+        term.feed(b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;/wAA\x1b\\");
+        let responses = term.drain_image_responses();
+        assert!(!responses.is_empty(), "query should produce a response");
+        assert!(
+            responses[0].contains("OK"),
+            "query response should be OK: {}",
+            responses[0]
+        );
+    }
+
+    #[test]
+    fn kitty_query_does_not_store_image() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        term.feed(b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;/wAA\x1b\\");
+        assert!(
+            !term.image_store().has_image(31),
+            "query should not persist image"
+        );
+    }
+
+    #[test]
+    fn kitty_transmit_stores_image() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        // Transmit a 1x1 RGB24 pixel (i=1, a=T for transmit+display)
+        term.feed(b"\x1b_Gi=1,s=1,v=1,f=24;/wAA\x1b\\");
+        assert!(
+            term.image_store().has_image(1),
+            "transmit+display should store image"
+        );
+    }
+
+    #[test]
+    fn kitty_transmit_creates_placement() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        term.feed(b"\x1b_Gi=1,s=1,v=1,f=24;/wAA\x1b\\");
+        assert!(
+            term.image_store().placement_count() >= 1,
+            "transmit+display should create a placement"
+        );
+    }
+
+    #[test]
+    fn kitty_delete_removes_placements() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        term.feed(b"\x1b_Gi=1,s=1,v=1,f=24;/wAA\x1b\\");
+        assert!(term.image_store().placement_count() >= 1);
+        // Delete by ID
+        term.feed(b"\x1b_Ga=d,d=i,i=1\x1b\\");
+        assert_eq!(
+            term.image_store().placement_count(),
+            0,
+            "delete should remove placements"
+        );
+        assert!(
+            term.image_store().has_image(1),
+            "data should be kept (lowercase d)"
+        );
+    }
+
+    #[test]
+    fn kitty_quiet_mode_suppresses_ok() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        // q=1 should suppress OK response
+        term.feed(b"\x1b_Gi=1,s=1,v=1,f=24,q=1;/wAA\x1b\\");
+        let responses = term.drain_image_responses();
+        assert!(responses.is_empty(), "q=1 should suppress OK response");
+    }
+
+    #[test]
+    fn kitty_normal_text_produces_no_image_responses() {
+        let mut term = Terminal::new(80, 24, 10_000);
+        term.feed(b"Hello world\r\n");
+        let responses = term.drain_image_responses();
+        assert!(
+            responses.is_empty(),
+            "normal text should not produce image responses"
+        );
+    }
+
+    #[test]
+    fn kitty_image_store_accessible() {
+        let term = Terminal::new(80, 24, 10_000);
+        assert_eq!(term.image_store().placement_count(), 0);
+        assert_eq!(term.image_store().memory_used(), 0);
     }
 }
