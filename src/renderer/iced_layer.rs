@@ -3949,14 +3949,15 @@ mod tests {
     }
 
     #[test]
-    fn theme_selector_shows_five_themes() {
+    fn theme_selector_shows_six_themes() {
         let themes = crate::config::theme::TerminalTheme::available_themes();
-        assert_eq!(themes.len(), 5);
+        assert_eq!(themes.len(), 6);
         assert_eq!(themes[0].0, "warm_dark");
         assert_eq!(themes[1].0, "midnight");
         assert_eq!(themes[2].0, "ember");
         assert_eq!(themes[3].0, "dusk");
-        assert_eq!(themes[4].0, "light");
+        assert_eq!(themes[4].0, "neon_forge");
+        assert_eq!(themes[5].0, "light");
     }
 
     // ── Button hover/press fix tests ──────────────────────────────

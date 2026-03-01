@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 const VALID_THEMES: &[&str] = &[
-    "warm_dark", "midnight", "ember", "dusk", "light",
+    "warm_dark", "midnight", "ember", "dusk", "neon_forge", "light",
     // Legacy aliases (backward compat)
     "claude_dark", "claude_light", "claude_warm",
 ];
@@ -122,7 +122,7 @@ impl Default for ShellConfig {
             program: None,
             args: vec![],
             env: HashMap::new(),
-            disable_starship: true,
+            disable_starship: false,
         }
     }
 }
@@ -359,7 +359,7 @@ impl Default for RawShellConfig {
             program: None,
             args: vec![],
             env: HashMap::new(),
-            disable_starship: true,
+            disable_starship: false,
         }
     }
 }
@@ -664,7 +664,7 @@ left = 10.0
 right = 10.0
 
 [colors]
-# Theme: "warm_dark", "midnight", "ember", "dusk", or "light"
+# Theme: "warm_dark", "midnight", "ember", "dusk", "neon_forge", or "light"
 theme = "midnight"
 
 [cursor]
@@ -694,8 +694,8 @@ bell_enabled = true
 # program = "/bin/zsh"
 # Extra shell arguments
 # args = ["--login"]
-# Disable starship prompt in VeloTerm shells (avoids conflict with p10k)
-disable_starship = true
+# Suppress starship prompt if it conflicts with your prompt theme (e.g. p10k)
+disable_starship = false
 
 [vi_mode]
 # Enable vi-mode for keyboard-driven scrollback navigation
@@ -1003,9 +1003,9 @@ bell_enabled = false
     }
 
     #[test]
-    fn default_disable_starship_is_true() {
+    fn default_disable_starship_is_false() {
         let config = Config::default();
-        assert!(config.shell.disable_starship);
+        assert!(!config.shell.disable_starship);
     }
 
     #[test]

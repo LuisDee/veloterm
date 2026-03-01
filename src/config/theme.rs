@@ -129,6 +129,7 @@ impl TerminalTheme {
             "midnight" => Some(MIDNIGHT),
             "ember" => Some(EMBER),
             "dusk" => Some(DUSK),
+            "neon_forge" => Some(NEON_FORGE),
             "light" => Some(LIGHT),
             // Legacy aliases
             "claude_dark" | "claude_warm" => {
@@ -150,6 +151,7 @@ impl TerminalTheme {
             ("midnight", "Midnight"),
             ("ember", "Ember"),
             ("dusk", "Dusk"),
+            ("neon_forge", "Neon Forge"),
             ("light", "Light"),
         ]
     }
@@ -536,6 +538,64 @@ pub const DUSK: TerminalTheme = TerminalTheme {
     ],
 };
 
+// ── NEON FORGE THEME ──────────────────────────────────────────────
+
+pub const NEON_FORGE: TerminalTheme = TerminalTheme {
+    name: "Neon Forge",
+
+    // Surfaces
+    bg_deep:    rgb(26, 27, 38),
+    bg_surface: rgb(30, 31, 43),
+    bg_raised:  rgb(36, 37, 58),
+    bg_hover:   rgb(42, 44, 62),
+    bg_active:  rgb(51, 53, 74),
+    bg_input:   rgb(26, 27, 38),
+
+    // Text
+    text_primary:   rgb(192, 202, 245),
+    text_secondary: rgb(169, 177, 214),
+    text_muted:     rgb(86, 95, 137),
+    text_ghost:     rgb(59, 61, 87),
+
+    // Accents
+    accent_orange: rgb(255, 158, 100),
+    accent_blue:   rgb(122, 162, 247),
+    accent_green:  rgb(158, 206, 106),
+    accent_purple: rgb(187, 154, 247),
+    accent_red:    rgb(247, 118, 142),
+    accent_yellow: rgb(224, 175, 104),
+
+    // Borders
+    border_subtle:  rgba(192, 202, 245, 0.06),
+    border_visible: rgba(192, 202, 245, 0.10),
+    border_strong:  rgba(192, 202, 245, 0.16),
+
+    // Selection & search
+    selection:           rgb(40, 52, 74),
+    search_match:        rgb(61, 74, 30),
+    search_match_active: rgb(107, 122, 20),
+
+    // ANSI palette
+    ansi: [
+        rgb(21, 22, 30),       // 0  Black
+        rgb(247, 118, 142),    // 1  Red
+        rgb(158, 206, 106),    // 2  Green
+        rgb(224, 175, 104),    // 3  Yellow
+        rgb(122, 162, 247),    // 4  Blue
+        rgb(187, 154, 247),    // 5  Magenta
+        rgb(125, 207, 255),    // 6  Cyan
+        rgb(169, 177, 214),    // 7  White
+        rgb(65, 72, 104),      // 8  Bright Black
+        rgb(255, 154, 158),    // 9  Bright Red
+        rgb(185, 242, 124),    // 10 Bright Green
+        rgb(255, 214, 138),    // 11 Bright Yellow
+        rgb(154, 189, 255),    // 12 Bright Blue
+        rgb(208, 176, 255),    // 13 Bright Magenta
+        rgb(164, 228, 255),    // 14 Bright Cyan
+        rgb(192, 202, 245),    // 15 Bright White
+    ],
+};
+
 // ── Theme selection enum ────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -545,6 +605,7 @@ pub enum ThemeMode {
     Midnight,
     Ember,
     Dusk,
+    NeonForge,
     Light,
 }
 
@@ -555,6 +616,7 @@ impl ThemeMode {
             ThemeMode::Midnight => &MIDNIGHT,
             ThemeMode::Ember => &EMBER,
             ThemeMode::Dusk => &DUSK,
+            ThemeMode::NeonForge => &NEON_FORGE,
             ThemeMode::Light => &LIGHT,
         }
     }
@@ -564,7 +626,8 @@ impl ThemeMode {
             ThemeMode::WarmDark => ThemeMode::Midnight,
             ThemeMode::Midnight => ThemeMode::Ember,
             ThemeMode::Ember => ThemeMode::Dusk,
-            ThemeMode::Dusk => ThemeMode::Light,
+            ThemeMode::Dusk => ThemeMode::NeonForge,
+            ThemeMode::NeonForge => ThemeMode::Light,
             ThemeMode::Light => ThemeMode::WarmDark,
         }
     }
@@ -737,9 +800,9 @@ mod tests {
     }
 
     #[test]
-    fn available_themes_returns_five() {
+    fn available_themes_returns_six() {
         let themes = TerminalTheme::available_themes();
-        assert_eq!(themes.len(), 5);
+        assert_eq!(themes.len(), 6);
         for &(config_name, display_name) in themes {
             let t = TerminalTheme::from_name(config_name)
                 .unwrap_or_else(|| panic!("{} should resolve", config_name));
@@ -767,7 +830,7 @@ mod tests {
     }
 
     #[test]
-    fn theme_mode_toggle_cycles_all_five() {
+    fn theme_mode_toggle_cycles_all_six() {
         let mode = ThemeMode::WarmDark;
         let mode = mode.toggle();
         assert_eq!(mode, ThemeMode::Midnight);
@@ -776,8 +839,33 @@ mod tests {
         let mode = mode.toggle();
         assert_eq!(mode, ThemeMode::Dusk);
         let mode = mode.toggle();
+        assert_eq!(mode, ThemeMode::NeonForge);
+        let mode = mode.toggle();
         assert_eq!(mode, ThemeMode::Light);
         let mode = mode.toggle();
         assert_eq!(mode, ThemeMode::WarmDark);
+    }
+
+    // ── Neon Forge theme tests ──────────────────────────────────────
+
+    #[test]
+    fn neon_forge_from_name() {
+        let theme = TerminalTheme::from_name("neon_forge").unwrap();
+        assert_eq!(theme.name, "Neon Forge");
+    }
+
+    #[test]
+    fn neon_forge_bg_deep() {
+        assert_color_approx(NEON_FORGE.bg_deep, rgb(26, 27, 38), "neon_forge.bg_deep");
+    }
+
+    #[test]
+    fn neon_forge_accent_orange() {
+        assert_color_approx(NEON_FORGE.accent_orange, rgb(255, 158, 100), "neon_forge.accent_orange");
+    }
+
+    #[test]
+    fn neon_forge_ansi_palette_length() {
+        assert_eq!(NEON_FORGE.ansi.len(), 16);
     }
 }

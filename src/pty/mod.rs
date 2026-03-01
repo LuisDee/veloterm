@@ -118,12 +118,50 @@ pub fn default_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
 }
 
-/// Resolve the shell program from config (priority: config.program > $SHELL > /bin/zsh).
+/// Resolve the shell program from config.
+///
+/// Priority: config.program > macOS user shell (dscl) > $SHELL > /bin/zsh.
+///
+/// On macOS, `$SHELL` can be wrong when VeloTerm is launched from a bash parent
+/// (e.g. a CI runner, IDE terminal, or script). We check the actual configured
+/// user shell via `dscl` as a more reliable source on macOS.
 pub fn resolve_shell(config: &crate::config::types::ShellConfig) -> String {
+    // 1. Explicit config override always wins
     if let Some(ref program) = config.program {
         return program.clone();
     }
+
+    // 2. On macOS, check the user's configured login shell via Directory Services
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(shell) = macos_user_shell() {
+            return shell;
+        }
+    }
+
+    // 3. Fall back to $SHELL, then /bin/zsh
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
+}
+
+/// Query the macOS Directory Services for the current user's configured login shell.
+/// Returns None if the query fails (non-macOS, dscl not found, parse error).
+#[cfg(target_os = "macos")]
+fn macos_user_shell() -> Option<String> {
+    let user = std::env::var("USER").ok()?;
+    let output = std::process::Command::new("dscl")
+        .args([".", "-read", &format!("/Users/{user}"), "UserShell"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Output format: "UserShell: /bin/zsh"
+    let shell = stdout.trim().strip_prefix("UserShell:")?.trim().to_string();
+    if shell.is_empty() || !std::path::Path::new(&shell).exists() {
+        return None;
+    }
+    Some(shell)
 }
 
 /// Starship suppression snippet for zsh: defines a shadow function before .zshrc,
