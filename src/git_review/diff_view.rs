@@ -419,6 +419,141 @@ pub fn renamed_file_header(from: &str, to: &str) -> String {
     format!("{} → {}", from, to)
 }
 
+/// Word-level insert background: semi-transparent green.
+pub const WORD_INSERT_BG: [f32; 4] = [0.0, 0.5, 0.0, 0.3];
+/// Word-level delete background: semi-transparent red.
+pub const WORD_DELETE_BG: [f32; 4] = [0.6, 0.0, 0.0, 0.3];
+/// Default text color (light gray) for non-highlighted text.
+pub const DEFAULT_FG: [f32; 4] = [0.784, 0.784, 0.784, 1.0];
+
+use crate::git_review::inline_diff::{InlineSpan, InlineTag};
+use crate::git_review::syntax_highlight::{DiffRgba, HighlightSpan};
+use crate::renderer::iced_layer::DiffSpan;
+
+/// Convert a DiffRgba (u8) to an f32 RGBA array.
+fn rgba_to_f32(c: DiffRgba) -> [f32; 4] {
+    [
+        c.r as f32 / 255.0,
+        c.g as f32 / 255.0,
+        c.b as f32 / 255.0,
+        c.a as f32 / 255.0,
+    ]
+}
+
+/// Merge syntax highlight spans with inline diff spans into DiffSpans.
+///
+/// For non-Modified rows, pass an empty `inline_spans` slice — the result
+/// will contain only syntax-colored spans with no highlight backgrounds.
+///
+/// For Modified rows, pass the inline spans from `inline_diff()`. The merge
+/// walks both span lists character-by-character, splitting syntax spans at
+/// inline diff boundaries and applying the appropriate background.
+pub fn merge_spans(
+    syntax_spans: &[HighlightSpan],
+    inline_spans: &[InlineSpan],
+    is_left: bool,
+) -> Vec<DiffSpan> {
+    // No inline diff — just convert syntax spans directly
+    if inline_spans.is_empty() {
+        return syntax_spans
+            .iter()
+            .filter(|s| !s.text.is_empty())
+            .map(|s| DiffSpan {
+                text: s.text.clone(),
+                fg: rgba_to_f32(s.color),
+                highlight: None,
+            })
+            .collect();
+    }
+
+    // Flatten syntax spans into (char, fg_color) pairs
+    let syntax_chars: Vec<(char, [f32; 4])> = syntax_spans
+        .iter()
+        .flat_map(|s| {
+            let fg = rgba_to_f32(s.color);
+            s.text.chars().map(move |c| (c, fg))
+        })
+        .collect();
+
+    // Flatten inline spans into (char, tag) pairs
+    let inline_chars: Vec<(char, InlineTag)> = inline_spans
+        .iter()
+        .flat_map(|s| s.text.chars().map(move |c| (c, s.tag)))
+        .collect();
+
+    // Both should be the same length if everything is consistent
+    let len = syntax_chars.len().min(inline_chars.len());
+    if len == 0 {
+        // Fallback: return syntax spans as-is
+        return syntax_spans
+            .iter()
+            .filter(|s| !s.text.is_empty())
+            .map(|s| DiffSpan {
+                text: s.text.clone(),
+                fg: rgba_to_f32(s.color),
+                highlight: None,
+            })
+            .collect();
+    }
+
+    let mut result = Vec::new();
+    let mut i = 0;
+    while i < len {
+        let fg = syntax_chars[i].1;
+        let tag = inline_chars[i].1;
+        let highlight = match tag {
+            InlineTag::Delete if is_left => Some(WORD_DELETE_BG),
+            InlineTag::Insert if !is_left => Some(WORD_INSERT_BG),
+            _ => None,
+        };
+
+        // Collect consecutive chars with same fg + highlight
+        let mut text = String::new();
+        while i < len {
+            let cur_fg = syntax_chars[i].1;
+            let cur_tag = inline_chars[i].1;
+            let cur_hl = match cur_tag {
+                InlineTag::Delete if is_left => Some(WORD_DELETE_BG),
+                InlineTag::Insert if !is_left => Some(WORD_INSERT_BG),
+                _ => None,
+            };
+            if cur_fg != fg || cur_hl != highlight {
+                break;
+            }
+            text.push(syntax_chars[i].0);
+            i += 1;
+        }
+        if !text.is_empty() {
+            result.push(DiffSpan {
+                text,
+                fg,
+                highlight,
+            });
+        }
+    }
+
+    // If syntax spans were longer than inline spans (shouldn't happen, but be safe)
+    if syntax_chars.len() > len {
+        let remaining: String = syntax_chars[len..].iter().map(|(c, _)| c).collect();
+        if !remaining.is_empty() {
+            let fg = syntax_chars[len].1;
+            result.push(DiffSpan {
+                text: remaining,
+                fg,
+                highlight: None,
+            });
+        }
+    }
+
+    result
+}
+
+/// Convert syntax highlight spans to DiffSpans without any inline diff highlighting.
+/// Convenience wrapper for non-Modified rows.
+pub fn syntax_to_diff_spans(syntax_spans: &[HighlightSpan]) -> Vec<DiffSpan> {
+    merge_spans(syntax_spans, &[], false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1058,5 +1193,194 @@ mod tests {
             renamed_file_header("old/path.rs", "new/path.rs"),
             "old/path.rs → new/path.rs"
         );
+    }
+
+    // -- merge_spans tests --
+
+    use crate::git_review::inline_diff::{InlineSpan, InlineTag};
+    use crate::git_review::syntax_highlight::{DiffRgba, HighlightSpan};
+    use crate::renderer::iced_layer::DiffSpan;
+
+    fn make_hl_span(text: &str, r: u8, g: u8, b: u8) -> HighlightSpan {
+        HighlightSpan {
+            text: text.to_string(),
+            color: DiffRgba::new(r, g, b, 255),
+        }
+    }
+
+    fn make_inline_span(text: &str, tag: InlineTag) -> InlineSpan {
+        InlineSpan {
+            text: text.to_string(),
+            tag,
+        }
+    }
+
+    #[test]
+    fn merge_spans_no_inline_returns_syntax_colors() {
+        let syntax = vec![
+            make_hl_span("fn ", 200, 100, 50),
+            make_hl_span("main", 100, 200, 100),
+        ];
+        let result = merge_spans(&syntax, &[], false);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].text, "fn ");
+        assert!(result[0].highlight.is_none());
+        assert_eq!(result[1].text, "main");
+        assert!(result[1].highlight.is_none());
+        // Check fg colors are correctly converted
+        assert!((result[0].fg[0] - 200.0 / 255.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn merge_spans_all_equal_no_highlights() {
+        let syntax = vec![make_hl_span("hello world", 200, 200, 200)];
+        let inline = vec![make_inline_span("hello world", InlineTag::Equal)];
+        let result = merge_spans(&syntax, &inline, true);
+        assert!(!result.is_empty());
+        let combined: String = result.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(combined, "hello world");
+        assert!(result.iter().all(|s| s.highlight.is_none()));
+    }
+
+    #[test]
+    fn merge_spans_all_delete_left_side() {
+        let syntax = vec![make_hl_span("removed", 200, 200, 200)];
+        let inline = vec![make_inline_span("removed", InlineTag::Delete)];
+        let result = merge_spans(&syntax, &inline, true);
+        let combined: String = result.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(combined, "removed");
+        // Left side with Delete should have red background
+        assert!(result.iter().all(|s| s.highlight == Some(WORD_DELETE_BG)));
+    }
+
+    #[test]
+    fn merge_spans_all_insert_right_side() {
+        let syntax = vec![make_hl_span("added", 200, 200, 200)];
+        let inline = vec![make_inline_span("added", InlineTag::Insert)];
+        let result = merge_spans(&syntax, &inline, false);
+        let combined: String = result.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(combined, "added");
+        // Right side with Insert should have green background
+        assert!(result.iter().all(|s| s.highlight == Some(WORD_INSERT_BG)));
+    }
+
+    #[test]
+    fn merge_spans_mixed_equal_and_delete() {
+        let syntax = vec![make_hl_span("hello world", 200, 200, 200)];
+        let inline = vec![
+            make_inline_span("hello ", InlineTag::Equal),
+            make_inline_span("world", InlineTag::Delete),
+        ];
+        let result = merge_spans(&syntax, &inline, true);
+        let combined: String = result.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(combined, "hello world");
+
+        // Find the "hello " span (no highlight) and "world" span (red highlight)
+        let equal_spans: Vec<&DiffSpan> = result.iter().filter(|s| s.highlight.is_none()).collect();
+        let delete_spans: Vec<&DiffSpan> = result.iter().filter(|s| s.highlight == Some(WORD_DELETE_BG)).collect();
+        let equal_text: String = equal_spans.iter().map(|s| s.text.as_str()).collect();
+        let delete_text: String = delete_spans.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(equal_text, "hello ");
+        assert_eq!(delete_text, "world");
+    }
+
+    #[test]
+    fn merge_spans_empty_inputs() {
+        let result = merge_spans(&[], &[], false);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn merge_spans_syntax_only_empty_text_filtered() {
+        let syntax = vec![
+            make_hl_span("", 200, 200, 200),
+            make_hl_span("code", 100, 150, 200),
+        ];
+        let result = merge_spans(&syntax, &[], false);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].text, "code");
+    }
+
+    #[test]
+    fn merge_spans_delete_on_right_side_is_no_highlight() {
+        // Delete tags on the right side should not produce highlights
+        let syntax = vec![make_hl_span("text", 200, 200, 200)];
+        let inline = vec![make_inline_span("text", InlineTag::Delete)];
+        let result = merge_spans(&syntax, &inline, false); // is_left = false
+        assert!(result.iter().all(|s| s.highlight.is_none()));
+    }
+
+    #[test]
+    fn merge_spans_insert_on_left_side_is_no_highlight() {
+        // Insert tags on the left side should not produce highlights
+        let syntax = vec![make_hl_span("text", 200, 200, 200)];
+        let inline = vec![make_inline_span("text", InlineTag::Insert)];
+        let result = merge_spans(&syntax, &inline, true); // is_left = true
+        assert!(result.iter().all(|s| s.highlight.is_none()));
+    }
+
+    #[test]
+    fn syntax_to_diff_spans_convenience() {
+        let syntax = vec![
+            make_hl_span("let ", 200, 100, 50),
+            make_hl_span("x", 100, 200, 100),
+        ];
+        let result = syntax_to_diff_spans(&syntax);
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().all(|s| s.highlight.is_none()));
+        assert_eq!(result[0].text, "let ");
+        assert_eq!(result[1].text, "x");
+    }
+
+    #[test]
+    fn merge_spans_splits_syntax_at_inline_boundaries() {
+        // Syntax: one big span covering "hello world"
+        // Inline: "hello " equal, "world" delete
+        // Should split the syntax span into two DiffSpans with different highlights
+        let syntax = vec![make_hl_span("hello world", 128, 128, 128)];
+        let inline = vec![
+            make_inline_span("hello ", InlineTag::Equal),
+            make_inline_span("world", InlineTag::Delete),
+        ];
+        let result = merge_spans(&syntax, &inline, true);
+        assert!(result.len() >= 2);
+        let combined: String = result.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(combined, "hello world");
+    }
+
+    #[test]
+    fn merge_spans_with_real_highlighter() {
+        // Use the actual DiffHighlighter to produce syntax spans for Rust code
+        let h = crate::git_review::syntax_highlight::DiffHighlighter::new();
+        let old_line = "let x = 42;";
+        let new_line = "let x = 99;";
+        let left_syntax = h.highlight_line(old_line, "test.rs");
+        let right_syntax = h.highlight_line(new_line, "test.rs");
+        let (left_inline, right_inline) = crate::git_review::inline_diff::inline_diff(old_line, new_line);
+
+        let left_spans = merge_spans(&left_syntax, &left_inline, true);
+        let right_spans = merge_spans(&right_syntax, &right_inline, false);
+
+        // Verify text reconstructs
+        let left_text: String = left_spans.iter().map(|s| s.text.as_str()).collect();
+        let right_text: String = right_spans.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(left_text, old_line);
+        assert_eq!(right_text, new_line);
+
+        // Left should have some delete highlights (for "42")
+        assert!(left_spans.iter().any(|s| s.highlight == Some(WORD_DELETE_BG)));
+        // Right should have some insert highlights (for "99")
+        assert!(right_spans.iter().any(|s| s.highlight == Some(WORD_INSERT_BG)));
+    }
+
+    #[test]
+    fn context_rows_get_no_highlight_backgrounds() {
+        let h = crate::git_review::syntax_highlight::DiffHighlighter::new();
+        let line = "    let y = 10;";
+        let syntax = h.highlight_line(line, "test.rs");
+        let result = syntax_to_diff_spans(&syntax);
+        let combined: String = result.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(combined, line);
+        assert!(result.iter().all(|s| s.highlight.is_none()));
     }
 }

@@ -601,23 +601,28 @@ impl App {
             None => return Vec::new(),
         };
         use crate::git_review::diff::ChangeType;
-        use crate::git_review::diff_view::{flatten_diff, FlatRow, gutter_char_width, max_line_number, format_line_number};
+        use crate::git_review::diff_view::{flatten_diff, FlatRow, gutter_char_width, max_line_number, format_line_number, merge_spans, syntax_to_diff_spans};
+        use crate::git_review::inline_diff::inline_diff;
         use crate::renderer::iced_layer::{DiffRowKind, GitReviewDiffRow};
         let flat = flatten_diff(diff);
         let max_ln = max_line_number(diff);
         let gutter_w = gutter_char_width(max_ln);
-        flat.iter().map(|row| match row {
+        let file_path = &diff.path;
+        let highlighter = &state.highlighter;
+        flat.iter().map(|frow| match frow {
             FlatRow::HunkHeader { header, index } => GitReviewDiffRow {
                 kind: DiffRowKind::HunkHeader,
                 left_num: None,
                 right_num: None,
                 left_text: header.clone(),
                 right_text: String::new(),
+                left_spans: Vec::new(),
+                right_spans: Vec::new(),
                 hunk_index: *index,
             },
             FlatRow::AlignedRow { row, hunk_index } => {
                 let kind = match (&row.left, &row.right) {
-                    (Some(l), Some(r)) => {
+                    (Some(l), Some(_r)) => {
                         if l.change_type == ChangeType::Context { DiffRowKind::Context }
                         else { DiffRowKind::Modified }
                     }
@@ -625,14 +630,37 @@ impl App {
                     (None, Some(_)) => DiffRowKind::Added,
                     (None, None) => DiffRowKind::Context,
                 };
+                let left_text = row.left.as_ref().map(|l| l.content.clone()).unwrap_or_default();
+                let right_text = row.right.as_ref().map(|r| r.content.clone()).unwrap_or_default();
+
+                // Syntax highlight both sides
+                let left_syntax = highlighter.highlight_line(&left_text, file_path);
+                let right_syntax = highlighter.highlight_line(&right_text, file_path);
+
+                // For Modified rows, compute word-level inline diff
+                let (left_spans, right_spans) = if kind == DiffRowKind::Modified {
+                    let (left_inline, right_inline) = inline_diff(&left_text, &right_text);
+                    (
+                        merge_spans(&left_syntax, &left_inline, true),
+                        merge_spans(&right_syntax, &right_inline, false),
+                    )
+                } else {
+                    (
+                        syntax_to_diff_spans(&left_syntax),
+                        syntax_to_diff_spans(&right_syntax),
+                    )
+                };
+
                 GitReviewDiffRow {
                     kind,
                     left_num: row.left.as_ref().and_then(|l| l.line_number)
                         .map(|n| format_line_number(Some(n), gutter_w)),
                     right_num: row.right.as_ref().and_then(|r| r.line_number)
                         .map(|n| format_line_number(Some(n), gutter_w)),
-                    left_text: row.left.as_ref().map(|l| l.content.clone()).unwrap_or_default(),
-                    right_text: row.right.as_ref().map(|r| r.content.clone()).unwrap_or_default(),
+                    left_text,
+                    right_text,
+                    left_spans,
+                    right_spans,
                     hunk_index: *hunk_index,
                 }
             }

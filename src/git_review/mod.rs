@@ -18,6 +18,7 @@ use crate::input::InputMode;
 use self::diff::FileDiff;
 use self::diff_view::DiffScrollState;
 use self::status::{FileStatus, GitStatus, SectionState};
+use self::syntax_highlight::DiffHighlighter;
 use self::view::Section;
 
 /// State for the Git Review overlay.
@@ -48,6 +49,8 @@ pub struct GitReviewState {
     pub current_hunk_index: usize,
     /// Current branch name (e.g. "main", "feature/foo").
     pub branch_name: Option<String>,
+    /// Cached syntax highlighter (syntect loading is expensive).
+    pub highlighter: DiffHighlighter,
 }
 
 /// A cached diff tied to a specific file path and section.
@@ -77,6 +80,7 @@ impl GitReviewState {
             diff_scroll: DiffScrollState::new(),
             current_hunk_index: 0,
             branch_name: None,
+            highlighter: DiffHighlighter::new(),
         }
     }
 

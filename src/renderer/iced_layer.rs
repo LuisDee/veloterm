@@ -319,6 +319,16 @@ pub enum GitReviewItemKind {
     FileEntry,
 }
 
+/// A span of diff text with foreground color and optional background highlight.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiffSpan {
+    pub text: String,
+    /// Syntax highlight foreground color (RGBA 0.0..1.0).
+    pub fg: [f32; 4],
+    /// Word-level diff background highlight (green for insert, red for delete).
+    pub highlight: Option<[f32; 4]>,
+}
+
 /// A single diff row for rendering.
 #[derive(Debug, Clone)]
 pub struct GitReviewDiffRow {
@@ -327,6 +337,8 @@ pub struct GitReviewDiffRow {
     pub right_num: Option<String>,
     pub left_text: String,
     pub right_text: String,
+    pub left_spans: Vec<DiffSpan>,
+    pub right_spans: Vec<DiffSpan>,
     pub hunk_index: usize,
 }
 
@@ -2528,30 +2540,84 @@ impl IcedLayer {
                             .size(11.0 / scale)
                             .color(text_muted)
                             .font(JETBRAINS_MONO);
-                        let left_text = text(diff_row.left_text.as_str())
-                            .size(11.0 / scale)
-                            .color(text_primary)
-                            .font(JETBRAINS_MONO);
 
                         let right_num = text(diff_row.right_num.as_deref().unwrap_or("   "))
                             .size(11.0 / scale)
                             .color(text_muted)
                             .font(JETBRAINS_MONO);
-                        let right_text = text(diff_row.right_text.as_str())
-                            .size(11.0 / scale)
-                            .color(text_primary)
-                            .font(JETBRAINS_MONO);
+
+                        // Build left text from spans (syntax highlighted + word-level diff)
+                        let left_content: IcedElement<'a> = if diff_row.left_spans.is_empty() {
+                            text(diff_row.left_text.as_str())
+                                .size(11.0 / scale)
+                                .color(text_primary)
+                                .font(JETBRAINS_MONO)
+                                .into()
+                        } else {
+                            let mut left_row = iced_widget::Row::new();
+                            for span in &diff_row.left_spans {
+                                let fg = iced_core::Color::from_rgba(span.fg[0], span.fg[1], span.fg[2], span.fg[3]);
+                                let span_widget = text(span.text.as_str())
+                                    .size(11.0 / scale)
+                                    .color(fg)
+                                    .font(JETBRAINS_MONO);
+                                if let Some(bg) = span.highlight {
+                                    let bg_color = iced_core::Color::from_rgba(bg[0], bg[1], bg[2], bg[3]);
+                                    left_row = left_row.push(
+                                        container(span_widget)
+                                            .style(move |_: &iced_core::Theme| container::Style {
+                                                background: Some(iced_core::Background::Color(bg_color)),
+                                                ..Default::default()
+                                            })
+                                    );
+                                } else {
+                                    left_row = left_row.push(span_widget);
+                                }
+                            }
+                            left_row.into()
+                        };
+
+                        // Build right text from spans
+                        let right_content: IcedElement<'a> = if diff_row.right_spans.is_empty() {
+                            text(diff_row.right_text.as_str())
+                                .size(11.0 / scale)
+                                .color(text_primary)
+                                .font(JETBRAINS_MONO)
+                                .into()
+                        } else {
+                            let mut right_row = iced_widget::Row::new();
+                            for span in &diff_row.right_spans {
+                                let fg = iced_core::Color::from_rgba(span.fg[0], span.fg[1], span.fg[2], span.fg[3]);
+                                let span_widget = text(span.text.as_str())
+                                    .size(11.0 / scale)
+                                    .color(fg)
+                                    .font(JETBRAINS_MONO);
+                                if let Some(bg) = span.highlight {
+                                    let bg_color = iced_core::Color::from_rgba(bg[0], bg[1], bg[2], bg[3]);
+                                    right_row = right_row.push(
+                                        container(span_widget)
+                                            .style(move |_: &iced_core::Theme| container::Style {
+                                                background: Some(iced_core::Background::Color(bg_color)),
+                                                ..Default::default()
+                                            })
+                                    );
+                                } else {
+                                    right_row = right_row.push(span_widget);
+                                }
+                            }
+                            right_row.into()
+                        };
 
                         let line_row = row![
                             indicator,
                             iced_widget::Space::new().width(2.0 / scale),
                             left_num,
                             iced_widget::Space::new().width(4.0 / scale),
-                            left_text,
+                            left_content,
                             iced_widget::Space::new().width(12.0 / scale),
                             right_num,
                             iced_widget::Space::new().width(4.0 / scale),
-                            right_text,
+                            right_content,
                         ]
                         .align_y(iced_core::Alignment::Center);
 
