@@ -159,18 +159,18 @@ export function pngDimensions(buf) {
 export function typeText(pid, text, pressEnter = false) {
     focusWindow(pid);
     // Primary: clipboard paste (immune to Karabiner key interception)
+    // When pressEnter is true, append \n to the pasted text so the terminal
+    // receives the newline as part of the paste — avoids needing a separate
+    // kp:return which Karabiner's grabber can intercept.
     try {
-        execSync(`/usr/bin/printf '%s' ${shellEscape(text)} | /usr/bin/pbcopy`, {
+        const pasteText = pressEnter ? text + "\n" : text;
+        execSync(`/usr/bin/printf '%s' ${shellEscape(pasteText)} | /usr/bin/pbcopy`, {
             timeout: 5000,
         });
         // Small delay after focus to ensure window is ready
         execSync("sleep 0.1", { timeout: 2000 });
         // Cmd+V to paste
         execFileSync("cliclick", ["kd:cmd", "t:v", "ku:cmd"], { timeout: 10000 });
-        if (pressEnter) {
-            execSync("sleep 0.1", { timeout: 2000 });
-            execFileSync("cliclick", ["kp:return"], { timeout: 10000 });
-        }
         return;
     }
     catch {
@@ -241,6 +241,19 @@ export function pressKey(pid, keyName) {
         throw new Error(`Unknown key: "${keyName}". Supported keys: ${Object.keys(KEY_CODES).join(", ")}`);
     }
     focusWindow(pid);
+    // For Enter/Return: use clipboard paste with \n to bypass Karabiner grabber
+    // which intercepts standalone kp:return CGEvents
+    if (lower === "enter" || lower === "return") {
+        try {
+            execSync(`/usr/bin/printf '\\n' | /usr/bin/pbcopy`, { timeout: 5000 });
+            execSync("sleep 0.1", { timeout: 2000 });
+            execFileSync("cliclick", ["kd:cmd", "t:v", "ku:cmd"], { timeout: 10000 });
+            return;
+        }
+        catch {
+            // Fall through to cliclick/AppleScript
+        }
+    }
     try {
         // Check for modifier combo (e.g., "ctrl+e", "ctrl+c")
         const parts = lower.split("+");
