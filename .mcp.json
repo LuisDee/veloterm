@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "veloterm": {
+      "command": "node",
+      "args": ["./mcp-server/dist/index.js"],
+      "env": {
+        "VELOTERM_PROJECT_DIR": "/Users/luisdeburnay/work/terminal-em",
+        "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/luisdeburnay/.cargo/bin"
+      }
+    }
+  }
+}
