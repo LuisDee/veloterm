@@ -1,0 +1,17 @@
+{
+  "track_id": "15_font_padding",
+  "state": "NOT_STARTED",
+  "complexity": "M",
+  "wave": 6,
+  "cc_version_at_brief": "v2",
+  "cc_version_current": "v2",
+  "dependencies": ["01_window_gpu_pipeline", "03_config"],
+  "interfaces_owned": ["font_loading", "glyph_atlas_rebuild", "terminal_padding", "runtime_font_size"],
+  "interfaces_consumed": ["Config.font", "GlyphAtlas", "GridRenderer"],
+  "events_published": [],
+  "events_consumed": [],
+  "patches": [],
+  "created_at": "2026-02-08T12:00:00Z",
+  "started_at": null,
+  "completed_at": null
+}

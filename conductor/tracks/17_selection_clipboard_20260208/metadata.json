@@ -1,0 +1,17 @@
+{
+  "track_id": "17_selection_clipboard",
+  "state": "NOT_STARTED",
+  "complexity": "M",
+  "wave": 6,
+  "cc_version_at_brief": "v2",
+  "cc_version_current": "v2",
+  "dependencies": ["02_core_terminal_emulation", "05_pane_ui", "15_font_padding"],
+  "interfaces_owned": ["double_click_word", "triple_click_line", "click_drag_select", "context_menu_basic"],
+  "interfaces_consumed": ["Selection", "Clipboard", "Config.theme", "Terminal"],
+  "events_published": [],
+  "events_consumed": [],
+  "patches": [],
+  "created_at": "2026-02-08T12:00:00Z",
+  "started_at": null,
+  "completed_at": null
+}

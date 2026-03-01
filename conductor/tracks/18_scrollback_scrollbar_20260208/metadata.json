@@ -1,0 +1,17 @@
+{
+  "track_id": "18_scrollback_scrollbar",
+  "state": "NOT_STARTED",
+  "complexity": "M",
+  "wave": 6,
+  "cc_version_at_brief": "v2",
+  "cc_version_current": "v2",
+  "dependencies": ["02_core_terminal_emulation", "07_perf_damage", "15_font_padding"],
+  "interfaces_owned": ["mouse_wheel_scroll", "smooth_scroll_animation", "scrollbar_ui", "scroll_position"],
+  "interfaces_consumed": ["Terminal.scrollback", "Config.scrollback", "GridRenderer", "DamageTracker"],
+  "events_published": [],
+  "events_consumed": [],
+  "patches": [],
+  "created_at": "2026-02-08T12:00:00Z",
+  "started_at": null,
+  "completed_at": null
+}

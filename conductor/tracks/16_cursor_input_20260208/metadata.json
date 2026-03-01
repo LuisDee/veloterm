@@ -1,0 +1,17 @@
+{
+  "track_id": "16_cursor_input",
+  "state": "NOT_STARTED",
+  "complexity": "S",
+  "wave": 6,
+  "cc_version_at_brief": "v2",
+  "cc_version_current": "v2",
+  "dependencies": ["01_window_gpu_pipeline", "02_core_terminal_emulation"],
+  "interfaces_owned": ["cursor_position_accuracy", "cursor_blink_config", "key_input_verification"],
+  "interfaces_consumed": ["CursorRenderer", "Config.cursor", "Terminal"],
+  "events_published": [],
+  "events_consumed": [],
+  "patches": [],
+  "created_at": "2026-02-08T12:00:00Z",
+  "started_at": null,
+  "completed_at": null
+}

@@ -1,0 +1,10 @@
+{
+  "id": "26_ui_chrome_redesign",
+  "title": "UI Chrome Redesign — Claude Terminal Design Spec",
+  "status": "in_progress",
+  "wave": 13,
+  "complexity": "L",
+  "depends_on": ["24_iced_ui_chrome"],
+  "boundaries": ["ui_layer", "config"],
+  "created": "2026-02-09"
+}

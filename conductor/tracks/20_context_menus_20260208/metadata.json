@@ -1,0 +1,17 @@
+{
+  "track_id": "20_context_menus",
+  "state": "NOT_STARTED",
+  "complexity": "M",
+  "wave": 7,
+  "cc_version_at_brief": "v2",
+  "cc_version_current": "v2",
+  "dependencies": ["06_tabs", "04_pane_layout", "17_selection_clipboard"],
+  "interfaces_owned": ["context_menu_overlay", "tab_bar_context_menu", "terminal_context_menu", "menu_keyboard_nav"],
+  "interfaces_consumed": ["TabManager", "PaneTree", "Clipboard", "Terminal", "Config.keybindings"],
+  "events_published": [],
+  "events_consumed": [],
+  "patches": [],
+  "created_at": "2026-02-08T12:00:00Z",
+  "started_at": null,
+  "completed_at": null
+}

@@ -1,0 +1,17 @@
+{
+  "track_id": "22_shell_hardening",
+  "state": "NOT_STARTED",
+  "complexity": "M",
+  "wave": 9,
+  "cc_version_at_brief": "v2",
+  "cc_version_current": "v2",
+  "dependencies": ["10_shell_integration", "08_url_detection"],
+  "interfaces_owned": ["shell_config_verification", "clear_scrollback", "bell_notification", "signal_handling"],
+  "interfaces_consumed": ["ShellIntegration", "URLDetector", "Terminal", "Config"],
+  "events_published": [],
+  "events_consumed": [],
+  "patches": [],
+  "created_at": "2026-02-08T12:00:00Z",
+  "started_at": null,
+  "completed_at": null
+}

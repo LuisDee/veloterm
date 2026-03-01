@@ -1,0 +1,17 @@
+{
+  "track_id": "19_tab_management",
+  "state": "NOT_STARTED",
+  "complexity": "M",
+  "wave": 7,
+  "cc_version_at_brief": "v2",
+  "cc_version_current": "v2",
+  "dependencies": ["06_tabs", "10_shell_integration"],
+  "interfaces_owned": ["tab_close_button", "tab_keyboard_shortcuts", "tab_drag_reorder", "tab_titles"],
+  "interfaces_consumed": ["TabManager", "TabBar", "Config.keybindings", "ShellIntegration.cwd"],
+  "events_published": [],
+  "events_consumed": [],
+  "patches": [],
+  "created_at": "2026-02-08T12:00:00Z",
+  "started_at": null,
+  "completed_at": null
+}
