@@ -524,6 +524,16 @@ impl App {
             };
             let icon_info = view::row_icon_info(row);
             let indent_guide = view::indent_guide_prefix(row);
+
+            // Compute git status indicator for this row
+            let git_status = state.git_status.as_ref().and_then(|gs| {
+                let tree = state.file_tree.as_ref()?;
+                let node = tree.get(row.index)?;
+                let repo_root = state.repo_root.as_ref()?;
+                let rel_path = node.path.strip_prefix(repo_root).ok()?;
+                gs.status_for(rel_path).map(|ind| ind.label().to_string())
+            });
+
             crate::renderer::iced_layer::FileBrowserRow {
                 index: vis_idx,
                 depth: row.depth,
@@ -534,6 +544,7 @@ impl App {
                 indent_guide,
                 is_selected,
                 is_hovered,
+                git_status,
             }
         }).collect()
     }
@@ -3392,6 +3403,9 @@ impl ApplicationHandler<UserEvent> for App {
                         git_review_can_commit: gr_can_commit,
                         git_review_commit_message: gr_commit_message,
                         git_review_diff_scroll: gr_diff_scroll,
+                        git_review_branch: self.git_review_state.as_ref()
+                            .and_then(|s| s.branch_name.clone())
+                            .unwrap_or_default(),
                     };
 
                     let mut iced_msgs = Vec::new();
@@ -3910,6 +3924,39 @@ impl App {
             match key {
                 Key::Character(ref s) if s.as_str() == "/" => {
                     state.enter_search_mode();
+                }
+                Key::Character(ref s) if s.as_str() == "." => {
+                    // Toggle hidden files
+                    if let Some(tree) = &mut state.file_tree {
+                        let new_val = !tree.show_hidden;
+                        tree.set_show_hidden(new_val);
+                        let _ = tree.expand(0); // re-expand root
+                        state.visible_rows = tree.visible_rows();
+                    }
+                }
+                Key::Character(ref s) if s.as_str() == "j" => {
+                    let result = state.handle_nav_action(TreeNavAction::Down, 500.0);
+                    if let Some(path) = result {
+                        state.load_preview(&path);
+                    }
+                }
+                Key::Character(ref s) if s.as_str() == "k" => {
+                    let result = state.handle_nav_action(TreeNavAction::Up, 500.0);
+                    if let Some(path) = result {
+                        state.load_preview(&path);
+                    }
+                }
+                Key::Character(ref s) if s.as_str() == "l" => {
+                    let result = state.handle_nav_action(TreeNavAction::Right, 500.0);
+                    if let Some(path) = result {
+                        state.load_preview(&path);
+                    }
+                }
+                Key::Character(ref s) if s.as_str() == "h" => {
+                    let result = state.handle_nav_action(TreeNavAction::Left, 500.0);
+                    if let Some(path) = result {
+                        state.load_preview(&path);
+                    }
                 }
                 Key::Named(NamedKey::ArrowDown) => {
                     let result = state.handle_nav_action(TreeNavAction::Down, 500.0);

@@ -46,6 +46,8 @@ pub struct GitReviewState {
     pub diff_scroll: DiffScrollState,
     /// Current hunk index in the diff view (for hunk-level staging).
     pub current_hunk_index: usize,
+    /// Current branch name (e.g. "main", "feature/foo").
+    pub branch_name: Option<String>,
 }
 
 /// A cached diff tied to a specific file path and section.
@@ -74,6 +76,7 @@ impl GitReviewState {
             cached_diff: None,
             diff_scroll: DiffScrollState::new(),
             current_hunk_index: 0,
+            branch_name: None,
         }
     }
 
@@ -83,14 +86,31 @@ impl GitReviewState {
             Ok(repo) => {
                 self.repo_path = repo.workdir().map(|p| p.to_path_buf());
                 self.error = None;
+                self.branch_name = Self::detect_branch(&repo);
                 self.refresh_status_from_repo(&repo);
             }
             Err(_) => {
                 self.repo_path = None;
                 self.git_status = None;
+                self.branch_name = None;
                 self.error = Some("Not in a git repository".to_string());
             }
         }
+    }
+
+    /// Detect the current branch name from a repository.
+    fn detect_branch(repo: &git2::Repository) -> Option<String> {
+        if let Ok(head) = repo.head() {
+            if head.is_branch() {
+                return head.shorthand().map(|s| s.to_string());
+            }
+            // Detached HEAD — show short hash
+            if let Ok(commit) = head.peel_to_commit() {
+                let id = commit.id();
+                return Some(format!("{:.7}", id));
+            }
+        }
+        None
     }
 
     /// Reset cached state while preserving layout settings.
@@ -113,7 +133,10 @@ impl GitReviewState {
             None => return,
         };
         match git2::Repository::open(&repo_path) {
-            Ok(repo) => self.refresh_status_from_repo(&repo),
+            Ok(repo) => {
+                self.branch_name = Self::detect_branch(&repo);
+                self.refresh_status_from_repo(&repo);
+            }
             Err(e) => self.error = Some(format!("Failed to open repo: {}", e)),
         }
     }

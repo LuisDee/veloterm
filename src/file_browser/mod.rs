@@ -9,6 +9,7 @@ pub mod view;
 pub mod watcher;
 
 use crate::input::InputMode;
+use git_status::TreeGitStatus;
 use preview::{FilePreview, PreviewViewState};
 use search::{FuzzyMatcher, SearchResult};
 use std::path::PathBuf;
@@ -66,6 +67,10 @@ pub struct FileBrowserState {
     pub search_results: Vec<SearchResult>,
     /// Whether to compact single-child directory chains (default true).
     pub compact_folders: bool,
+    /// Cached git status for displaying indicators in the file tree.
+    pub git_status: Option<TreeGitStatus>,
+    /// Git repository root path (for computing relative paths).
+    pub repo_root: Option<PathBuf>,
 }
 
 impl FileBrowserState {
@@ -86,6 +91,8 @@ impl FileBrowserState {
             search_matcher: FuzzyMatcher::new(),
             search_results: Vec::new(),
             compact_folders: true,
+            git_status: None,
+            repo_root: None,
         }
     }
 
@@ -98,6 +105,24 @@ impl FileBrowserState {
         self.breadcrumb = Some(BreadcrumbData::from_path(&root, &root));
         self.file_tree = Some(tree);
         self.view_state = FileTreeViewState::new();
+        self.refresh_git_status(&root);
+    }
+
+    /// Refresh git status indicators from the repository at the given root.
+    pub fn refresh_git_status(&mut self, root: &std::path::Path) {
+        match git2::Repository::discover(root) {
+            Ok(repo) => {
+                self.repo_root = repo.workdir().map(|p| p.to_path_buf());
+                match TreeGitStatus::from_repo(&repo) {
+                    Ok(status) => self.git_status = Some(status),
+                    Err(_) => self.git_status = None,
+                }
+            }
+            Err(_) => {
+                self.repo_root = None;
+                self.git_status = None;
+            }
+        }
     }
 
     /// Refresh the visible rows cache from the current tree state.

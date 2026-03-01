@@ -279,6 +279,8 @@ pub struct UiState<'a> {
     pub git_review_commit_message: String,
     /// Diff scroll offset.
     pub git_review_diff_scroll: f32,
+    /// Current git branch name.
+    pub git_review_branch: String,
 }
 
 /// A file browser row for rendering.
@@ -293,6 +295,8 @@ pub struct FileBrowserRow {
     pub indent_guide: String,
     pub is_selected: bool,
     pub is_hovered: bool,
+    /// Git status indicator label (e.g. "M", "U", "S", "*").
+    pub git_status: Option<String>,
 }
 
 /// A git review list item for rendering.
@@ -1955,6 +1959,27 @@ impl IcedLayer {
                     .into(),
             );
 
+            // Git status badge (M/U/S/*/I)
+            if let Some(ref status_label) = row.git_status {
+                let status_color = match status_label.as_str() {
+                    "M" => accent,
+                    "U" => accent_green,
+                    "S" => to_iced_color(&theme.accent_blue),
+                    "I" => text_muted,
+                    "*" => text_secondary,
+                    _ => text_muted,
+                };
+                row_items.push(iced_widget::Space::new().width(iced_core::Length::Fill).into());
+                row_items.push(
+                    text(status_label.as_str())
+                        .size(11.0 / scale)
+                        .color(status_color)
+                        .font(JETBRAINS_MONO)
+                        .into(),
+                );
+                row_items.push(iced_widget::Space::new().width(4.0 / scale).into());
+            }
+
             let row_content = Row::with_children(row_items)
                 .align_y(iced_core::Alignment::Center);
 
@@ -2138,6 +2163,39 @@ impl IcedLayer {
         let border_color = to_iced_color(&theme.border_visible);
         let focused = state.overlay_focused_panel == crate::file_browser::OverlayPanel::Left;
         let panel_border = if focused { accent } else { bg_surface };
+
+        // Branch header
+        let branch_widget: Option<IcedElement<'a>> = if !state.git_review_branch.is_empty() {
+            let accent_blue = to_iced_color(&theme.accent_blue);
+            Some(container(
+                row![
+                    text("\u{E0A0}") // Powerline branch icon
+                        .size(12.0 / scale)
+                        .color(accent_blue)
+                        .font(JETBRAINS_MONO),
+                    iced_widget::Space::new().width(6.0 / scale),
+                    text(state.git_review_branch.as_str())
+                        .size(12.0 / scale)
+                        .color(text_primary)
+                        .font(DM_SANS),
+                ]
+                .align_y(iced_core::Alignment::Center),
+            )
+            .width(iced_core::Length::Fill)
+            .padding(iced_core::Padding::from([6.0 / scale, 10.0 / scale]))
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(bg_deep)),
+                border: iced_core::Border {
+                    color: border_color,
+                    width: 0.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into())
+        } else {
+            None
+        };
 
         // Error message
         let error_widget: Option<IcedElement<'a>> = state.git_review_error.as_ref().map(|err| {
@@ -2324,6 +2382,9 @@ impl IcedLayer {
         .into();
 
         let mut content_col: iced_widget::Column<'a, UiMessage, iced_core::Theme, iced_wgpu::Renderer> = iced_widget::Column::new();
+        if let Some(branch) = branch_widget {
+            content_col = content_col.push(branch);
+        }
         if let Some(err) = error_widget {
             content_col = content_col.push(err);
         }
@@ -3139,6 +3200,7 @@ mod tests {
             git_review_can_commit: false,
             git_review_commit_message: String::new(),
             git_review_diff_scroll: 0.0,
+            git_review_branch: String::new(),
         }
     }
 
@@ -3427,6 +3489,7 @@ mod tests {
             git_review_can_commit: false,
             git_review_commit_message: String::new(),
             git_review_diff_scroll: 0.0,
+            git_review_branch: String::new(),
             };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
@@ -3558,6 +3621,7 @@ mod tests {
             git_review_can_commit: false,
             git_review_commit_message: String::new(),
             git_review_diff_scroll: 0.0,
+            git_review_branch: String::new(),
             };
         let messages = layer.render(&view, &state);
         assert!(messages.is_empty(), "No interactions, no messages expected");
@@ -3976,6 +4040,7 @@ mod tests {
             git_review_can_commit: false,
             git_review_commit_message: String::new(),
             git_review_diff_scroll: 0.0,
+            git_review_branch: String::new(),
         };
         assert!(!state.context_menu_visible);
         assert_eq!(state.context_menu_position, (0.0, 0.0));
