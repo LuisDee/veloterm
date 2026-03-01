@@ -40,6 +40,11 @@ pub struct VisibleRow {
     pub node_type: NodeType,
     pub expanded: bool,
     pub has_children: bool,
+    /// Whether this node is the last child of its parent.
+    pub is_last_child: bool,
+    /// For each ancestor depth level (0..depth), whether that ancestor has a next sibling.
+    /// Used to render `│` (true) or blank space (false) at each indent level.
+    pub ancestor_has_next_sibling: Vec<bool>,
 }
 
 /// Flat-storage tree of files and directories with lazy loading.
@@ -240,11 +245,18 @@ impl FileTree {
             return rows;
         }
         // Start from root's children if root is expanded, or show root itself
-        self.collect_visible(0, &mut rows);
+        let ancestor_trail = Vec::new();
+        self.collect_visible(0, &mut rows, false, &ancestor_trail);
         rows
     }
 
-    fn collect_visible(&self, index: usize, rows: &mut Vec<VisibleRow>) {
+    fn collect_visible(
+        &self,
+        index: usize,
+        rows: &mut Vec<VisibleRow>,
+        is_last_child: bool,
+        ancestor_has_next: &[bool],
+    ) {
         let node = &self.nodes[index];
         let has_children = match &node.children {
             Some(c) => !c.is_empty(),
@@ -258,12 +270,28 @@ impl FileTree {
             node_type: node.node_type.clone(),
             expanded: node.expanded,
             has_children,
+            is_last_child,
+            ancestor_has_next_sibling: ancestor_has_next.to_vec(),
         });
 
         if node.expanded {
             if let Some(children) = &node.children {
-                for &child_idx in children {
-                    self.collect_visible(child_idx, rows);
+                let len = children.len();
+                for (i, &child_idx) in children.iter().enumerate() {
+                    let child_is_last = i == len - 1;
+                    // Build ancestor trail for the child: current trail + whether THIS node has a next sibling
+                    let mut child_ancestor = ancestor_has_next.to_vec();
+                    child_ancestor.push(!is_last_child && node.depth > 0);
+                    // Actually: for the child's ancestor trail, we care about whether
+                    // the PARENT at each level has a next sibling. The current node
+                    // contributes to the child's trail based on whether *it* is the last child.
+                    // Correction: ancestor_has_next_sibling[d] = at depth d, does the ancestor have a next sibling?
+                    // For the child at depth node.depth+1:
+                    //   ancestor_has_next_sibling = parent's ancestor_has_next_sibling + [!is_last_child for the current node]
+                    // But root (depth 0) never has guides, and has no parent, so its entry doesn't matter.
+                    let mut child_ancestor = ancestor_has_next.to_vec();
+                    child_ancestor.push(!is_last_child);
+                    self.collect_visible(child_idx, rows, child_is_last, &child_ancestor);
                 }
             }
         }
@@ -306,26 +334,92 @@ pub fn visible_range(scroll_offset: f32, viewport_height: f32, row_height: f32, 
     (start, end)
 }
 
-/// Map a file extension to a display icon character.
-pub fn file_icon(extension: Option<&str>) -> &'static str {
-    match extension {
-        Some("rs") => "\u{2699}",     // gear for Rust
-        Some("py") => "\u{1F40D}",    // snake for Python — but we use text for safety
-        Some("js") | Some("jsx") => "JS",
-        Some("ts") | Some("tsx") => "TS",
-        Some("json") => "{}",
-        Some("toml") => "\u{2699}",   // gear
-        Some("yaml") | Some("yml") => "Y",
-        Some("md") => "\u{2193}",     // markdown arrow
-        Some("txt") => "\u{2261}",    // text lines
-        Some("sh") | Some("bash") | Some("zsh") => "$",
-        Some("css") | Some("scss") => "#",
-        Some("html") | Some("htm") => "<>",
-        Some("png") | Some("jpg") | Some("jpeg") | Some("gif") | Some("svg") | Some("webp") => "\u{25A3}",
-        Some("lock") => "\u{1F512}",
-        Some("wgsl") | Some("glsl") | Some("hlsl") => "\u{25B3}", // shader triangle
-        _ => "\u{25A1}",             // generic file
+/// Icon information with a display character and a color category hint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IconInfo {
+    pub icon: &'static str,
+    pub color_hint: &'static str,
+}
+
+/// Map a file extension (or filename) to an `IconInfo` with icon character and color category.
+///
+/// Color hints: "source", "config", "data", "image", "binary", "archive",
+/// "git", "docker", "docs", "shell", "markup", "style", "default".
+pub fn file_icon_info(extension: Option<&str>, filename: Option<&str>) -> IconInfo {
+    // Check special filenames first
+    if let Some(name) = filename {
+        let lower = name.to_lowercase();
+        match lower.as_str() {
+            "dockerfile" => return IconInfo { icon: "D", color_hint: "docker" },
+            "makefile" => return IconInfo { icon: "M", color_hint: "config" },
+            ".gitignore" | ".gitattributes" | ".gitmodules" => {
+                return IconInfo { icon: "G", color_hint: "git" };
+            }
+            "cargo.toml" | "cargo.lock" => return IconInfo { icon: "C", color_hint: "source" },
+            "package.json" | "package-lock.json" => return IconInfo { icon: "N", color_hint: "config" },
+            ".env" | ".env.local" | ".env.example" => {
+                return IconInfo { icon: "E", color_hint: "config" };
+            }
+            _ => {}
+        }
     }
+
+    match extension {
+        // Languages / Source
+        Some("rs") => IconInfo { icon: "R", color_hint: "source" },
+        Some("py") => IconInfo { icon: "P", color_hint: "source" },
+        Some("js") | Some("jsx") => IconInfo { icon: "J", color_hint: "source" },
+        Some("ts") | Some("tsx") => IconInfo { icon: "T", color_hint: "source" },
+        Some("c") => IconInfo { icon: "C", color_hint: "source" },
+        Some("h") | Some("hpp") => IconInfo { icon: "H", color_hint: "source" },
+        Some("cpp") | Some("cc") => IconInfo { icon: "C", color_hint: "source" },
+        Some("go") => IconInfo { icon: "G", color_hint: "source" },
+        Some("java") => IconInfo { icon: "J", color_hint: "source" },
+        Some("rb") => IconInfo { icon: "R", color_hint: "source" },
+        Some("php") => IconInfo { icon: "P", color_hint: "source" },
+        Some("swift") => IconInfo { icon: "S", color_hint: "source" },
+        Some("kt") => IconInfo { icon: "K", color_hint: "source" },
+        Some("lua") => IconInfo { icon: "L", color_hint: "source" },
+        Some("wasm") => IconInfo { icon: "W", color_hint: "source" },
+        Some("wgsl") | Some("glsl") | Some("hlsl") => IconInfo { icon: "\u{25B3}", color_hint: "source" },
+        // Config
+        Some("json") => IconInfo { icon: "{}", color_hint: "config" },
+        Some("toml") => IconInfo { icon: "T", color_hint: "config" },
+        Some("yaml") | Some("yml") => IconInfo { icon: "Y", color_hint: "config" },
+        Some("xml") => IconInfo { icon: "X", color_hint: "config" },
+        Some("ini") | Some("conf") | Some("cfg") => IconInfo { icon: "\u{2699}", color_hint: "config" },
+        // Data
+        Some("sql") => IconInfo { icon: "Q", color_hint: "data" },
+        Some("csv") => IconInfo { icon: ",", color_hint: "data" },
+        // Markup / Docs
+        Some("md") => IconInfo { icon: "M", color_hint: "docs" },
+        Some("txt") => IconInfo { icon: "\u{2261}", color_hint: "docs" },
+        Some("pdf") => IconInfo { icon: "P", color_hint: "docs" },
+        // Markup
+        Some("html") | Some("htm") => IconInfo { icon: "<>", color_hint: "markup" },
+        Some("svg") => IconInfo { icon: "S", color_hint: "markup" },
+        // Style
+        Some("css") | Some("scss") | Some("less") => IconInfo { icon: "#", color_hint: "style" },
+        // Shell
+        Some("sh") | Some("bash") | Some("zsh") | Some("fish") => IconInfo { icon: "$", color_hint: "shell" },
+        // Images
+        Some("png") | Some("jpg") | Some("jpeg") | Some("gif") | Some("webp") | Some("bmp") | Some("ico") => {
+            IconInfo { icon: "\u{25A3}", color_hint: "image" }
+        }
+        // Archive
+        Some("zip") | Some("tar") | Some("gz") | Some("bz2") | Some("xz") | Some("7z") | Some("rar") => {
+            IconInfo { icon: "\u{25A0}", color_hint: "archive" }
+        }
+        // Lock / Generated
+        Some("lock") => IconInfo { icon: "L", color_hint: "config" },
+        // Default
+        _ => IconInfo { icon: "\u{25A1}", color_hint: "default" },
+    }
+}
+
+/// Map a file extension to a display icon character (legacy API, delegates to `file_icon_info`).
+pub fn file_icon(extension: Option<&str>) -> &'static str {
+    file_icon_info(extension, None).icon
 }
 
 /// Map a file extension to a short label for icons (ASCII-safe fallback).
@@ -395,6 +489,10 @@ pub enum TreeNavAction {
     Home,
     /// Jump to last row.
     End,
+    /// Move selection down by a full page of rows.
+    PageDown(usize),
+    /// Move selection up by a full page of rows.
+    PageUp(usize),
 }
 
 /// Keyboard navigation state for the tree.
@@ -512,6 +610,18 @@ impl TreeNavState {
                 }
                 None
             }
+            TreeNavAction::PageDown(page_size) => {
+                let current = self.selected_visible_row.unwrap_or(0);
+                let target = (current + page_size).min(visible_rows.len().saturating_sub(1));
+                self.selected_visible_row = Some(target);
+                None
+            }
+            TreeNavAction::PageUp(page_size) => {
+                let current = self.selected_visible_row.unwrap_or(0);
+                let target = current.saturating_sub(page_size);
+                self.selected_visible_row = Some(target);
+                None
+            }
         }
     }
 }
@@ -528,6 +638,20 @@ pub enum TreeNavResult {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    /// Helper to build a VisibleRow with default indent guide fields (for nav tests).
+    fn vr(index: usize, depth: usize, name: &str, node_type: NodeType, expanded: bool, has_children: bool) -> VisibleRow {
+        VisibleRow {
+            index,
+            depth,
+            name: name.into(),
+            node_type,
+            expanded,
+            has_children,
+            is_last_child: false,
+            ancestor_has_next_sibling: vec![],
+        }
+    }
 
     // --- FileTree data model tests ---
 
@@ -799,7 +923,7 @@ mod tests {
 
     #[test]
     fn file_icon_rust() {
-        assert_eq!(file_icon(Some("rs")), "\u{2699}");
+        assert_eq!(file_icon(Some("rs")), "R");
     }
 
     #[test]
@@ -810,8 +934,8 @@ mod tests {
 
     #[test]
     fn file_icon_javascript() {
-        assert_eq!(file_icon(Some("js")), "JS");
-        assert_eq!(file_icon(Some("jsx")), "JS");
+        assert_eq!(file_icon(Some("js")), "J");
+        assert_eq!(file_icon(Some("jsx")), "J");
     }
 
     #[test]
@@ -864,7 +988,7 @@ mod tests {
     fn nav_down_from_none_selects_first() {
         let mut nav = TreeNavState::new();
         let rows = vec![
-            VisibleRow { index: 0, depth: 0, name: "root".into(), node_type: NodeType::Directory, expanded: true, has_children: true },
+            vr(0, 0, "root", NodeType::Directory, true, true),
         ];
         nav.apply(TreeNavAction::Down, &rows);
         assert_eq!(nav.selected_visible_row, Some(0));
@@ -875,8 +999,8 @@ mod tests {
         let mut nav = TreeNavState::new();
         nav.selected_visible_row = Some(0);
         let rows = vec![
-            VisibleRow { index: 0, depth: 0, name: "root".into(), node_type: NodeType::Directory, expanded: true, has_children: true },
-            VisibleRow { index: 1, depth: 1, name: "src".into(), node_type: NodeType::Directory, expanded: false, has_children: true },
+            vr(0, 0, "root", NodeType::Directory, true, true),
+            vr(1, 1, "src", NodeType::Directory, false, true),
         ];
         nav.apply(TreeNavAction::Down, &rows);
         assert_eq!(nav.selected_visible_row, Some(1));
@@ -887,7 +1011,7 @@ mod tests {
         let mut nav = TreeNavState::new();
         nav.selected_visible_row = Some(0);
         let rows = vec![
-            VisibleRow { index: 0, depth: 0, name: "root".into(), node_type: NodeType::Directory, expanded: true, has_children: true },
+            vr(0, 0, "root", NodeType::Directory, true, true),
         ];
         nav.apply(TreeNavAction::Up, &rows);
         assert_eq!(nav.selected_visible_row, Some(0));
@@ -898,7 +1022,7 @@ mod tests {
         let mut nav = TreeNavState::new();
         nav.selected_visible_row = Some(0);
         let rows = vec![
-            VisibleRow { index: 0, depth: 0, name: "root".into(), node_type: NodeType::Directory, expanded: true, has_children: true },
+            vr(0, 0, "root", NodeType::Directory, true, true),
         ];
         nav.apply(TreeNavAction::Down, &rows);
         assert_eq!(nav.selected_visible_row, Some(0)); // stays, already at last
@@ -909,7 +1033,7 @@ mod tests {
         let mut nav = TreeNavState::new();
         nav.selected_visible_row = Some(0);
         let rows = vec![
-            VisibleRow { index: 0, depth: 0, name: "root".into(), node_type: NodeType::Directory, expanded: true, has_children: true },
+            vr(0, 0, "root", NodeType::Directory, true, true),
         ];
         let result = nav.apply(TreeNavAction::Left, &rows);
         assert_eq!(result, Some(TreeNavResult::Collapse(0)));
@@ -920,8 +1044,8 @@ mod tests {
         let mut nav = TreeNavState::new();
         nav.selected_visible_row = Some(1);
         let rows = vec![
-            VisibleRow { index: 0, depth: 0, name: "root".into(), node_type: NodeType::Directory, expanded: true, has_children: true },
-            VisibleRow { index: 1, depth: 1, name: "file.rs".into(), node_type: NodeType::File { extension: Some("rs".into()), size: 100 }, expanded: false, has_children: false },
+            vr(0, 0, "root", NodeType::Directory, true, true),
+            vr(1, 1, "file.rs", NodeType::File { extension: Some("rs".into()), size: 100 }, false, false),
         ];
         nav.apply(TreeNavAction::Left, &rows);
         assert_eq!(nav.selected_visible_row, Some(0)); // moved to parent
@@ -932,7 +1056,7 @@ mod tests {
         let mut nav = TreeNavState::new();
         nav.selected_visible_row = Some(0);
         let rows = vec![
-            VisibleRow { index: 5, depth: 1, name: "src".into(), node_type: NodeType::Directory, expanded: false, has_children: true },
+            vr(5, 1, "src", NodeType::Directory, false, true),
         ];
         let result = nav.apply(TreeNavAction::Right, &rows);
         assert_eq!(result, Some(TreeNavResult::Expand(5)));
@@ -943,8 +1067,8 @@ mod tests {
         let mut nav = TreeNavState::new();
         nav.selected_visible_row = Some(0);
         let rows = vec![
-            VisibleRow { index: 0, depth: 0, name: "src".into(), node_type: NodeType::Directory, expanded: true, has_children: true },
-            VisibleRow { index: 1, depth: 1, name: "main.rs".into(), node_type: NodeType::File { extension: Some("rs".into()), size: 100 }, expanded: false, has_children: false },
+            vr(0, 0, "src", NodeType::Directory, true, true),
+            vr(1, 1, "main.rs", NodeType::File { extension: Some("rs".into()), size: 100 }, false, false),
         ];
         nav.apply(TreeNavAction::Right, &rows);
         assert_eq!(nav.selected_visible_row, Some(1));
@@ -955,7 +1079,7 @@ mod tests {
         let mut nav = TreeNavState::new();
         nav.selected_visible_row = Some(0);
         let rows = vec![
-            VisibleRow { index: 3, depth: 1, name: "main.rs".into(), node_type: NodeType::File { extension: Some("rs".into()), size: 100 }, expanded: false, has_children: false },
+            vr(3, 1, "main.rs", NodeType::File { extension: Some("rs".into()), size: 100 }, false, false),
         ];
         let result = nav.apply(TreeNavAction::Enter, &rows);
         assert_eq!(result, Some(TreeNavResult::OpenFile(3)));
@@ -966,7 +1090,7 @@ mod tests {
         let mut nav = TreeNavState::new();
         nav.selected_visible_row = Some(0);
         let rows = vec![
-            VisibleRow { index: 2, depth: 0, name: "docs".into(), node_type: NodeType::Directory, expanded: false, has_children: true },
+            vr(2, 0, "docs", NodeType::Directory, false, true),
         ];
         let result = nav.apply(TreeNavAction::Enter, &rows);
         assert_eq!(result, Some(TreeNavResult::Expand(2)));
@@ -977,7 +1101,7 @@ mod tests {
         let mut nav = TreeNavState::new();
         nav.selected_visible_row = Some(0);
         let rows = vec![
-            VisibleRow { index: 2, depth: 0, name: "docs".into(), node_type: NodeType::Directory, expanded: true, has_children: true },
+            vr(2, 0, "docs", NodeType::Directory, true, true),
         ];
         let result = nav.apply(TreeNavAction::Enter, &rows);
         assert_eq!(result, Some(TreeNavResult::Collapse(2)));
@@ -1069,10 +1193,10 @@ mod tests {
         let mut nav = TreeNavState::new();
         nav.selected_visible_row = Some(3);
         let rows = vec![
-            VisibleRow { index: 0, depth: 0, name: "root".into(), node_type: NodeType::Directory, expanded: true, has_children: true },
-            VisibleRow { index: 1, depth: 1, name: "a.txt".into(), node_type: NodeType::File { extension: None, size: 0 }, expanded: false, has_children: false },
-            VisibleRow { index: 2, depth: 1, name: "b.txt".into(), node_type: NodeType::File { extension: None, size: 0 }, expanded: false, has_children: false },
-            VisibleRow { index: 3, depth: 1, name: "c.txt".into(), node_type: NodeType::File { extension: None, size: 0 }, expanded: false, has_children: false },
+            vr(0, 0, "root", NodeType::Directory, true, true),
+            vr(1, 1, "a.txt", NodeType::File { extension: None, size: 0 }, false, false),
+            vr(2, 1, "b.txt", NodeType::File { extension: None, size: 0 }, false, false),
+            vr(3, 1, "c.txt", NodeType::File { extension: None, size: 0 }, false, false),
         ];
         nav.apply(TreeNavAction::Home, &rows);
         assert_eq!(nav.selected_visible_row, Some(0));
@@ -1083,9 +1207,9 @@ mod tests {
         let mut nav = TreeNavState::new();
         nav.selected_visible_row = Some(0);
         let rows = vec![
-            VisibleRow { index: 0, depth: 0, name: "root".into(), node_type: NodeType::Directory, expanded: true, has_children: true },
-            VisibleRow { index: 1, depth: 1, name: "a.txt".into(), node_type: NodeType::File { extension: None, size: 0 }, expanded: false, has_children: false },
-            VisibleRow { index: 2, depth: 1, name: "b.txt".into(), node_type: NodeType::File { extension: None, size: 0 }, expanded: false, has_children: false },
+            vr(0, 0, "root", NodeType::Directory, true, true),
+            vr(1, 1, "a.txt", NodeType::File { extension: None, size: 0 }, false, false),
+            vr(2, 1, "b.txt", NodeType::File { extension: None, size: 0 }, false, false),
         ];
         nav.apply(TreeNavAction::End, &rows);
         assert_eq!(nav.selected_visible_row, Some(2));
@@ -1130,5 +1254,227 @@ mod tests {
             }
             _ => panic!("expected file node"),
         }
+    }
+
+    // ── Indent guide tests ──
+
+    #[test]
+    fn visible_row_root_is_not_last_child() {
+        // Root node (depth 0) has is_last_child=false (no parent concept)
+        let tree = FileTree::new(PathBuf::from("/tmp/project"));
+        let rows = tree.visible_rows();
+        assert_eq!(rows.len(), 1);
+        assert!(!rows[0].is_last_child);
+        assert!(rows[0].ancestor_has_next_sibling.is_empty());
+    }
+
+    #[test]
+    fn visible_row_last_child_computed_correctly() {
+        // last sibling should have is_last_child=true, others false
+        let mut tree = FileTree::new(PathBuf::from("/tmp/project"));
+        tree.add_child(0, "src", NodeType::Directory);
+        tree.add_child(0, "README.md", NodeType::File { extension: Some("md".into()), size: 50 });
+        tree.nodes[0].expanded = true;
+        tree.sort_children(0);
+
+        let rows = tree.visible_rows();
+        // rows: project(root), src(dir, first), README.md(file, last)
+        assert_eq!(rows.len(), 3);
+        assert!(!rows[1].is_last_child, "src is not last child");
+        assert!(rows[2].is_last_child, "README.md is last child");
+    }
+
+    #[test]
+    fn visible_row_ancestor_sibling_tracking() {
+        // Deep nesting: project > src > config > types.rs
+        let mut tree = FileTree::new(PathBuf::from("/tmp/project"));
+        let src = tree.add_child(0, "src", NodeType::Directory);
+        tree.add_child(0, "Cargo.toml", NodeType::File { extension: Some("toml".into()), size: 50 });
+        let config = tree.add_child(src, "config", NodeType::Directory);
+        tree.add_child(src, "main.rs", NodeType::File { extension: Some("rs".into()), size: 100 });
+        tree.add_child(config, "types.rs", NodeType::File { extension: Some("rs".into()), size: 200 });
+
+        tree.nodes[0].expanded = true;
+        tree.sort_children(0);
+        tree.nodes[src].expanded = true;
+        tree.sort_children(src);
+        tree.nodes[config].expanded = true;
+        tree.sort_children(config);
+
+        let rows = tree.visible_rows();
+        // Expected tree:
+        // project (depth 0)
+        //   src (depth 1, not last — Cargo.toml follows)
+        //     config (depth 2, not last — main.rs follows)
+        //       types.rs (depth 3, last)
+        //     main.rs (depth 2, last)
+        //   Cargo.toml (depth 1, last)
+
+        let types_row = rows.iter().find(|r| r.name == "types.rs").unwrap();
+        assert_eq!(types_row.depth, 3);
+        assert!(types_row.is_last_child);
+        // ancestor_has_next_sibling should have 3 entries (for depths 0, 1, 2)
+        assert_eq!(types_row.ancestor_has_next_sibling.len(), 3);
+    }
+
+    #[test]
+    fn indent_guide_not_at_depth_0() {
+        // Root items (depth 0) should have empty ancestor_has_next_sibling
+        let mut tree = FileTree::new(PathBuf::from("/tmp/project"));
+        tree.add_child(0, "a.txt", NodeType::File { extension: None, size: 0 });
+        tree.nodes[0].expanded = true;
+
+        let rows = tree.visible_rows();
+        assert!(rows[0].ancestor_has_next_sibling.is_empty(), "root has no ancestor trail");
+    }
+
+    #[test]
+    fn indent_guide_last_child_uses_corner() {
+        // The last child should have is_last_child=true (render └─)
+        let mut tree = FileTree::new(PathBuf::from("/tmp/project"));
+        tree.add_child(0, "alpha.txt", NodeType::File { extension: None, size: 0 });
+        tree.add_child(0, "beta.txt", NodeType::File { extension: None, size: 0 });
+        tree.nodes[0].expanded = true;
+        tree.sort_children(0);
+
+        let rows = tree.visible_rows();
+        assert!(!rows[1].is_last_child, "alpha is not last");
+        assert!(rows[2].is_last_child, "beta is last — render └─");
+    }
+
+    #[test]
+    fn indent_guide_middle_child_uses_tee() {
+        // Non-last children should have is_last_child=false (render ├─)
+        let mut tree = FileTree::new(PathBuf::from("/tmp/project"));
+        tree.add_child(0, "a.txt", NodeType::File { extension: None, size: 0 });
+        tree.add_child(0, "b.txt", NodeType::File { extension: None, size: 0 });
+        tree.add_child(0, "c.txt", NodeType::File { extension: None, size: 0 });
+        tree.nodes[0].expanded = true;
+        tree.sort_children(0);
+
+        let rows = tree.visible_rows();
+        assert!(!rows[1].is_last_child, "a.txt — render ├─");
+        assert!(!rows[2].is_last_child, "b.txt — render ├─");
+        assert!(rows[3].is_last_child, "c.txt — render └─");
+    }
+
+    // ── Enhanced icon tests ──
+
+    #[test]
+    fn icon_for_rust_file() {
+        let info = file_icon_info(Some("rs"), None);
+        assert_eq!(info.icon, "R");
+        assert_eq!(info.color_hint, "source");
+    }
+
+    #[test]
+    fn icon_for_go_file() {
+        let info = file_icon_info(Some("go"), None);
+        assert_eq!(info.icon, "G");
+        assert_eq!(info.color_hint, "source");
+    }
+
+    #[test]
+    fn icon_for_dockerfile() {
+        let info = file_icon_info(None, Some("Dockerfile"));
+        assert_eq!(info.icon, "D");
+        assert_eq!(info.color_hint, "docker");
+    }
+
+    #[test]
+    fn icon_for_unknown_extension() {
+        let info = file_icon_info(Some("xyz"), None);
+        assert_eq!(info.icon, "\u{25A1}");
+        assert_eq!(info.color_hint, "default");
+    }
+
+    #[test]
+    fn icon_color_hint_source_code() {
+        for ext in &["rs", "py", "js", "ts", "go", "java", "rb", "swift", "kt", "c", "cpp", "h"] {
+            let info = file_icon_info(Some(ext), None);
+            assert_eq!(info.color_hint, "source", "expected source for .{ext}");
+        }
+    }
+
+    #[test]
+    fn icon_color_hint_config() {
+        for ext in &["json", "toml", "yaml", "yml", "xml", "ini", "conf"] {
+            let info = file_icon_info(Some(ext), None);
+            assert_eq!(info.color_hint, "config", "expected config for .{ext}");
+        }
+    }
+
+    #[test]
+    fn icon_special_filenames_override_extension() {
+        // Dockerfile has no extension but matches by filename
+        let info = file_icon_info(None, Some("Makefile"));
+        assert_eq!(info.icon, "M");
+        assert_eq!(info.color_hint, "config");
+
+        let info = file_icon_info(None, Some(".gitignore"));
+        assert_eq!(info.icon, "G");
+        assert_eq!(info.color_hint, "git");
+    }
+
+    #[test]
+    fn icon_archive_category() {
+        for ext in &["zip", "tar", "gz"] {
+            let info = file_icon_info(Some(ext), None);
+            assert_eq!(info.color_hint, "archive", "expected archive for .{ext}");
+        }
+    }
+
+    #[test]
+    fn icon_legacy_api_delegates() {
+        // file_icon() should still return a valid icon via file_icon_info
+        assert_eq!(file_icon(Some("rs")), "R");
+        assert_eq!(file_icon(Some("xyz")), "\u{25A1}");
+        assert_eq!(file_icon(None), "\u{25A1}");
+    }
+
+    // ── Page navigation tests ──
+
+    #[test]
+    fn page_down_moves_by_viewport() {
+        let mut nav = TreeNavState::new();
+        nav.selected_visible_row = Some(0);
+        let rows: Vec<VisibleRow> = (0..50)
+            .map(|i| vr(i, 0, &format!("item_{i}"), NodeType::File { extension: None, size: 0 }, false, false))
+            .collect();
+        nav.apply(TreeNavAction::PageDown(10), &rows);
+        assert_eq!(nav.selected_visible_row, Some(10));
+    }
+
+    #[test]
+    fn page_up_moves_by_viewport() {
+        let mut nav = TreeNavState::new();
+        nav.selected_visible_row = Some(20);
+        let rows: Vec<VisibleRow> = (0..50)
+            .map(|i| vr(i, 0, &format!("item_{i}"), NodeType::File { extension: None, size: 0 }, false, false))
+            .collect();
+        nav.apply(TreeNavAction::PageUp(10), &rows);
+        assert_eq!(nav.selected_visible_row, Some(10));
+    }
+
+    #[test]
+    fn page_down_at_bottom_clamps() {
+        let mut nav = TreeNavState::new();
+        nav.selected_visible_row = Some(45);
+        let rows: Vec<VisibleRow> = (0..50)
+            .map(|i| vr(i, 0, &format!("item_{i}"), NodeType::File { extension: None, size: 0 }, false, false))
+            .collect();
+        nav.apply(TreeNavAction::PageDown(10), &rows);
+        assert_eq!(nav.selected_visible_row, Some(49)); // clamped to last
+    }
+
+    #[test]
+    fn page_up_at_top_clamps() {
+        let mut nav = TreeNavState::new();
+        nav.selected_visible_row = Some(3);
+        let rows: Vec<VisibleRow> = (0..50)
+            .map(|i| vr(i, 0, &format!("item_{i}"), NodeType::File { extension: None, size: 0 }, false, false))
+            .collect();
+        nav.apply(TreeNavAction::PageUp(10), &rows);
+        assert_eq!(nav.selected_visible_row, Some(0)); // clamped to first
     }
 }

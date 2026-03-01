@@ -517,12 +517,16 @@ impl App {
             } else {
                 None
             };
+            let icon_info = view::row_icon_info(row);
+            let indent_guide = view::indent_guide_prefix(row);
             crate::renderer::iced_layer::FileBrowserRow {
                 index: vis_idx,
                 depth: row.depth,
                 name: row.name.clone(),
-                icon: view::row_icon(row).to_string(),
+                icon: icon_info.icon.to_string(),
+                icon_color_hint: icon_info.color_hint.to_string(),
                 chevron,
+                indent_guide,
                 is_selected,
                 is_hovered,
             }
@@ -554,15 +558,17 @@ impl App {
                     is_selected: false,
                     section: Some(format!("{:?}", section)),
                     status_label: None,
+                    display_dir: None,
                 }
             }
-            ListItem::FileEntry { display_name, status_label, selected, section, .. } => {
+            ListItem::FileEntry { display_name, display_dir, status_label, selected, section, .. } => {
                 GitReviewListItem {
                     kind: GitReviewItemKind::FileEntry,
                     label: display_name.clone(),
                     is_selected: *selected,
                     section: Some(format!("{:?}", section)),
                     status_label: Some(status_label.clone()),
+                    display_dir: display_dir.clone(),
                 }
             }
         }).collect()
@@ -2779,6 +2785,21 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
+                // Route scroll to git review diff view when overlay is active
+                if self.input_mode == InputMode::GitReview {
+                    if let Some(state) = &mut self.git_review_state {
+                        let scroll_delta = match delta {
+                            winit::event::MouseScrollDelta::LineDelta(_, y) => -y * 60.0,
+                            winit::event::MouseScrollDelta::PixelDelta(pos) => -pos.y as f32,
+                        };
+                        state.diff_scroll.scroll_vertical(scroll_delta);
+                    }
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                    return;
+                }
+
                 let focused_pane = self.tab_manager.active_tab().pane_tree.focused_pane_id();
                 if let Some(state) = self.pane_states.get_mut(&focused_pane) {
                     let history_size = state.terminal.history_size();
@@ -3762,6 +3783,20 @@ impl App {
                         state.view_state.ensure_selected_visible(state.visible_rows.len(), 500.0);
                     }
                 }
+                Key::Named(NamedKey::PageDown) => {
+                    let page_size = (500.0_f32 / 28.0).floor() as usize;
+                    let result = state.handle_nav_action(TreeNavAction::PageDown(page_size), 500.0);
+                    if let Some(path) = result {
+                        state.load_preview(&path);
+                    }
+                }
+                Key::Named(NamedKey::PageUp) => {
+                    let page_size = (500.0_f32 / 28.0).floor() as usize;
+                    let result = state.handle_nav_action(TreeNavAction::PageUp(page_size), 500.0);
+                    if let Some(path) = result {
+                        state.load_preview(&path);
+                    }
+                }
                 _ => {} // Consume other keys
             }
         } else {
@@ -3862,13 +3897,24 @@ impl App {
                             state.navigate(-1);
                             state.compute_selected_diff();
                         }
+                        "R" => {
+                            state.refresh_status();
+                            state.invalidate_diff_cache();
+                        }
+                        "l" => {
+                            // Focus diff panel
+                            if state.selected.is_some() {
+                                state.compute_selected_diff();
+                                state.focused_panel = crate::file_browser::OverlayPanel::Right;
+                            }
+                        }
                         _ => {}
                     }
                 }
                 _ => {}
             }
         } else {
-            // Right panel (diff): scroll
+            // Right panel (diff): scroll + hunk navigation + hunk staging
             match key {
                 Key::Named(NamedKey::ArrowDown) => {
                     state.diff_scroll.scroll_vertical(20.0);
@@ -3876,11 +3922,61 @@ impl App {
                 Key::Named(NamedKey::ArrowUp) => {
                     state.diff_scroll.scroll_vertical(-20.0);
                 }
+                Key::Named(NamedKey::ArrowLeft) => {
+                    // Return focus to file list
+                    state.focused_panel = crate::file_browser::OverlayPanel::Left;
+                }
                 Key::Named(NamedKey::PageDown) => {
                     state.diff_scroll.scroll_vertical(200.0);
                 }
                 Key::Named(NamedKey::PageUp) => {
                     state.diff_scroll.scroll_vertical(-200.0);
+                }
+                Key::Named(NamedKey::Home) => {
+                    state.diff_scroll.reset();
+                    state.current_hunk_index = 0;
+                }
+                Key::Named(NamedKey::End) => {
+                    let max = state.diff_scroll.max_vertical();
+                    state.diff_scroll.scroll_vertical(max);
+                    let last = state.hunk_count().saturating_sub(1);
+                    state.current_hunk_index = last;
+                }
+                Key::Character(ref s) => {
+                    match s.as_str() {
+                        "j" => {
+                            state.diff_scroll.scroll_vertical(20.0);
+                        }
+                        "k" => {
+                            state.diff_scroll.scroll_vertical(-20.0);
+                        }
+                        "h" => {
+                            // Return focus to file list
+                            state.focused_panel = crate::file_browser::OverlayPanel::Left;
+                        }
+                        "]" | "n" => {
+                            // Jump to next hunk
+                            state.next_hunk();
+                        }
+                        "[" | "N" => {
+                            // Jump to previous hunk
+                            state.prev_hunk();
+                        }
+                        "s" | " " => {
+                            // Stage current hunk
+                            state.stage_current_hunk();
+                        }
+                        "u" => {
+                            // Unstage current hunk
+                            state.unstage_current_hunk();
+                        }
+                        "R" => {
+                            // Manual refresh
+                            state.refresh_status();
+                            state.invalidate_diff_cache();
+                        }
+                        _ => {}
+                    }
                 }
                 _ => {}
             }
@@ -4048,7 +4144,7 @@ mod tests {
     fn app_config_defaults_match_expected_values() {
         let app = App::new(WindowConfig::default(), Config::default());
         assert_eq!(app.app_config.colors.theme, "midnight");
-        assert_eq!(app.app_config.font.size, 12.0);
+        assert_eq!(app.app_config.font.size, 13.0);
         assert_eq!(app.app_config.scrollback.lines, 10_000);
         assert_eq!(app.app_config.cursor.style, "block");
         assert!(app.app_config.cursor.blink);
@@ -4746,8 +4842,8 @@ blink = false
     #[test]
     fn font_size_tracks_in_app() {
         let app = App::new(WindowConfig::default(), Config::default());
-        assert_eq!(app.current_font_size, 12.0);
-        assert_eq!(app.default_font_size, 12.0);
+        assert_eq!(app.current_font_size, 13.0);
+        assert_eq!(app.default_font_size, 13.0);
     }
 
     // ── Config hot-reload ────────────────────────────────────────
@@ -4755,7 +4851,7 @@ blink = false
     #[test]
     fn config_reload_font_updates_app_state() {
         let mut app = App::new(WindowConfig::default(), Config::default());
-        assert_eq!(app.current_font_size, 12.0);
+        assert_eq!(app.current_font_size, 13.0);
 
         let mut new_config = Config::default();
         new_config.font.size = 20.0;

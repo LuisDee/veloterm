@@ -275,7 +275,9 @@ pub struct FileBrowserRow {
     pub depth: usize,
     pub name: String,
     pub icon: String,
+    pub icon_color_hint: String,
     pub chevron: Option<String>,
+    pub indent_guide: String,
     pub is_selected: bool,
     pub is_hovered: bool,
 }
@@ -288,6 +290,7 @@ pub struct GitReviewListItem {
     pub is_selected: bool,
     pub section: Option<String>,
     pub status_label: Option<String>,
+    pub display_dir: Option<String>,
 }
 
 /// Kind of git review list item.
@@ -1843,7 +1846,10 @@ impl IcedLayer {
         let text_primary = to_iced_color(&theme.text_primary);
         let text_secondary = to_iced_color(&theme.text_secondary);
         let text_muted = to_iced_color(&theme.text_muted);
+        let text_ghost = to_iced_color(&theme.text_ghost);
         let accent = to_iced_color(&theme.accent_orange);
+        let accent_blue = to_iced_color(&theme.accent_blue);
+        let accent_green = to_iced_color(&theme.accent_green);
         let border_color = to_iced_color(&theme.border_visible);
         let focused = state.overlay_focused_panel == crate::file_browser::OverlayPanel::Left;
         let panel_border = if focused { accent } else { bg_surface };
@@ -1872,15 +1878,25 @@ impl IcedLayer {
         let mut rows_col = iced_widget::Column::new().spacing(0.0);
         for row in &state.file_browser_rows {
             let idx = row.index;
-            let depth = row.depth;
             let is_sel = row.is_selected;
             let is_hov = row.is_hovered;
 
-            // Build row content: indent + chevron + icon + name
-            let indent_w = depth as f32 * 18.0 / scale;
-            let indent = iced_widget::Space::new().width(indent_w);
+            let mut row_items: Vec<IcedElement<'a>> = Vec::new();
 
-            let mut row_items: Vec<IcedElement<'a>> = vec![indent.into()];
+            // Indent guides (box-drawing characters) — only for depth > 0
+            if !row.indent_guide.is_empty() {
+                row_items.push(
+                    text(row.indent_guide.as_str())
+                        .size(13.0 / scale)
+                        .color(text_ghost)
+                        .font(JETBRAINS_MONO)
+                        .into(),
+                );
+            } else if row.depth > 0 {
+                // Fallback indent space for depth > 0 with no guide
+                let indent_w = row.depth as f32 * 18.0 / scale;
+                row_items.push(iced_widget::Space::new().width(indent_w).into());
+            }
 
             if let Some(chev) = &row.chevron {
                 row_items.push(
@@ -1896,10 +1912,25 @@ impl IcedLayer {
                 row_items.push(iced_widget::Space::new().width(14.0 / scale).into());
             }
 
+            // Icon with color based on category hint
+            let icon_color = match row.icon_color_hint.as_str() {
+                "source" => accent_blue,
+                "config" => text_muted,
+                "data" => text_secondary,
+                "image" => text_secondary,
+                "archive" => accent,
+                "git" => accent,
+                "docker" => accent_blue,
+                "docs" => accent_green,
+                "shell" => accent_green,
+                "markup" => accent,
+                "style" => text_secondary,
+                _ => text_secondary,
+            };
             row_items.push(
                 text(row.icon.as_str())
                     .size(13.0 / scale)
-                    .color(text_secondary)
+                    .color(icon_color)
                     .into(),
             );
             row_items.push(iced_widget::Space::new().width(6.0 / scale).into());
@@ -2096,7 +2127,7 @@ impl IcedLayer {
         if state.git_review_list_items.is_empty() && state.git_review_error.is_none() {
             list_col = list_col.push(
                 container(
-                    text("No changes")
+                    text("Working tree clean")
                         .size(13.0 / scale)
                         .color(text_muted)
                         .font(DM_SANS),
@@ -2132,10 +2163,14 @@ impl IcedLayer {
                     let is_sel = item.is_selected;
 
                     // Status badge color
+                    let accent_blue = iced_core::Color::from_rgba(0.3, 0.5, 1.0, 1.0);
+                    let accent_orange = iced_core::Color::from_rgba(1.0, 0.6, 0.2, 1.0);
                     let status_color = match item.status_label.as_deref() {
                         Some("A") => accent_green,
                         Some("D") => accent_red,
                         Some("M") => accent,
+                        Some("R") => accent_blue,
+                        Some("C") => accent_orange,
                         Some("?") => text_muted,
                         _ => text_secondary,
                     };
@@ -2150,13 +2185,24 @@ impl IcedLayer {
                         .color(if is_sel { accent } else { text_primary })
                         .font(DM_SANS);
 
-                    let entry_row = row![
+                    let mut entry_row = row![
                         iced_widget::Space::new().width(10.0 / scale),
                         status_text,
                         iced_widget::Space::new().width(8.0 / scale),
                         file_text,
                     ]
                     .align_y(iced_core::Alignment::Center);
+
+                    // Show directory path dimmed after filename
+                    if let Some(ref dir) = item.display_dir {
+                        let dir_label = format!("  {}", dir);
+                        entry_row = entry_row.push(
+                            text(dir_label)
+                                .size(11.0 / scale)
+                                .color(text_muted)
+                                .font(DM_SANS),
+                        );
+                    }
 
                     let row_bg = if is_sel {
                         iced_core::Color { a: 0.2, ..accent }

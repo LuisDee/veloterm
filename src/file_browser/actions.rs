@@ -227,6 +227,8 @@ mod tests {
                 node_type: NodeType::Directory,
                 expanded: true,
                 has_children: true,
+                is_last_child: false,
+                ancestor_has_next_sibling: vec![],
             },
             VisibleRow {
                 index: 1,
@@ -235,6 +237,8 @@ mod tests {
                 node_type: NodeType::Directory,
                 expanded: false,
                 has_children: true,
+                is_last_child: false,
+                ancestor_has_next_sibling: vec![],
             },
             VisibleRow {
                 index: 2,
@@ -246,6 +250,8 @@ mod tests {
                 },
                 expanded: false,
                 has_children: false,
+                is_last_child: false,
+                ancestor_has_next_sibling: vec![],
             },
             VisibleRow {
                 index: 3,
@@ -254,6 +260,8 @@ mod tests {
                 node_type: NodeType::Directory,
                 expanded: false,
                 has_children: true,
+                is_last_child: false,
+                ancestor_has_next_sibling: vec![],
             },
             VisibleRow {
                 index: 4,
@@ -265,6 +273,8 @@ mod tests {
                 },
                 expanded: false,
                 has_children: false,
+                is_last_child: true,
+                ancestor_has_next_sibling: vec![],
             },
         ]
     }

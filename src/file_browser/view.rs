@@ -4,7 +4,7 @@
 // breadcrumb bar, and virtual scrolling.
 
 use crate::file_browser::tree::{
-    breadcrumb_segments, file_icon, visible_range, FileTree, NodeType, TreeNavState, VisibleRow,
+    breadcrumb_segments, file_icon_info, visible_range, FileTree, IconInfo, NodeType, TreeNavState, VisibleRow,
 };
 use std::path::Path;
 
@@ -33,19 +33,54 @@ pub fn chevron(expanded: bool) -> &'static str {
     }
 }
 
-/// Get a display icon for a visible row.
+/// Get a display icon for a visible row (legacy, returns just the icon string).
 pub fn row_icon(row: &VisibleRow) -> &'static str {
+    row_icon_info(row).icon
+}
+
+/// Get full icon info (icon + color hint) for a visible row.
+pub fn row_icon_info(row: &VisibleRow) -> IconInfo {
     match &row.node_type {
         NodeType::Directory => {
             if row.expanded {
-                "\u{1F4C2}" // open folder
+                IconInfo { icon: "\u{1F4C2}", color_hint: "default" } // open folder
             } else {
-                "\u{1F4C1}" // closed folder
+                IconInfo { icon: "\u{1F4C1}", color_hint: "default" } // closed folder
             }
         }
-        NodeType::File { extension, .. } => file_icon(extension.as_deref()),
-        NodeType::Symlink { .. } => "\u{1F517}", // link symbol
+        NodeType::File { extension, .. } => {
+            file_icon_info(extension.as_deref(), Some(&row.name))
+        }
+        NodeType::Symlink { .. } => IconInfo { icon: "\u{1F517}", color_hint: "default" }, // link symbol
     }
+}
+
+/// Build the indent guide prefix string for a tree row.
+/// Returns empty string for depth-0 rows. For deeper rows, uses box-drawing characters.
+pub fn indent_guide_prefix(row: &VisibleRow) -> String {
+    if row.depth == 0 {
+        return String::new();
+    }
+
+    let mut prefix = String::new();
+
+    // For each ancestor level (skip level 0 — root never has guides)
+    for d in 1..row.depth {
+        if d < row.ancestor_has_next_sibling.len() && row.ancestor_has_next_sibling[d] {
+            prefix.push_str("\u{2502} "); // │ + space (continuing line)
+        } else {
+            prefix.push_str("  "); // blank (no continuing line)
+        }
+    }
+
+    // Current item connector
+    if row.is_last_child {
+        prefix.push_str("\u{2514}\u{2500}"); // └─
+    } else {
+        prefix.push_str("\u{251C}\u{2500}"); // ├─
+    }
+
+    prefix
 }
 
 /// Compute which visible rows should be rendered given scroll state.
@@ -167,6 +202,8 @@ mod tests {
             node_type: NodeType::Directory,
             expanded: true,
             has_children: true,
+            is_last_child: false,
+            ancestor_has_next_sibling: vec![],
         };
         assert_eq!(row_icon(&row), "\u{1F4C2}");
     }
@@ -180,6 +217,8 @@ mod tests {
             node_type: NodeType::Directory,
             expanded: false,
             has_children: true,
+            is_last_child: false,
+            ancestor_has_next_sibling: vec![],
         };
         assert_eq!(row_icon(&row), "\u{1F4C1}");
     }
@@ -196,8 +235,10 @@ mod tests {
             },
             expanded: false,
             has_children: false,
+            is_last_child: false,
+            ancestor_has_next_sibling: vec![],
         };
-        assert_eq!(row_icon(&row), "\u{2699}");
+        assert_eq!(row_icon(&row), "R");
     }
 
     // --- Virtual scrolling slice ---
@@ -215,6 +256,8 @@ mod tests {
                 },
                 expanded: false,
                 has_children: false,
+                is_last_child: false,
+                ancestor_has_next_sibling: vec![],
             })
             .collect();
 
@@ -235,6 +278,8 @@ mod tests {
                 },
                 expanded: false,
                 has_children: false,
+                is_last_child: false,
+                ancestor_has_next_sibling: vec![],
             })
             .collect();
 

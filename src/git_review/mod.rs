@@ -44,6 +44,8 @@ pub struct GitReviewState {
     pub cached_diff: Option<CachedDiff>,
     /// Scroll state for the diff view.
     pub diff_scroll: DiffScrollState,
+    /// Current hunk index in the diff view (for hunk-level staging).
+    pub current_hunk_index: usize,
 }
 
 /// A cached diff tied to a specific file path and section.
@@ -71,6 +73,7 @@ impl GitReviewState {
             discard_confirm: None,
             cached_diff: None,
             diff_scroll: DiffScrollState::new(),
+            current_hunk_index: 0,
         }
     }
 
@@ -100,6 +103,7 @@ impl GitReviewState {
         self.error = None;
         self.discard_confirm = None;
         self.diff_scroll = DiffScrollState::new();
+        self.current_hunk_index = 0;
     }
 
     /// Refresh the git status from the stored repo path.
@@ -288,6 +292,7 @@ impl GitReviewState {
                     diff: file_diff,
                 });
                 self.diff_scroll.reset();
+                self.current_hunk_index = 0;
                 self.cached_diff.as_ref().map(|c| &c.diff)
             }
             Err(e) => {
@@ -346,6 +351,102 @@ impl GitReviewState {
                 self.selected = Some((Section::Staged, status.staged.len() - 1));
             }
         }
+    }
+
+    /// Stage the hunk at `current_hunk_index` for the selected file.
+    /// Only works when a Changed/Untracked file is selected.
+    pub fn stage_current_hunk(&mut self) {
+        let (section, index) = match self.selected {
+            Some(s) => s,
+            None => return,
+        };
+        // Hunk staging only makes sense for unstaged (Changed) files
+        if section != Section::Changed {
+            return;
+        }
+        let path = {
+            let status = match &self.git_status {
+                Some(s) => s,
+                None => return,
+            };
+            match status.changed.get(index) {
+                Some(e) => e.path.clone(),
+                None => return,
+            }
+        };
+        if let Some(repo_path) = &self.repo_path {
+            if let Ok(repo) = git2::Repository::open(repo_path) {
+                if let Err(e) = hunk_staging::stage_hunk(&repo, &path, self.current_hunk_index) {
+                    self.error = Some(format!("Stage hunk failed: {}", e));
+                    return;
+                }
+                self.invalidate_diff_cache();
+                self.refresh_status_from_repo(&repo);
+            }
+        }
+    }
+
+    /// Unstage the hunk at `current_hunk_index` for the selected file.
+    /// Only works when a Staged file is selected.
+    pub fn unstage_current_hunk(&mut self) {
+        let (section, index) = match self.selected {
+            Some(s) => s,
+            None => return,
+        };
+        if section != Section::Staged {
+            return;
+        }
+        let path = {
+            let status = match &self.git_status {
+                Some(s) => s,
+                None => return,
+            };
+            match status.staged.get(index) {
+                Some(e) => e.path.clone(),
+                None => return,
+            }
+        };
+        if let Some(repo_path) = &self.repo_path {
+            if let Ok(repo) = git2::Repository::open(repo_path) {
+                if let Err(e) = hunk_staging::unstage_hunk(&repo, &path, self.current_hunk_index) {
+                    self.error = Some(format!("Unstage hunk failed: {}", e));
+                    return;
+                }
+                self.invalidate_diff_cache();
+                self.refresh_status_from_repo(&repo);
+            }
+        }
+    }
+
+    /// Navigate to the next hunk in the current diff.
+    /// Returns true if the hunk index changed.
+    pub fn next_hunk(&mut self) -> bool {
+        let hunk_count = self.current_diff().map(|d| d.hunks.len()).unwrap_or(0);
+        if hunk_count == 0 {
+            return false;
+        }
+        if self.current_hunk_index + 1 < hunk_count {
+            self.current_hunk_index += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Navigate to the previous hunk in the current diff.
+    /// Returns true if the hunk index changed.
+    pub fn prev_hunk(&mut self) -> bool {
+        if self.current_hunk_index > 0 {
+            self.current_hunk_index -= 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get the total number of hunks in the current diff.
+    pub fn hunk_count(&self) -> usize {
+        self.current_diff().map(|d| d.hunks.len()).unwrap_or(0)
     }
 
     /// Get the path of the currently selected file, if any.
@@ -941,5 +1042,211 @@ mod tests {
         assert!(state.cached_diff.is_some());
         state.invalidate_diff_cache();
         assert!(state.cached_diff.is_none());
+    }
+
+    // -- current_hunk_index / hunk navigation --
+
+    #[test]
+    fn hunk_index_defaults_to_zero() {
+        let state = GitReviewState::new();
+        assert_eq!(state.current_hunk_index, 0);
+    }
+
+    #[test]
+    fn hunk_index_resets_on_new_diff() {
+        let (dir, _repo) = setup_test_repo();
+        let mut state = GitReviewState::new();
+        state.open_from_cwd(dir.path());
+
+        std::fs::write(dir.path().join("file.txt"), "line1\nline2").unwrap();
+        state.refresh_status();
+        state.navigate(1);
+
+        state.current_hunk_index = 5;
+        state.compute_selected_diff();
+        assert_eq!(state.current_hunk_index, 0);
+    }
+
+    #[test]
+    fn hunk_index_resets_on_reset() {
+        let mut state = GitReviewState::new();
+        state.current_hunk_index = 3;
+        state.reset();
+        assert_eq!(state.current_hunk_index, 0);
+    }
+
+    #[test]
+    fn hunk_count_zero_when_no_diff() {
+        let state = GitReviewState::new();
+        assert_eq!(state.hunk_count(), 0);
+    }
+
+    #[test]
+    fn next_hunk_returns_false_when_no_diff() {
+        let mut state = GitReviewState::new();
+        assert!(!state.next_hunk());
+    }
+
+    #[test]
+    fn prev_hunk_returns_false_at_zero() {
+        let mut state = GitReviewState::new();
+        assert!(!state.prev_hunk());
+    }
+
+    #[test]
+    fn hunk_navigation_with_diff() {
+        let (dir, repo) = setup_test_repo();
+        make_initial_commit(dir.path(), &repo);
+
+        let mut state = GitReviewState::new();
+        state.open_from_cwd(dir.path());
+
+        // Create a file with content and commit it
+        std::fs::write(dir.path().join("initial.txt"), "changed content\nmore changes").unwrap();
+        state.refresh_status();
+
+        state.navigate(1); // select the changed file
+        state.compute_selected_diff();
+
+        let count = state.hunk_count();
+        assert!(count > 0);
+        assert_eq!(state.current_hunk_index, 0);
+
+        // If there's only 1 hunk, next should not advance
+        if count == 1 {
+            assert!(!state.next_hunk());
+            assert_eq!(state.current_hunk_index, 0);
+        }
+    }
+
+    // -- click-to-diff tests --
+
+    #[test]
+    fn click_staged_file_loads_diff() {
+        let (dir, repo) = setup_test_repo();
+        make_initial_commit(dir.path(), &repo);
+
+        let mut state = GitReviewState::new();
+        state.open_from_cwd(dir.path());
+
+        // Stage a modification
+        std::fs::write(dir.path().join("initial.txt"), "staged change").unwrap();
+        state.stage_file(Path::new("initial.txt"));
+
+        // Select the staged file
+        state.selected = Some((Section::Staged, 0));
+        let diff = state.compute_selected_diff();
+        assert!(diff.is_some());
+        assert_eq!(diff.unwrap().diff_type, diff::DiffType::Modified);
+    }
+
+    #[test]
+    fn click_changed_file_loads_diff() {
+        let (dir, repo) = setup_test_repo();
+        make_initial_commit(dir.path(), &repo);
+
+        let mut state = GitReviewState::new();
+        state.open_from_cwd(dir.path());
+
+        std::fs::write(dir.path().join("initial.txt"), "modified").unwrap();
+        state.refresh_status();
+
+        state.selected = Some((Section::Changed, 0));
+        let diff = state.compute_selected_diff();
+        assert!(diff.is_some());
+        assert_eq!(diff.unwrap().diff_type, diff::DiffType::Modified);
+    }
+
+    #[test]
+    fn click_different_file_updates_diff() {
+        let (dir, _repo) = setup_test_repo();
+        let mut state = GitReviewState::new();
+        state.open_from_cwd(dir.path());
+
+        std::fs::write(dir.path().join("a.txt"), "aaa").unwrap();
+        std::fs::write(dir.path().join("b.txt"), "bbb").unwrap();
+        state.refresh_status();
+
+        // Select first file
+        state.selected = Some((Section::Untracked, 0));
+        state.compute_selected_diff();
+        assert_eq!(
+            state.cached_diff.as_ref().unwrap().path,
+            PathBuf::from("a.txt")
+        );
+
+        // Select second file — should load different diff
+        state.selected = Some((Section::Untracked, 1));
+        state.compute_selected_diff();
+        assert_eq!(
+            state.cached_diff.as_ref().unwrap().path,
+            PathBuf::from("b.txt")
+        );
+    }
+
+    // -- hunk staging integration tests --
+
+    #[test]
+    fn stage_current_hunk_stages_from_changed() {
+        let (dir, repo) = setup_test_repo();
+        // Create a file with many lines
+        let mut content = String::new();
+        for i in 1..=30 {
+            content.push_str(&format!("line{}\n", i));
+        }
+        let mut index = repo.index().unwrap();
+        std::fs::write(dir.path().join("file.txt"), &content).unwrap();
+        index.add_path(Path::new("file.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = repo.signature().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+            .unwrap();
+
+        // Modify line 3 and line 28 (far apart = separate hunks)
+        let mut modified = String::new();
+        for i in 1..=30 {
+            if i == 3 {
+                modified.push_str("CHANGED_3\n");
+            } else if i == 28 {
+                modified.push_str("CHANGED_28\n");
+            } else {
+                modified.push_str(&format!("line{}\n", i));
+            }
+        }
+        std::fs::write(dir.path().join("file.txt"), &modified).unwrap();
+
+        let mut state = GitReviewState::new();
+        state.open_from_cwd(dir.path());
+
+        // Select the changed file
+        state.selected = Some((Section::Changed, 0));
+        state.current_hunk_index = 0;
+
+        // Stage hunk 0
+        state.stage_current_hunk();
+
+        // Should now have staged and unstaged entries
+        let status = state.git_status.as_ref().unwrap();
+        assert!(!status.staged.is_empty());
+    }
+
+    #[test]
+    fn stage_hunk_noop_for_staged_section() {
+        let mut state = GitReviewState::new();
+        state.selected = Some((Section::Staged, 0));
+        // Should not panic or error — just a no-op
+        state.stage_current_hunk();
+        assert!(state.error.is_none());
+    }
+
+    #[test]
+    fn unstage_hunk_noop_for_changed_section() {
+        let mut state = GitReviewState::new();
+        state.selected = Some((Section::Changed, 0));
+        // Should not panic or error — just a no-op
+        state.unstage_current_hunk();
+        assert!(state.error.is_none());
     }
 }

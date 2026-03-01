@@ -5,6 +5,45 @@ use std::path::PathBuf;
 
 use crate::git_review::status::{FileStatus, GitStatus, SectionState, StatusEntry};
 
+/// Color classification for status labels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusColor {
+    Green,
+    Yellow,
+    Red,
+    Blue,
+    Orange,
+    Grey,
+    Default,
+}
+
+/// Map a file status label to its display color.
+pub fn status_color_for_label(label: &str) -> StatusColor {
+    match label {
+        "A" => StatusColor::Green,
+        "M" => StatusColor::Yellow,
+        "D" => StatusColor::Red,
+        "R" => StatusColor::Blue,
+        "C" => StatusColor::Orange,
+        "?" => StatusColor::Grey,
+        _ => StatusColor::Default,
+    }
+}
+
+/// Chevron indicator for section collapse state.
+pub fn section_chevron(collapsed: bool) -> &'static str {
+    if collapsed { "\u{25B8}" } else { "\u{25BE}" }
+}
+
+/// Message to display when the working tree is clean (no changes in any section).
+pub fn working_tree_clean_message(status: &GitStatus) -> Option<&'static str> {
+    if status.is_empty() {
+        Some("Working tree clean")
+    } else {
+        None
+    }
+}
+
 /// Which section a file entry belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
@@ -533,6 +572,138 @@ mod tests {
         }
         if let ListItem::FileEntry { status_label, .. } = &items[5] {
             assert_eq!(status_label, "?");
+        }
+    }
+
+    // -- section_headers_show_counts --
+
+    #[test]
+    fn section_headers_show_counts() {
+        let status = make_status(
+            &[("a.rs", FileStatus::Added), ("b.rs", FileStatus::Modified)],
+            &[("c.rs", FileStatus::Deleted)],
+            &["d.rs", "e.rs", "f.rs"],
+        );
+        let items = build_list_items(&status, &SectionState::default(), None);
+        // Staged header
+        if let ListItem::SectionHeader { label, count, .. } = &items[0] {
+            assert_eq!(*count, 2);
+            assert!(label.contains("2"));
+        } else {
+            panic!("Expected SectionHeader");
+        }
+        // Changed header
+        if let ListItem::SectionHeader { label, count, .. } = &items[3] {
+            assert_eq!(*count, 1);
+            assert!(label.contains("1"));
+        } else {
+            panic!("Expected SectionHeader");
+        }
+        // Untracked header
+        if let ListItem::SectionHeader { label, count, .. } = &items[5] {
+            assert_eq!(*count, 3);
+            assert!(label.contains("3"));
+        } else {
+            panic!("Expected SectionHeader");
+        }
+    }
+
+    // -- empty_sections_not_shown --
+
+    #[test]
+    fn empty_sections_not_shown() {
+        // Only untracked files — staged and changed headers should not appear
+        let status = make_status(&[], &[], &["a.txt"]);
+        let items = build_list_items(&status, &SectionState::default(), None);
+        assert_eq!(items.len(), 2); // 1 header + 1 entry
+        assert!(matches!(&items[0], ListItem::SectionHeader { section: Section::Untracked, .. }));
+    }
+
+    // -- status_color tests --
+
+    #[test]
+    fn status_color_for_added_is_green() {
+        assert_eq!(status_color_for_label("A"), StatusColor::Green);
+    }
+
+    #[test]
+    fn status_color_for_modified_is_yellow() {
+        assert_eq!(status_color_for_label("M"), StatusColor::Yellow);
+    }
+
+    #[test]
+    fn status_color_for_deleted_is_red() {
+        assert_eq!(status_color_for_label("D"), StatusColor::Red);
+    }
+
+    #[test]
+    fn status_color_for_renamed_is_blue() {
+        assert_eq!(status_color_for_label("R"), StatusColor::Blue);
+    }
+
+    #[test]
+    fn status_color_for_conflicted_is_orange() {
+        assert_eq!(status_color_for_label("C"), StatusColor::Orange);
+    }
+
+    #[test]
+    fn status_color_for_untracked_is_grey() {
+        assert_eq!(status_color_for_label("?"), StatusColor::Grey);
+    }
+
+    // -- working_tree_clean_message --
+
+    #[test]
+    fn working_tree_clean_message_when_empty() {
+        let status = make_status(&[], &[], &[]);
+        assert_eq!(working_tree_clean_message(&status), Some("Working tree clean"));
+    }
+
+    #[test]
+    fn working_tree_clean_message_not_when_changes() {
+        let status = make_status(&[], &[("a.rs", FileStatus::Modified)], &[]);
+        assert_eq!(working_tree_clean_message(&status), None);
+    }
+
+    // -- section_chevron --
+
+    #[test]
+    fn section_chevron_expanded() {
+        assert_eq!(section_chevron(false), "\u{25BE}");
+    }
+
+    #[test]
+    fn section_chevron_collapsed() {
+        assert_eq!(section_chevron(true), "\u{25B8}");
+    }
+
+    // -- display_dir in file entries --
+
+    #[test]
+    fn file_entry_includes_display_dir() {
+        let status = make_status(
+            &[],
+            &[("src/git_review/mod.rs", FileStatus::Modified)],
+            &[],
+        );
+        let items = build_list_items(&status, &SectionState::default(), None);
+        if let ListItem::FileEntry { display_name, display_dir, .. } = &items[1] {
+            assert_eq!(display_name, "mod.rs");
+            assert_eq!(display_dir.as_deref(), Some("src/git_review"));
+        } else {
+            panic!("Expected FileEntry");
+        }
+    }
+
+    #[test]
+    fn file_entry_root_file_no_display_dir() {
+        let status = make_status(&[], &[], &["README.md"]);
+        let items = build_list_items(&status, &SectionState::default(), None);
+        if let ListItem::FileEntry { display_name, display_dir, .. } = &items[1] {
+            assert_eq!(display_name, "README.md");
+            assert_eq!(*display_dir, None);
+        } else {
+            panic!("Expected FileEntry");
         }
     }
 }
