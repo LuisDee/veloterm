@@ -44,6 +44,19 @@ pub struct GlyphAtlas {
     /// Used by the shader to size the cursor to font height instead of full cell height.
     pub cursor_height_ratio: f32,
     glyphs: HashMap<char, GlyphInfo>,
+    /// Number of columns in the atlas grid layout.
+    atlas_cols: u32,
+    /// Slot width in pixels (cell + padding).
+    slot_w: u32,
+    /// Slot height in pixels (cell + padding).
+    slot_h: u32,
+    /// Next slot index for on-demand glyph rasterization.
+    next_overflow_index: u32,
+    /// Whether the atlas data has been modified since the last GPU upload.
+    pub atlas_dirty: bool,
+    /// CoreText rasterizer for on-demand glyph rasterization (macOS only).
+    #[cfg(target_os = "macos")]
+    rasterizer: crate::renderer::coretext_rasterizer::CoreTextRasterizer,
 }
 
 /// Extra UI chrome characters beyond ASCII printable range.
@@ -187,6 +200,8 @@ impl GlyphAtlas {
             );
         }
 
+        let next_overflow_index = chars.len() as u32;
+
         log::info!(
             "CoreText atlas: {}x{} (slot: {}x{}, cell: {:.1}x{:.1}, {} glyphs)",
             atlas_width,
@@ -207,6 +222,12 @@ impl GlyphAtlas {
             bytes_per_pixel,
             cursor_height_ratio,
             glyphs,
+            atlas_cols: cols,
+            slot_w,
+            slot_h,
+            next_overflow_index,
+            atlas_dirty: false,
+            rasterizer,
         }
     }
 
@@ -319,6 +340,8 @@ impl GlyphAtlas {
             glyphs.len(),
         );
 
+        let next_overflow_index = ascii_count + EXTRA_CHARS.len() as u32;
+
         Self {
             atlas_data,
             atlas_width,
@@ -328,6 +351,11 @@ impl GlyphAtlas {
             bytes_per_pixel: 1,
             cursor_height_ratio,
             glyphs,
+            atlas_cols: cols,
+            slot_w,
+            slot_h,
+            next_overflow_index,
+            atlas_dirty: false,
         }
     }
 
@@ -420,6 +448,73 @@ impl GlyphAtlas {
     /// Look up glyph metadata for a character.
     pub fn glyph_info(&self, c: char) -> Option<&GlyphInfo> {
         self.glyphs.get(&c)
+    }
+
+    /// Rasterize a glyph on demand if not already in the atlas.
+    /// Returns the glyph info if successfully rasterized (or already present),
+    /// or None if the atlas has no room for more glyphs.
+    /// Sets `atlas_dirty` to true when new glyphs are added.
+    #[cfg(target_os = "macos")]
+    pub fn rasterize_on_demand(&mut self, c: char) -> Option<&GlyphInfo> {
+        if self.glyphs.contains_key(&c) {
+            return self.glyphs.get(&c);
+        }
+
+        let index = self.next_overflow_index;
+        let col = index % self.atlas_cols;
+        let row = index / self.atlas_cols;
+        let slot_x = col * self.slot_w;
+        let slot_y = row * self.slot_h;
+
+        // Check if slot fits within atlas bounds
+        if slot_x + self.slot_w > self.atlas_width || slot_y + self.slot_h > self.atlas_height {
+            return None;
+        }
+
+        let cell_w = self.cell_width.ceil() as u32;
+        let cell_h = self.cell_height.ceil() as u32;
+        let pad = GLYPH_PADDING;
+        let bpp = self.bytes_per_pixel;
+
+        let glyph_bmp = self.rasterizer.rasterize(c, cell_w, cell_h);
+
+        // Copy RGBA data into padded slot in atlas
+        for y in 0..glyph_bmp.height {
+            for x in 0..glyph_bmp.width {
+                let src_idx = ((y * glyph_bmp.width + x) * 4) as usize;
+                let dst_x = slot_x + pad + x;
+                let dst_y = slot_y + pad + y;
+                if dst_x < self.atlas_width && dst_y < self.atlas_height {
+                    let dst_idx = ((dst_y * self.atlas_width + dst_x) * bpp) as usize;
+                    self.atlas_data[dst_idx..dst_idx + 4]
+                        .copy_from_slice(&glyph_bmp.data[src_idx..src_idx + 4]);
+                }
+            }
+        }
+
+        self.glyphs.insert(
+            c,
+            GlyphInfo {
+                uv: [
+                    (slot_x + pad) as f32 / self.atlas_width as f32,
+                    (slot_y + pad) as f32 / self.atlas_height as f32,
+                    cell_w as f32 / self.atlas_width as f32,
+                    cell_h as f32 / self.atlas_height as f32,
+                ],
+            },
+        );
+
+        self.next_overflow_index += 1;
+        self.atlas_dirty = true;
+
+        self.glyphs.get(&c)
+    }
+
+    /// Rasterize a glyph on demand (non-macOS stub — not yet implemented).
+    #[cfg(not(target_os = "macos"))]
+    pub fn rasterize_on_demand(&mut self, _c: char) -> Option<&GlyphInfo> {
+        // TODO: Implement cosmic-text on-demand rasterization
+        None
     }
 
     /// Dump atlas as PGM (grayscale) image for debugging.
@@ -932,6 +1027,91 @@ mod tests {
             "Expected at least {} glyphs, got {}",
             95 + 22 + 32,
             atlas.glyphs.len()
+        );
+    }
+
+    // ── On-demand glyph rasterization ───────────────────────────
+
+    #[test]
+    fn on_demand_rasterize_unknown_char() {
+        let mut atlas = create_test_atlas();
+        // CJK character not pre-baked
+        let ch = '\u{4E16}'; // 世
+        assert!(atlas.glyph_info(ch).is_none(), "should not be pre-baked");
+        let result = atlas.rasterize_on_demand(ch);
+        assert!(result.is_some(), "should rasterize on demand");
+        // Subsequent lookup should return cached entry
+        assert!(atlas.glyph_info(ch).is_some());
+    }
+
+    #[test]
+    fn on_demand_returns_existing_glyph() {
+        let mut atlas = create_test_atlas();
+        let info_before = atlas.glyph_info('A').unwrap().uv;
+        let info_after = atlas.rasterize_on_demand('A').unwrap().uv;
+        assert_eq!(
+            info_before, info_after,
+            "should return pre-baked glyph unchanged"
+        );
+    }
+
+    #[test]
+    fn on_demand_uv_within_bounds() {
+        let mut atlas = create_test_atlas();
+        for ch in ['α', 'β', 'γ', '你', '好', '⌘', '⌥'] {
+            if let Some(info) = atlas.rasterize_on_demand(ch) {
+                let [u, v, w, h] = info.uv;
+                assert!(
+                    u >= 0.0 && v >= 0.0 && u + w <= 1.0 + 1e-6 && v + h <= 1.0 + 1e-6,
+                    "UV out of bounds for '{}': {:?}",
+                    ch,
+                    info.uv
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn on_demand_atlas_data_grows_correctly() {
+        let mut atlas = create_test_atlas();
+        let initial_len = atlas.glyphs.len();
+        atlas.rasterize_on_demand('α');
+        atlas.rasterize_on_demand('β');
+        assert_eq!(atlas.glyphs.len(), initial_len + 2);
+    }
+
+    #[test]
+    fn on_demand_sets_dirty_flag() {
+        let mut atlas = create_test_atlas();
+        assert!(!atlas.atlas_dirty);
+        atlas.rasterize_on_demand('α');
+        assert!(atlas.atlas_dirty, "atlas should be dirty after on-demand rasterization");
+    }
+
+    #[test]
+    fn on_demand_respects_atlas_capacity() {
+        // Create small atlas (1x scale) — still has 512px minimum but fewer pre-baked glyphs slots used
+        let mut atlas = GlyphAtlas::new(10.0, 1.0, "Source Code Pro", 1.2);
+        let mut rasterized = 0;
+        // Try rasterizing many CJK chars until atlas is full
+        for cp in 0x4E00u32..0x9FFFu32 {
+            if let Some(ch) = char::from_u32(cp) {
+                if atlas.rasterize_on_demand(ch).is_some() {
+                    rasterized += 1;
+                } else {
+                    break; // atlas full
+                }
+            }
+        }
+        assert!(
+            rasterized > 0,
+            "should rasterize at least some chars before atlas fills"
+        );
+        // Verify the atlas is actually bounded — we can't add infinite glyphs
+        // (the atlas is 512x512 minimum with ~16px slots, so ~1024 slots max)
+        assert!(
+            rasterized < 10000,
+            "should not rasterize infinitely many chars"
         );
     }
 }
