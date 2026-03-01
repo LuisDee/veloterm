@@ -139,6 +139,14 @@ impl Terminal {
         &self.term
     }
 
+    /// Check if bracketed paste mode is currently enabled.
+    /// The shell requests this via DECSET ?2004h; when active, paste text
+    /// should be wrapped in ESC[200~ ... ESC[201~ sequences.
+    pub fn is_bracketed_paste_enabled(&self) -> bool {
+        use alacritty_terminal::term::TermMode;
+        self.term.mode().contains(TermMode::BRACKETED_PASTE)
+    }
+
     /// Get the cursor position as (row, col).
     pub fn cursor_position(&self) -> (usize, usize) {
         let content = self.term.renderable_content();

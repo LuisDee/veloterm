@@ -160,22 +160,41 @@ export function pngDimensions(buf: Buffer): { width: number; height: number } {
 }
 
 /**
- * Type text into VeloTerm via cliclick (CGEvent-level injection).
- * Optionally presses Enter afterwards in the same cliclick invocation
- * to avoid re-focusing (which would click and move the cursor).
+ * Type text into VeloTerm via clipboard paste (Cmd+V).
+ * This avoids Karabiner-Elements intercepting individual keystrokes (e.g., 'm').
+ * The flow: pbcopy → focus window → Cmd+V → optional Enter.
+ * Falls back to cliclick t: if clipboard paste fails.
  */
 export function typeText(pid: number, text: string, pressEnter = false): void {
   focusWindow(pid);
+
+  // Primary: clipboard paste (immune to Karabiner key interception)
   try {
-    // -w 150 adds 150ms delay between each event for reliable delivery
-    // (30ms dropped chars, 80ms still dropped on longer strings; 150ms is safe)
+    execSync(`/usr/bin/printf '%s' ${shellEscape(text)} | /usr/bin/pbcopy`, {
+      timeout: 5000,
+    });
+    // Small delay after focus to ensure window is ready
+    execSync("sleep 0.1", { timeout: 2000 });
+    // Cmd+V to paste
+    execFileSync("cliclick", ["kd:cmd", "t:v", "ku:cmd"], { timeout: 10000 });
+    if (pressEnter) {
+      execSync("sleep 0.1", { timeout: 2000 });
+      execFileSync("cliclick", ["kp:return"], { timeout: 10000 });
+    }
+    return;
+  } catch {
+    // Clipboard paste failed, fall through to cliclick
+  }
+
+  // Fallback: cliclick character-by-character (may drop chars with Karabiner)
+  try {
     const args = ["-w", "150", `t:${text}`];
     if (pressEnter) {
       args.push("kp:return");
     }
     execFileSync("cliclick", args, { timeout: 30000 });
   } catch {
-    // Fallback: AppleScript (unreliable with winit windows)
+    // Last resort: AppleScript
     const escaped = text.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     execFileSync("osascript", [
       "-e", 'tell application "System Events"',
@@ -195,6 +214,11 @@ export function typeText(pid: number, text: string, pressEnter = false): void {
       ], { timeout: 10000 });
     }
   }
+}
+
+/** Escape a string for safe use in shell commands. */
+function shellEscape(s: string): string {
+  return "'" + s.replace(/'/g, "'\\''") + "'";
 }
 
 /** Map our key names to cliclick kp: key names */

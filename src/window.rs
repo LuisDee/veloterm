@@ -2409,7 +2409,8 @@ impl ApplicationHandler<UserEvent> for App {
                         if let Ok(mut clipboard) = arboard::Clipboard::new() {
                             if let Ok(text) = clipboard.get_text() {
                                 if let Some(state) = self.pane_states.get_mut(&focused_id) {
-                                    let bytes = crate::input::clipboard::paste_bytes(&text, true);
+                                    let bracketed = state.terminal.is_bracketed_paste_enabled();
+                                    let bytes = crate::input::clipboard::paste_bytes(&text, bracketed);
                                     if let Err(e) = state.pty.write(&bytes) {
                                         log::warn!("PTY paste write error: {e}");
                                     }

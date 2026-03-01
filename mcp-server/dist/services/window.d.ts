@@ -34,9 +34,10 @@ export declare function pngDimensions(buf: Buffer): {
     height: number;
 };
 /**
- * Type text into VeloTerm via cliclick (CGEvent-level injection).
- * Optionally presses Enter afterwards in the same cliclick invocation
- * to avoid re-focusing (which would click and move the cursor).
+ * Type text into VeloTerm via clipboard paste (Cmd+V).
+ * This avoids Karabiner-Elements intercepting individual keystrokes (e.g., 'm').
+ * The flow: pbcopy → focus window → Cmd+V → optional Enter.
+ * Falls back to cliclick t: if clipboard paste fails.
  */
 export declare function typeText(pid: number, text: string, pressEnter?: boolean): void;
 /**
