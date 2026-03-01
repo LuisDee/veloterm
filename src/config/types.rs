@@ -221,7 +221,7 @@ impl Default for RawFontConfig {
     fn default() -> Self {
         Self {
             family: "Source Code Pro".to_string(),
-            size: 15.0,
+            size: 12.0,
             line_height: 1.2,
             ui_family: "Inter".to_string(),
             display_family: "Georgia".to_string(),
@@ -403,7 +403,7 @@ impl Default for FontConfig {
     fn default() -> Self {
         Self {
             family: "Source Code Pro".to_string(),
-            size: 15.0,
+            size: 12.0,
             line_height: 1.2,
             ui_family: "Inter".to_string(),
             display_family: "Georgia".to_string(),
@@ -621,7 +621,7 @@ impl Config {
 # Terminal content font family (with fallback: Source Code Pro -> SF Mono -> Menlo -> system)
 family = "Source Code Pro"
 # Font size in points
-size = 15.0
+size = 12.0
 # Line-height multiplier (1.2 = 120% of font size)
 line_height = 1.2
 # UI chrome font (tab bar, menus, status)
@@ -743,7 +743,7 @@ mod tests {
     #[test]
     fn default_font_size() {
         let config = Config::default();
-        assert_eq!(config.font.size, 15.0);
+        assert_eq!(config.font.size, 12.0);
     }
 
     #[test]
@@ -880,7 +880,7 @@ size = 14.0
     #[test]
     fn parse_empty_toml_uses_all_defaults() {
         let config = Config::from_toml("").unwrap();
-        assert_eq!(config.font.size, 15.0);
+        assert_eq!(config.font.size, 12.0);
         assert_eq!(config.font.family, "Source Code Pro");
         assert_eq!(config.font.line_height, 1.2);
         assert_eq!(config.colors.theme, "midnight");
@@ -1220,7 +1220,7 @@ fps_limit = 0
     fn load_missing_file_returns_defaults() {
         let path = Path::new("/tmp/nonexistent_veloterm_config_test.toml");
         let config = Config::load(path).unwrap();
-        assert_eq!(config.font.size, 15.0);
+        assert_eq!(config.font.size, 12.0);
         assert_eq!(config.colors.theme, "midnight");
     }
 

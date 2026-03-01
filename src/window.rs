@@ -4023,7 +4023,7 @@ mod tests {
     fn app_config_defaults_match_expected_values() {
         let app = App::new(WindowConfig::default(), Config::default());
         assert_eq!(app.app_config.colors.theme, "midnight");
-        assert_eq!(app.app_config.font.size, 15.0);
+        assert_eq!(app.app_config.font.size, 12.0);
         assert_eq!(app.app_config.scrollback.lines, 10_000);
         assert_eq!(app.app_config.cursor.style, "block");
         assert!(app.app_config.cursor.blink);
@@ -4721,8 +4721,8 @@ blink = false
     #[test]
     fn font_size_tracks_in_app() {
         let app = App::new(WindowConfig::default(), Config::default());
-        assert_eq!(app.current_font_size, 15.0);
-        assert_eq!(app.default_font_size, 15.0);
+        assert_eq!(app.current_font_size, 12.0);
+        assert_eq!(app.default_font_size, 12.0);
     }
 
     // ── Config hot-reload ────────────────────────────────────────
@@ -4730,7 +4730,7 @@ blink = false
     #[test]
     fn config_reload_font_updates_app_state() {
         let mut app = App::new(WindowConfig::default(), Config::default());
-        assert_eq!(app.current_font_size, 15.0);
+        assert_eq!(app.current_font_size, 12.0);
 
         let mut new_config = Config::default();
         new_config.font.size = 20.0;
