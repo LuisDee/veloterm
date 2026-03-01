@@ -7,17 +7,37 @@ import { FOCUS_DELAY_MS, KEY_CODES, SCREENSHOT_PATH } from "../constants.js";
  * Falls back to GetWindowID (Homebrew) if JXA fails.
  */
 export function findWindowByPid(pid) {
-    // Primary: JXA via osascript
+    // Primary: GetWindowID (Homebrew) — most reliable on macOS
+    // Requires both app name and window title arguments
+    try {
+        const result = execSync('GetWindowID "VeloTerm" "VeloTerm" 2>/dev/null || echo ""', {
+            timeout: 5000,
+            encoding: "utf-8",
+        }).trim();
+        if (result && result !== "" && result !== "0") {
+            return parseInt(result, 10);
+        }
+    }
+    catch {
+        // GetWindowID not installed or failed
+    }
+    // Fallback: JXA via osascript (requires Screen Recording permission)
+    // Note: ObjC.deepUnwrap returns an NSArray which lacks JS Array methods,
+    // so we iterate with objectAtIndex instead of using .find()
     try {
         const script = `
       ObjC.import('CoreGraphics');
-      var list = ObjC.deepUnwrap(
-        $.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly, 0)
-      );
-      var win = list.find(function(w) {
-        return w.kCGWindowOwnerPID === ${pid} && w.kCGWindowLayer === 0;
-      });
-      if (win) { win.kCGWindowNumber; } else { ''; }
+      var rawList = $.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly, 0);
+      var count = rawList.count;
+      var result = '';
+      for (var i = 0; i < count; i++) {
+        var w = ObjC.deepUnwrap(rawList.objectAtIndex(i));
+        if (w.kCGWindowOwnerPID === ${pid} && w.kCGWindowBounds && w.kCGWindowBounds.Height > 100) {
+          result = '' + w.kCGWindowNumber;
+          break;
+        }
+      }
+      result;
     `;
         const result = execSync(`osascript -l JavaScript -e '${script.replace(/'/g, "'\\''")}'`, {
             timeout: 5000,
@@ -28,20 +48,7 @@ export function findWindowByPid(pid) {
         }
     }
     catch {
-        // JXA failed, try fallback
-    }
-    // Fallback: GetWindowID (Homebrew)
-    try {
-        const result = execSync('GetWindowID "VeloTerm" 2>/dev/null || echo ""', {
-            timeout: 5000,
-            encoding: "utf-8",
-        }).trim();
-        if (result && result !== "" && result !== "0") {
-            return parseInt(result, 10);
-        }
-    }
-    catch {
-        // GetWindowID not installed or failed
+        // JXA failed (likely no Screen Recording permission)
     }
     return null;
 }
@@ -64,7 +71,7 @@ export async function captureWindow(windowId, pid) {
     focusWindow(pid);
     // Brief delay to ensure window is in front
     await new Promise((r) => setTimeout(r, FOCUS_DELAY_MS));
-    execFileSync("screencapture", ["-o", "-x", "-l", String(windowId), SCREENSHOT_PATH], {
+    execFileSync("/usr/sbin/screencapture", ["-o", "-x", "-l", String(windowId), SCREENSHOT_PATH], {
         timeout: 10000,
     });
     return readFileSync(SCREENSHOT_PATH);
