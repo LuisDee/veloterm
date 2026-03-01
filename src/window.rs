@@ -508,7 +508,8 @@ impl App {
             Some(s) => s,
             None => return Vec::new(),
         };
-        state.visible_rows.iter().enumerate().map(|(vis_idx, row)| {
+        let effective_rows = state.effective_visible_rows();
+        effective_rows.iter().enumerate().map(|(vis_idx, row)| {
             use crate::file_browser::view;
             let is_selected = state.view_state.nav.selected_visible_row == Some(vis_idx);
             let is_hovered = state.view_state.hovered_row == Some(vis_idx);
@@ -2214,8 +2215,22 @@ impl ApplicationHandler<UserEvent> for App {
                                 }
                             }
                             _ => {
-                                // Dispatch to overlay-specific keyboard handler
-                                if self.input_mode == InputMode::FileBrowser {
+                                // Cmd+C in file browser with right panel focused: copy preview selection
+                                if self.input_mode == InputMode::FileBrowser
+                                    && crate::input::clipboard::is_copy_keybinding(&event.logical_key, self.modifiers)
+                                {
+                                    if let Some(state) = &self.file_browser_state {
+                                        if state.focused_panel == crate::file_browser::OverlayPanel::Right {
+                                            if let Some(preview) = &state.preview {
+                                                if let Some(text) = state.preview_view.copy_selection(&preview.lines) {
+                                                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                                        let _ = clipboard.set_text(&text);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else if self.input_mode == InputMode::FileBrowser {
                                     self.handle_file_browser_key(&event.logical_key);
                                 } else {
                                     self.handle_git_review_key(&event.logical_key);
@@ -3203,7 +3218,7 @@ impl ApplicationHandler<UserEvent> for App {
 
                 // Pre-compute overlay content data before borrowing renderer
                 let (fb_rows, fb_breadcrumb, fb_preview_name, fb_preview_lines,
-                     fb_preview_truncated, fb_preview_scroll) =
+                     fb_preview_truncated, fb_preview_scroll, fb_preview_selection) =
                     if self.input_mode == InputMode::FileBrowser {
                         (
                             self.build_file_browser_rows(),
@@ -3225,9 +3240,12 @@ impl ApplicationHandler<UserEvent> for App {
                             self.file_browser_state.as_ref()
                                 .map(|s| s.preview_view.scroll_offset)
                                 .unwrap_or(0.0),
+                            self.file_browser_state.as_ref()
+                                .and_then(|s| s.preview_view.selection.as_ref())
+                                .map(|sel| sel.normalized()),
                         )
                     } else {
-                        (Vec::new(), String::new(), None, Vec::new(), false, 0.0)
+                        (Vec::new(), String::new(), None, Vec::new(), false, 0.0, None)
                     };
 
                 let (gr_list_items, gr_diff_header, gr_diff_rows,
@@ -3337,6 +3355,11 @@ impl ApplicationHandler<UserEvent> for App {
                         },
                         is_file_browser_icon_hovered: self.hovering_file_browser_icon,
                         is_git_review_icon_hovered: self.hovering_git_review_icon,
+                        // File browser search state
+                        file_browser_search_active: self.file_browser_state.as_ref()
+                            .map(|s| s.search_active).unwrap_or(false),
+                        file_browser_search_query: self.file_browser_state.as_ref()
+                            .map(|s| s.search_query.clone()).unwrap_or_default(),
                         // File browser content (pre-computed above)
                         file_browser_rows: fb_rows,
                         file_browser_breadcrumb: fb_breadcrumb,
@@ -3344,6 +3367,7 @@ impl ApplicationHandler<UserEvent> for App {
                         file_browser_preview_lines: fb_preview_lines,
                         file_browser_preview_truncated: fb_preview_truncated,
                         file_browser_preview_scroll: fb_preview_scroll,
+                        file_browser_preview_selection: fb_preview_selection,
                         // Git review content (pre-computed above)
                         git_review_list_items: gr_list_items,
                         git_review_diff_header: gr_diff_header,
@@ -3648,6 +3672,46 @@ impl ApplicationHandler<UserEvent> for App {
                                     state.view_state.scroll_by(delta, total, 500.0);
                                 }
                             }
+                            UiMessage::FileBrowserPreviewMouseDown(x, y) => {
+                                if let Some(state) = &mut self.file_browser_state {
+                                    let total = state.preview.as_ref().map(|p| p.lines.len()).unwrap_or(0);
+                                    if total > 0 {
+                                        let (line, col) = crate::file_browser::preview::pixel_to_text_position(
+                                            x, y, state.preview_view.scroll_offset,
+                                            7.2, 20.0, 40.0, total,
+                                        );
+                                        state.preview_view.handle_mouse_down(line, col);
+                                    }
+                                }
+                            }
+                            UiMessage::FileBrowserPreviewMouseDrag(x, y) => {
+                                if let Some(state) = &mut self.file_browser_state {
+                                    let total = state.preview.as_ref().map(|p| p.lines.len()).unwrap_or(0);
+                                    if total > 0 {
+                                        let (line, col) = crate::file_browser::preview::pixel_to_text_position(
+                                            x, y, state.preview_view.scroll_offset,
+                                            7.2, 20.0, 40.0, total,
+                                        );
+                                        state.preview_view.handle_mouse_drag(line, col);
+                                    }
+                                }
+                            }
+                            UiMessage::FileBrowserPreviewMouseUp => {
+                                if let Some(state) = &mut self.file_browser_state {
+                                    state.preview_view.handle_mouse_up();
+                                }
+                            }
+                            UiMessage::FileBrowserPreviewCopy => {
+                                if let Some(state) = &self.file_browser_state {
+                                    if let Some(preview) = &state.preview {
+                                        if let Some(text) = state.preview_view.copy_selection(&preview.lines) {
+                                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                                let _ = clipboard.set_text(&text);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             // Git review interactions
                             UiMessage::GitReviewFileClicked(flat_idx) => {
                                 self.handle_git_review_flat_click(flat_idx);
@@ -3700,6 +3764,22 @@ impl ApplicationHandler<UserEvent> for App {
                             UiMessage::GitReviewCommitMsgChanged(msg) => {
                                 if let Some(state) = &mut self.git_review_state {
                                     state.commit_message = msg;
+                                }
+                            }
+                            UiMessage::FileBrowserSearchInput(input) => {
+                                if let Some(state) = &mut self.file_browser_state {
+                                    for ch in input.chars() {
+                                        state.search_append_char(ch);
+                                    }
+                                }
+                            }
+                            UiMessage::FileBrowserSearchToggle => {
+                                if let Some(state) = &mut self.file_browser_state {
+                                    if state.search_active {
+                                        state.exit_search_mode();
+                                    } else {
+                                        state.enter_search_mode();
+                                    }
                                 }
                             }
                             UiMessage::Noop => {}
@@ -3755,7 +3835,66 @@ impl App {
         };
 
         if state.focused_panel == crate::file_browser::OverlayPanel::Left {
+            // Search mode: intercept character input for the search query
+            if state.search_active {
+                match key {
+                    Key::Named(NamedKey::Escape) => {
+                        state.exit_search_mode();
+                    }
+                    Key::Named(NamedKey::Backspace) => {
+                        state.search_backspace();
+                        if state.search_query.is_empty() {
+                            state.exit_search_mode();
+                        }
+                    }
+                    Key::Named(NamedKey::Enter) => {
+                        // Select the first search result (if any) and exit search
+                        let rows = state.effective_visible_rows();
+                        if let Some(first_row) = rows.first() {
+                            if let Some(tree) = &state.file_tree {
+                                if let Some(node) = tree.get(first_row.index) {
+                                    if node.path.is_file() {
+                                        let path = node.path.clone();
+                                        state.view_state.selected_file = Some(first_row.index);
+                                        state.exit_search_mode();
+                                        state.load_preview(&path);
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                        state.exit_search_mode();
+                    }
+                    Key::Named(NamedKey::ArrowDown) => {
+                        // Navigate within search results
+                        let rows = state.effective_visible_rows();
+                        let current = state.view_state.nav.selected_visible_row.unwrap_or(0);
+                        if current + 1 < rows.len() {
+                            state.view_state.nav.selected_visible_row = Some(current + 1);
+                        }
+                    }
+                    Key::Named(NamedKey::ArrowUp) => {
+                        let current = state.view_state.nav.selected_visible_row.unwrap_or(0);
+                        if current > 0 {
+                            state.view_state.nav.selected_visible_row = Some(current - 1);
+                        }
+                    }
+                    Key::Character(ref s) => {
+                        for ch in s.chars() {
+                            state.search_append_char(ch);
+                        }
+                        // Reset selection to first result
+                        state.view_state.nav.selected_visible_row = Some(0);
+                    }
+                    _ => {}
+                }
+                return;
+            }
+
             match key {
+                Key::Character(ref s) if s.as_str() == "/" => {
+                    state.enter_search_mode();
+                }
                 Key::Named(NamedKey::ArrowDown) => {
                     let result = state.handle_nav_action(TreeNavAction::Down, 500.0);
                     if let Some(path) = result {

@@ -4,7 +4,7 @@
 // breadcrumb bar, and virtual scrolling.
 
 use crate::file_browser::tree::{
-    breadcrumb_segments, file_icon_info, visible_range, FileTree, IconInfo, NodeType, TreeNavState, VisibleRow,
+    breadcrumb_segments, file_icon_info, visible_range, IconInfo, NodeType, TreeNavState, VisibleRow,
 };
 use std::path::Path;
 
@@ -81,6 +81,93 @@ pub fn indent_guide_prefix(row: &VisibleRow) -> String {
     }
 
     prefix
+}
+
+/// Compact single-child directory chains in the visible rows.
+///
+/// When a directory has exactly one child that is also a directory, merge them
+/// into a single row with a combined name (e.g. "a/b/c"). The merged row uses
+/// the depth of the first directory in the chain and inherits other fields from
+/// the last directory in the chain.
+pub fn compact_visible_rows(rows: Vec<VisibleRow>) -> Vec<VisibleRow> {
+    if rows.is_empty() {
+        return rows;
+    }
+
+    let mut result: Vec<VisibleRow> = Vec::with_capacity(rows.len());
+    let mut i = 0;
+
+    while i < rows.len() {
+        let row = &rows[i];
+
+        // Only try to compact directories (skip root at depth 0)
+        if !matches!(row.node_type, NodeType::Directory) || !row.expanded || row.depth == 0 {
+            result.push(row.clone());
+            i += 1;
+            continue;
+        }
+
+        // Check if this expanded dir has exactly one child that is also an expanded dir
+        // The child would be the next row at depth + 1
+        let start_depth = row.depth;
+        let mut chain_name = row.name.clone();
+        let mut chain_end = i;
+
+        let mut j = i + 1;
+        while j < rows.len() {
+            let next = &rows[j];
+            // Must be exactly one level deeper and a directory
+            if next.depth != rows[chain_end].depth + 1 {
+                break;
+            }
+            if !matches!(next.node_type, NodeType::Directory) || !next.expanded {
+                break;
+            }
+            // Check: the previous dir at chain_end must have exactly one child
+            // in the visible rows at depth chain_end.depth + 1. Count children
+            // of the current chain end: they are consecutive rows at depth+1.
+            let parent_depth = rows[chain_end].depth;
+            let mut child_count = 0;
+            for k in (chain_end + 1)..rows.len() {
+                if rows[k].depth <= parent_depth {
+                    break;
+                }
+                if rows[k].depth == parent_depth + 1 {
+                    child_count += 1;
+                }
+            }
+            if child_count != 1 {
+                break;
+            }
+
+            chain_name = format!("{}/{}", chain_name, next.name);
+            chain_end = j;
+            j += 1;
+        }
+
+        if chain_end > i {
+            // Create a compacted row
+            let last = &rows[chain_end];
+            result.push(VisibleRow {
+                index: last.index,
+                depth: start_depth,
+                name: chain_name,
+                node_type: last.node_type.clone(),
+                expanded: last.expanded,
+                has_children: last.has_children,
+                is_last_child: row.is_last_child,
+                ancestor_has_next_sibling: row.ancestor_has_next_sibling.clone(),
+            });
+            // Skip the compacted rows (the chain interior dirs), continue from
+            // the row after the last chain dir
+            i = chain_end + 1;
+        } else {
+            result.push(row.clone());
+            i += 1;
+        }
+    }
+
+    result
 }
 
 /// Compute which visible rows should be rendered given scroll state.
@@ -362,5 +449,112 @@ mod tests {
         assert!(state.hovered_row.is_none());
         assert!(state.selected_file.is_none());
         assert!(state.nav.selected_visible_row.is_none());
+    }
+
+    // --- Compact visible rows ---
+
+    fn make_dir_row(index: usize, depth: usize, name: &str, expanded: bool) -> VisibleRow {
+        VisibleRow {
+            index,
+            depth,
+            name: name.into(),
+            node_type: NodeType::Directory,
+            expanded,
+            has_children: true,
+            is_last_child: false,
+            ancestor_has_next_sibling: vec![],
+        }
+    }
+
+    fn make_file_row(index: usize, depth: usize, name: &str) -> VisibleRow {
+        VisibleRow {
+            index,
+            depth,
+            name: name.into(),
+            node_type: NodeType::File { extension: None, size: 0 },
+            expanded: false,
+            has_children: false,
+            is_last_child: false,
+            ancestor_has_next_sibling: vec![],
+        }
+    }
+
+    #[test]
+    fn compact_empty_rows() {
+        let result = compact_visible_rows(vec![]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn compact_single_child_dir_chain() {
+        // root > a (expanded, 1 child) > b (expanded, 1 child) > file.txt
+        let rows = vec![
+            make_dir_row(0, 0, "root", true),
+            make_dir_row(1, 1, "a", true),
+            make_dir_row(2, 2, "b", true),
+            make_file_row(3, 3, "file.txt"),
+        ];
+        let result = compact_visible_rows(rows);
+        // root stays, a/b compacted into one row, file.txt remains
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].name, "root");
+        assert_eq!(result[1].name, "a/b");
+        assert_eq!(result[1].depth, 1); // depth of first in chain
+        assert_eq!(result[2].name, "file.txt");
+    }
+
+    #[test]
+    fn compact_multi_child_dir_not_compacted() {
+        // root > src (expanded, 2 children: a.rs, b.rs)
+        let rows = vec![
+            make_dir_row(0, 0, "root", true),
+            make_dir_row(1, 1, "src", true),
+            make_file_row(2, 2, "a.rs"),
+            make_file_row(3, 2, "b.rs"),
+        ];
+        let result = compact_visible_rows(rows);
+        assert_eq!(result.len(), 4); // no compaction
+        assert_eq!(result[1].name, "src");
+    }
+
+    #[test]
+    fn compact_collapsed_dir_not_compacted() {
+        // root > a (collapsed) — not expanded, so no compaction
+        let rows = vec![
+            make_dir_row(0, 0, "root", true),
+            make_dir_row(1, 1, "a", false),
+        ];
+        let result = compact_visible_rows(rows);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[1].name, "a");
+    }
+
+    #[test]
+    fn compact_deep_chain() {
+        // root > a > b > c > file.txt (all single-child expanded dirs)
+        let rows = vec![
+            make_dir_row(0, 0, "root", true),
+            make_dir_row(1, 1, "a", true),
+            make_dir_row(2, 2, "b", true),
+            make_dir_row(3, 3, "c", true),
+            make_file_row(4, 4, "file.txt"),
+        ];
+        let result = compact_visible_rows(rows);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[1].name, "a/b/c");
+        assert_eq!(result[1].depth, 1);
+        assert_eq!(result[2].name, "file.txt");
+    }
+
+    #[test]
+    fn compact_preserves_files_between_dirs() {
+        // root > file1.txt, dir_a (collapsed)
+        let rows = vec![
+            make_dir_row(0, 0, "root", true),
+            make_file_row(1, 1, "file1.txt"),
+            make_dir_row(2, 1, "dir_a", false),
+        ];
+        let result = compact_visible_rows(rows);
+        assert_eq!(result.len(), 3); // no compaction possible
     }
 }

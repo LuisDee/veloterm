@@ -118,6 +118,11 @@ impl FileTree {
         self.nodes.get_mut(index)
     }
 
+    /// Get a reference to all nodes in the tree.
+    pub fn nodes(&self) -> &[FileNode] {
+        &self.nodes
+    }
+
     /// Expand a directory node: read its children from the filesystem.
     /// If already loaded, just set expanded = true.
     /// Hidden files (starting with '.') are excluded.

@@ -84,6 +84,13 @@ pub enum UiMessage {
     FileBrowserRowHovered(usize),
     FileBrowserRowUnhovered,
     FileBrowserScroll(f32),
+    FileBrowserSearchInput(String),
+    FileBrowserSearchToggle,
+    // File browser preview selection
+    FileBrowserPreviewMouseDown(f32, f32),
+    FileBrowserPreviewMouseDrag(f32, f32),
+    FileBrowserPreviewMouseUp,
+    FileBrowserPreviewCopy,
     // Git review interactions
     GitReviewFileClicked(usize),
     GitReviewStageFile,
@@ -239,6 +246,10 @@ pub struct UiState<'a> {
     /// Whether the Git Review toolbar icon is hovered.
     pub is_git_review_icon_hovered: bool,
     // ── File Browser content ──
+    /// Whether the file browser search bar is active.
+    pub file_browser_search_active: bool,
+    /// Current file browser search query.
+    pub file_browser_search_query: String,
     /// Visible file tree rows for rendering.
     pub file_browser_rows: Vec<FileBrowserRow>,
     /// Breadcrumb path text.
@@ -251,6 +262,8 @@ pub struct UiState<'a> {
     pub file_browser_preview_truncated: bool,
     /// Preview scroll offset.
     pub file_browser_preview_scroll: f32,
+    /// Preview text selection (normalized: start_line, start_col, end_line, end_col).
+    pub file_browser_preview_selection: Option<(usize, usize, usize, usize)>,
     // ── Git Review content ──
     /// Flat list items for the file list panel.
     pub git_review_list_items: Vec<GitReviewListItem>,
@@ -1975,7 +1988,29 @@ impl IcedLayer {
             .width(iced_core::Length::Fill)
             .height(iced_core::Length::Fill);
 
-        let content = column![breadcrumb, scrollable_tree];
+        let content = if state.file_browser_search_active {
+            let search_bar: IcedElement<'a> = container(
+                text(format!("/ {}", &state.file_browser_search_query))
+                    .size(12.0 / scale)
+                    .color(text_primary)
+                    .font(JETBRAINS_MONO)
+            )
+            .width(iced_core::Length::Fill)
+            .padding(iced_core::Padding::from([4.0 / scale, 10.0 / scale]))
+            .style(move |_: &iced_core::Theme| container::Style {
+                background: Some(iced_core::Background::Color(bg_raised)),
+                border: iced_core::Border {
+                    color: accent,
+                    width: 1.0 / scale,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into();
+            column![breadcrumb, search_bar, scrollable_tree]
+        } else {
+            column![breadcrumb, scrollable_tree]
+        };
 
         container(content)
             .width(iced_core::Length::Fill)
@@ -3088,12 +3123,15 @@ mod tests {
             overlay_focused_panel: crate::file_browser::OverlayPanel::default(),
             is_file_browser_icon_hovered: false,
             is_git_review_icon_hovered: false,
+            file_browser_search_active: false,
+            file_browser_search_query: String::new(),
             file_browser_rows: Vec::new(),
             file_browser_breadcrumb: String::new(),
             file_browser_preview_name: None,
             file_browser_preview_lines: Vec::new(),
             file_browser_preview_truncated: false,
             file_browser_preview_scroll: 0.0,
+            file_browser_preview_selection: None,
             git_review_list_items: Vec::new(),
             git_review_diff_header: None,
             git_review_diff_rows: Vec::new(),
@@ -3373,12 +3411,15 @@ mod tests {
             overlay_focused_panel: crate::file_browser::OverlayPanel::default(),
             is_file_browser_icon_hovered: false,
             is_git_review_icon_hovered: false,
-file_browser_rows: Vec::new(),
+            file_browser_search_active: false,
+            file_browser_search_query: String::new(),
+            file_browser_rows: Vec::new(),
             file_browser_breadcrumb: String::new(),
             file_browser_preview_name: None,
             file_browser_preview_lines: Vec::new(),
             file_browser_preview_truncated: false,
             file_browser_preview_scroll: 0.0,
+            file_browser_preview_selection: None,
             git_review_list_items: Vec::new(),
             git_review_diff_header: None,
             git_review_diff_rows: Vec::new(),
@@ -3501,12 +3542,15 @@ file_browser_rows: Vec::new(),
             overlay_focused_panel: crate::file_browser::OverlayPanel::default(),
             is_file_browser_icon_hovered: false,
             is_git_review_icon_hovered: false,
-file_browser_rows: Vec::new(),
+            file_browser_search_active: false,
+            file_browser_search_query: String::new(),
+            file_browser_rows: Vec::new(),
             file_browser_breadcrumb: String::new(),
             file_browser_preview_name: None,
             file_browser_preview_lines: Vec::new(),
             file_browser_preview_truncated: false,
             file_browser_preview_scroll: 0.0,
+            file_browser_preview_selection: None,
             git_review_list_items: Vec::new(),
             git_review_diff_header: None,
             git_review_diff_rows: Vec::new(),
@@ -3916,12 +3960,15 @@ file_browser_rows: Vec::new(),
             overlay_focused_panel: crate::file_browser::OverlayPanel::default(),
             is_file_browser_icon_hovered: false,
             is_git_review_icon_hovered: false,
-file_browser_rows: Vec::new(),
+            file_browser_search_active: false,
+            file_browser_search_query: String::new(),
+            file_browser_rows: Vec::new(),
             file_browser_breadcrumb: String::new(),
             file_browser_preview_name: None,
             file_browser_preview_lines: Vec::new(),
             file_browser_preview_truncated: false,
             file_browser_preview_scroll: 0.0,
+            file_browser_preview_selection: None,
             git_review_list_items: Vec::new(),
             git_review_diff_header: None,
             git_review_diff_rows: Vec::new(),

@@ -10,11 +10,12 @@ pub mod watcher;
 
 use crate::input::InputMode;
 use preview::{FilePreview, PreviewViewState};
+use search::{FuzzyMatcher, SearchResult};
 use std::path::PathBuf;
 use syntect::highlighting::ThemeSet;
 use syntect::parsing::SyntaxSet;
-use tree::{FileTree, TreeNavAction, TreeNavResult, VisibleRow};
-use view::{BreadcrumbData, FileTreeViewState};
+use tree::{FileTree, NodeType, TreeNavAction, TreeNavResult, VisibleRow};
+use view::{compact_visible_rows, BreadcrumbData, FileTreeViewState};
 
 /// Which panel has focus in a split overlay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -55,6 +56,16 @@ pub struct FileBrowserState {
     pub syntax_set: SyntaxSet,
     /// Shared theme set for highlighting (loaded once).
     pub theme_set: ThemeSet,
+    /// Whether search mode is active (typing into the search bar).
+    pub search_active: bool,
+    /// Current search query string.
+    pub search_query: String,
+    /// Fuzzy matcher for file search.
+    pub search_matcher: FuzzyMatcher,
+    /// Current search results.
+    pub search_results: Vec<SearchResult>,
+    /// Whether to compact single-child directory chains (default true).
+    pub compact_folders: bool,
 }
 
 impl FileBrowserState {
@@ -70,6 +81,11 @@ impl FileBrowserState {
             preview_view: PreviewViewState::new(),
             syntax_set: SyntaxSet::load_defaults_newlines(),
             theme_set: ThemeSet::load_defaults(),
+            search_active: false,
+            search_query: String::new(),
+            search_matcher: FuzzyMatcher::new(),
+            search_results: Vec::new(),
+            compact_folders: true,
         }
     }
 
@@ -156,6 +172,80 @@ impl FileBrowserState {
         self.open(path);
     }
 
+    /// Enter search mode: activate the search bar and clear any previous query.
+    pub fn enter_search_mode(&mut self) {
+        self.search_active = true;
+        self.search_query.clear();
+        self.search_results.clear();
+    }
+
+    /// Exit search mode: deactivate the search bar and clear results.
+    pub fn exit_search_mode(&mut self) {
+        self.search_active = false;
+        self.search_query.clear();
+        self.search_results.clear();
+    }
+
+    /// Update search results for the given query.
+    pub fn update_search(&mut self, query: &str) {
+        self.search_query = query.to_string();
+        if query.is_empty() {
+            self.search_results.clear();
+        } else if let Some(tree) = &self.file_tree {
+            self.search_results = self.search_matcher.search_files(
+                query,
+                tree.nodes(),
+                tree.root(),
+            );
+        }
+    }
+
+    /// Append a character to the search query and refresh results.
+    pub fn search_append_char(&mut self, ch: char) {
+        self.search_query.push(ch);
+        let q = self.search_query.clone();
+        self.update_search(&q);
+    }
+
+    /// Remove the last character from the search query and refresh results.
+    pub fn search_backspace(&mut self) {
+        self.search_query.pop();
+        let q = self.search_query.clone();
+        self.update_search(&q);
+    }
+
+    /// Get the effective visible rows — filtered by search when active,
+    /// or compacted when compact_folders is enabled.
+    pub fn effective_visible_rows(&self) -> Vec<VisibleRow> {
+        if self.search_active && !self.search_query.is_empty() {
+            // In search mode with a query: show flat list of matching files
+            self.search_results
+                .iter()
+                .filter_map(|result| {
+                    self.file_tree.as_ref().and_then(|tree| {
+                        tree.get(result.node_index).map(|node| VisibleRow {
+                            index: result.node_index,
+                            depth: 0,
+                            name: result.relative_path.clone(),
+                            node_type: node.node_type.clone(),
+                            expanded: false,
+                            has_children: false,
+                            is_last_child: false,
+                            ancestor_has_next_sibling: vec![],
+                        })
+                    })
+                })
+                .collect()
+        } else {
+            let rows = self.visible_rows.clone();
+            if self.compact_folders {
+                compact_visible_rows(rows)
+            } else {
+                rows
+            }
+        }
+    }
+
     /// Reset state while preserving layout and syntax resources.
     /// Clears: file_tree, visible_rows, view_state, breadcrumb, preview, preview_view
     /// Preserves: split_ratio, focused_panel, syntax_set, theme_set
@@ -166,6 +256,9 @@ impl FileBrowserState {
         self.breadcrumb = None;
         self.preview = None;
         self.preview_view = PreviewViewState::new();
+        self.search_active = false;
+        self.search_query.clear();
+        self.search_results.clear();
     }
 
     /// Load a file preview for the given path.
@@ -481,5 +574,239 @@ mod tests {
         // Left from file should go to parent (subdir at row 1)
         state.handle_nav_action(TreeNavAction::Left, 500.0);
         assert_eq!(state.view_state.nav.selected_visible_row, Some(1));
+    }
+
+    // ── Search mode ─────────────────────────────────────────
+
+    fn create_test_state() -> FileBrowserState {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::write(root.join("hello.txt"), "hi").unwrap();
+        let mut state = FileBrowserState::new();
+        state.open(root);
+        // Leak the tempdir so the directory stays around for the test
+        std::mem::forget(dir);
+        state
+    }
+
+    #[test]
+    fn search_slash_enters_search_mode() {
+        let mut state = create_test_state();
+        state.enter_search_mode();
+        assert!(state.search_active);
+        assert!(state.search_query.is_empty());
+    }
+
+    #[test]
+    fn search_escape_exits_search() {
+        let mut state = create_test_state();
+        state.enter_search_mode();
+        state.search_append_char('t');
+        state.exit_search_mode();
+        assert!(!state.search_active);
+        assert!(state.search_query.is_empty());
+        assert!(state.search_results.is_empty());
+    }
+
+    #[test]
+    fn search_filters_visible_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::write(root.join("config.toml"), "").unwrap();
+        std::fs::write(root.join("main.rs"), "").unwrap();
+        std::fs::write(root.join("readme.md"), "").unwrap();
+
+        let mut state = FileBrowserState::new();
+        state.open(root);
+        state.enter_search_mode();
+        state.update_search("config");
+
+        let rows = state.effective_visible_rows();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].name.contains("config"));
+    }
+
+    #[test]
+    fn search_empty_query_shows_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::write(root.join("a.txt"), "").unwrap();
+        std::fs::write(root.join("b.txt"), "").unwrap();
+
+        let mut state = FileBrowserState::new();
+        state.open(root);
+        let all_rows = state.effective_visible_rows().len();
+
+        state.enter_search_mode();
+        // Empty query -- should show all rows
+        let search_rows = state.effective_visible_rows().len();
+        assert_eq!(search_rows, all_rows);
+    }
+
+    #[test]
+    fn search_append_char() {
+        let mut state = create_test_state();
+        state.enter_search_mode();
+        state.search_append_char('h');
+        state.search_append_char('e');
+        assert_eq!(state.search_query, "he");
+    }
+
+    #[test]
+    fn search_backspace() {
+        let mut state = create_test_state();
+        state.enter_search_mode();
+        state.search_append_char('h');
+        state.search_append_char('e');
+        state.search_backspace();
+        assert_eq!(state.search_query, "h");
+    }
+
+    #[test]
+    fn search_backspace_on_empty() {
+        let mut state = create_test_state();
+        state.enter_search_mode();
+        state.search_backspace(); // should not panic
+        assert!(state.search_query.is_empty());
+    }
+
+    #[test]
+    fn search_results_sorted_by_relevance() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::write(root.join("main.rs"), "").unwrap();
+        std::fs::write(root.join("lib.rs"), "").unwrap();
+        std::fs::write(root.join("config.toml"), "").unwrap();
+
+        let mut state = FileBrowserState::new();
+        state.open(root);
+        state.enter_search_mode();
+        state.update_search("rs");
+
+        let rows = state.effective_visible_rows();
+        // Should find at least the .rs files
+        assert!(rows.len() >= 2);
+        // All results should be files (search only matches files)
+        for row in &rows {
+            assert!(matches!(row.node_type, NodeType::File { .. }));
+        }
+    }
+
+    #[test]
+    fn search_reset_clears_search_state() {
+        let mut state = create_test_state();
+        state.enter_search_mode();
+        state.search_append_char('x');
+        state.reset();
+        assert!(!state.search_active);
+        assert!(state.search_query.is_empty());
+        assert!(state.search_results.is_empty());
+    }
+
+    // ── Compact folders ──────────────────────────────────────
+
+    #[test]
+    fn compact_folders_single_child_chain() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let deep = root.join("a").join("b").join("c");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("file.txt"), "").unwrap();
+
+        let mut state = FileBrowserState::new();
+        state.open(root);
+        state.compact_folders = true;
+
+        // Expand a, then a/b, then a/b/c
+        // After open(), root is expanded. visible rows: root, a
+        // Find 'a' and expand
+        let a_idx = state.visible_rows.iter()
+            .find(|r| r.name == "a").unwrap().index;
+        if let Some(tree) = &mut state.file_tree {
+            let _ = tree.expand(a_idx);
+        }
+        state.refresh_visible_rows();
+
+        // Find 'b' and expand
+        let b_idx = state.visible_rows.iter()
+            .find(|r| r.name == "b").unwrap().index;
+        if let Some(tree) = &mut state.file_tree {
+            let _ = tree.expand(b_idx);
+        }
+        state.refresh_visible_rows();
+
+        // Find 'c' and expand
+        let c_idx = state.visible_rows.iter()
+            .find(|r| r.name == "c").unwrap().index;
+        if let Some(tree) = &mut state.file_tree {
+            let _ = tree.expand(c_idx);
+        }
+        state.refresh_visible_rows();
+
+        let rows = state.effective_visible_rows();
+        // Should have compacted: "a/b/c" as one row + file.txt
+        let dir_row = rows.iter().find(|r| r.name.contains("a")).unwrap();
+        assert!(
+            dir_row.name.contains("a/b/c") || dir_row.name.contains("a/b"),
+            "single-child dirs should be compacted, got: {}",
+            dir_row.name
+        );
+    }
+
+    #[test]
+    fn compact_folders_multi_child_not_compacted() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let sub = root.join("src");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("a.rs"), "").unwrap();
+        std::fs::write(sub.join("b.rs"), "").unwrap();
+
+        let mut state = FileBrowserState::new();
+        state.open(root);
+        state.compact_folders = true;
+
+        let rows = state.effective_visible_rows();
+        // "src" has 2 children -- should NOT be compacted
+        let src_row = rows.iter().find(|r| r.name == "src").unwrap();
+        assert_eq!(src_row.name, "src");
+    }
+
+    #[test]
+    fn compact_folders_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let deep = root.join("a").join("b");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("file.txt"), "").unwrap();
+
+        let mut state = FileBrowserState::new();
+        state.open(root);
+        state.compact_folders = false;
+
+        let rows = state.effective_visible_rows();
+        // Should NOT compact -- "a" should be a separate row
+        assert!(rows.iter().any(|r| r.name == "a"), "should have separate 'a' row");
+    }
+
+    #[test]
+    fn compact_folders_default_is_true() {
+        let state = FileBrowserState::new();
+        assert!(state.compact_folders);
+    }
+
+    #[test]
+    fn effective_visible_rows_without_search_returns_compacted() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::write(root.join("file.txt"), "").unwrap();
+
+        let mut state = FileBrowserState::new();
+        state.open(root);
+
+        // Not in search mode — should return compacted visible rows
+        assert!(!state.search_active);
+        let rows = state.effective_visible_rows();
+        assert!(!rows.is_empty());
     }
 }
