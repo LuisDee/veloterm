@@ -55,6 +55,7 @@ pub struct Renderer {
     damage_state: DamageState,
     pane_damage: PaneDamageMap,
     _bind_group_layout: wgpu::BindGroupLayout,
+    atlas_texture: wgpu::Texture,
     _atlas_view: wgpu::TextureView,
     _sampler: wgpu::Sampler,
     /// Terminal content padding in physical pixels (top, bottom, left, right).
@@ -250,6 +251,7 @@ impl Renderer {
             damage_state,
             pane_damage,
             _bind_group_layout: bind_group_layout,
+            atlas_texture,
             _atlas_view: atlas_view,
             _sampler: sampler,
             padding: [0.0; 4],
@@ -329,6 +331,7 @@ impl Renderer {
         self.atlas = atlas;
         self.grid = grid;
         self.bind_group = bind_group;
+        self.atlas_texture = atlas_texture;
         self._atlas_view = atlas_view;
         self._sampler = sampler;
         self.pane_damage.force_full_damage_all();
@@ -551,6 +554,40 @@ impl Renderer {
         let _multi_pane = panes.len() > 1;
         let cw = self.cell_width();
         let ch = self.cell_height();
+
+        // Pre-scan: rasterize any unknown characters on demand before generating instances.
+        // This mutably borrows self.atlas once, then the generated glyphs are available
+        // for the immutable glyph_info() calls in generate_instances().
+        for pane in panes.iter() {
+            for cell in &pane.cells {
+                if cell.ch != ' ' && self.atlas.glyph_info(cell.ch).is_none() {
+                    self.atlas.rasterize_on_demand(cell.ch);
+                }
+            }
+        }
+        // If atlas was modified by on-demand rasterization, re-upload to GPU
+        if self.atlas.atlas_dirty {
+            self.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.atlas_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &self.atlas.atlas_data,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(self.atlas.atlas_width * self.atlas.bytes_per_pixel),
+                    rows_per_image: Some(self.atlas.atlas_height),
+                },
+                wgpu::Extent3d {
+                    width: self.atlas.atlas_width,
+                    height: self.atlas.atlas_height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            self.atlas.atlas_dirty = false;
+        }
 
         for pane in panes.iter_mut() {
             // Compute content area: pane rect inset by padding
