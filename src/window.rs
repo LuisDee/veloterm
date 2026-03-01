@@ -172,6 +172,8 @@ pub struct App {
     file_browser_state: Option<crate::file_browser::FileBrowserState>,
     /// Git review overlay state. Some = state exists (may or may not be visible).
     git_review_state: Option<crate::git_review::GitReviewState>,
+    /// Double-click tracking for file browser rows.
+    fb_last_click: Option<(usize, std::time::Instant)>,
     /// Whether the File Browser toolbar icon is hovered.
     hovering_file_browser_icon: bool,
     /// Whether the Git Review toolbar icon is hovered.
@@ -235,6 +237,7 @@ impl App {
             is_dragging_divider: false,
             file_browser_state: None,
             git_review_state: None,
+            fb_last_click: None,
             hovering_file_browser_icon: false,
             hovering_git_review_icon: false,
         }
@@ -3579,9 +3582,25 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                             // File browser interactions
                             UiMessage::FileBrowserRowClicked(idx) => {
+                                let now = std::time::Instant::now();
+                                let is_double_click = if let Some((last_idx, last_time)) = self.fb_last_click {
+                                    last_idx == idx && now.duration_since(last_time).as_millis() < 400
+                                } else {
+                                    false
+                                };
+                                self.fb_last_click = Some((idx, now));
+
                                 if let Some(state) = &mut self.file_browser_state {
-                                    if let Some(path) = state.handle_row_click(idx, 500.0) {
-                                        state.load_preview(&path);
+                                    if is_double_click {
+                                        // Double-click: expand dir or open file
+                                        if let Some(path) = state.handle_row_click(idx, 500.0) {
+                                            state.load_preview(&path);
+                                        }
+                                    } else {
+                                        // Single-click: select row, load preview if file
+                                        if let Some(path) = state.handle_row_select(idx) {
+                                            state.load_preview(&path);
+                                        }
                                     }
                                 }
                             }

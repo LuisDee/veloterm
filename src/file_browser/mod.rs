@@ -127,9 +127,28 @@ impl FileBrowserState {
     }
 
     /// Handle clicking on a row (by visible row index).
+    /// This triggers the Enter action (expand dir / open file).
     pub fn handle_row_click(&mut self, visible_row_idx: usize, viewport_height: f32) -> Option<PathBuf> {
         self.view_state.nav.selected_visible_row = Some(visible_row_idx);
         self.handle_nav_action(TreeNavAction::Enter, viewport_height)
+    }
+
+    /// Select a row without triggering any action (no expand/open).
+    /// Used for single-click: just highlight the row and load preview.
+    pub fn handle_row_select(&mut self, visible_row_idx: usize) -> Option<PathBuf> {
+        self.view_state.nav.selected_visible_row = Some(visible_row_idx);
+        // Return the path of the selected item for preview loading
+        if let Some(row) = self.visible_rows.get(visible_row_idx) {
+            if let Some(tree) = &self.file_tree {
+                if let Some(node) = tree.get(row.index) {
+                    if node.path.is_file() {
+                        self.view_state.selected_file = Some(row.index);
+                        return Some(node.path.clone());
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Navigate to a breadcrumb segment path.
@@ -330,11 +349,63 @@ mod tests {
         let mut state = FileBrowserState::new();
         state.open(root.clone());
 
-        // Click on the file row
+        // Click on the file row (handle_row_click = double-click action)
         let result = state.handle_row_click(1, 500.0);
         assert!(result.is_some());
         assert_eq!(result.unwrap(), root.join("click.txt"));
         assert_eq!(state.view_state.selected_file.is_some(), true);
+    }
+
+    #[test]
+    fn row_select_only_selects_file_without_expanding_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let sub = root.join("subdir");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("inner.txt"), "in").unwrap();
+        std::fs::write(root.join("hello.txt"), "hi").unwrap();
+
+        let mut state = FileBrowserState::new();
+        state.open(root.clone());
+        let initial_rows = state.visible_rows.len();
+
+        // Single-click on subdir (row 1) — should NOT expand it
+        let result = state.handle_row_select(1);
+        assert!(result.is_none(), "selecting a dir should not return a file path");
+        assert_eq!(state.view_state.nav.selected_visible_row, Some(1));
+        assert_eq!(state.visible_rows.len(), initial_rows, "dir should not expand on select");
+    }
+
+    #[test]
+    fn row_select_on_file_returns_path_for_preview() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::write(root.join("preview.txt"), "content").unwrap();
+
+        let mut state = FileBrowserState::new();
+        state.open(root.clone());
+
+        // Single-click on file row (root=0, file=1)
+        let result = state.handle_row_select(1);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), root.join("preview.txt"));
+        assert_eq!(state.view_state.nav.selected_visible_row, Some(1));
+        assert!(state.view_state.selected_file.is_some());
+    }
+
+    #[test]
+    fn row_select_out_of_bounds_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::write(root.join("a.txt"), "a").unwrap();
+
+        let mut state = FileBrowserState::new();
+        state.open(root);
+
+        // Out-of-bounds index
+        let result = state.handle_row_select(999);
+        assert!(result.is_none());
+        assert_eq!(state.view_state.nav.selected_visible_row, Some(999));
     }
 
     #[test]

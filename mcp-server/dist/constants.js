@@ -37,6 +37,10 @@ export const KEY_CODES = {
     "ctrl+w": { code: 13, modifiers: ["control down"] },
     "ctrl+u": { code: 32, modifiers: ["control down"] },
     "ctrl+k": { code: 40, modifiers: ["control down"] },
+    "ctrl+g": { code: 5, modifiers: ["control down"] },
+    "ctrl+b": { code: 11, modifiers: ["control down"] },
+    "ctrl+t": { code: 17, modifiers: ["control down"] },
+    "ctrl+n": { code: 45, modifiers: ["control down"] },
 };
 export const SUPPORTED_KEYS = Object.keys(KEY_CODES);
 //# sourceMappingURL=constants.js.map
