@@ -2902,6 +2902,12 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                         }
                     }
+                    // Process Kitty Graphics Protocol responses
+                    for resp in state.terminal.drain_image_responses() {
+                        if let Err(e) = state.pty.write(resp.as_bytes()) {
+                            log::warn!("Failed to write image response to PTY: {}", e);
+                        }
+                    }
                     // Check for bell events
                     if state.terminal.take_bell() && self.app_config.shell.bell_enabled {
                         self.bell_flash_until = Some(
