@@ -2230,6 +2230,18 @@ impl ApplicationHandler<UserEvent> for App {
                                             }
                                         }
                                     }
+                                // Cmd+A in file browser with right panel focused: select all preview text
+                                } else if self.input_mode == InputMode::FileBrowser
+                                    && crate::input::clipboard::is_select_all_keybinding(&event.logical_key, self.modifiers)
+                                {
+                                    if let Some(state) = &mut self.file_browser_state {
+                                        if state.focused_panel == crate::file_browser::OverlayPanel::Right {
+                                            if let Some(preview) = &state.preview {
+                                                let lines = preview.lines.clone();
+                                                state.preview_view.select_all(&lines);
+                                            }
+                                        }
+                                    }
                                 } else if self.input_mode == InputMode::FileBrowser {
                                     self.handle_file_browser_key(&event.logical_key);
                                 } else {

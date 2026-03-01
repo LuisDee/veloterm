@@ -138,11 +138,116 @@ pub fn preview_visible_range(
     (start, end)
 }
 
+/// A text selection range within the preview content.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextSelection {
+    pub start_line: usize,
+    pub start_col: usize,
+    pub end_line: usize,
+    pub end_col: usize,
+}
+
+impl TextSelection {
+    /// Returns (start_line, start_col, end_line, end_col) with start always before end.
+    pub fn normalized(&self) -> (usize, usize, usize, usize) {
+        if self.start_line < self.end_line
+            || (self.start_line == self.end_line && self.start_col <= self.end_col)
+        {
+            (self.start_line, self.start_col, self.end_line, self.end_col)
+        } else {
+            (self.end_line, self.end_col, self.start_line, self.start_col)
+        }
+    }
+
+    /// Extract selected text from line data.
+    pub fn extract_text(&self, lines: &[String]) -> String {
+        let (sl, sc, el, ec) = self.normalized();
+        if lines.is_empty() || sl >= lines.len() {
+            return String::new();
+        }
+        let el = el.min(lines.len() - 1);
+
+        if sl == el {
+            // Single line selection
+            let line = &lines[sl];
+            let sc = sc.min(line.len());
+            let ec = ec.min(line.len());
+            line[sc..ec].to_string()
+        } else {
+            // Multi-line selection
+            let mut result = String::new();
+            // First line: from start_col to end
+            let first = &lines[sl];
+            let sc = sc.min(first.len());
+            result.push_str(&first[sc..]);
+            // Middle lines: full content
+            for line in &lines[sl + 1..el] {
+                result.push('\n');
+                result.push_str(line);
+            }
+            // Last line: from start to end_col
+            result.push('\n');
+            let last = &lines[el];
+            let ec = ec.min(last.len());
+            result.push_str(&last[..ec]);
+            result
+        }
+    }
+
+    /// Does selection touch this line?
+    pub fn contains_line(&self, line: usize) -> bool {
+        let (sl, _, el, _) = self.normalized();
+        line >= sl && line <= el
+    }
+
+    /// Column range selected on this line, if any.
+    pub fn line_selection_range(&self, line: usize, line_len: usize) -> Option<(usize, usize)> {
+        let (sl, sc, el, ec) = self.normalized();
+        if line < sl || line > el {
+            return None;
+        }
+        if sl == el {
+            // Single line selection
+            Some((sc.min(line_len), ec.min(line_len)))
+        } else if line == sl {
+            Some((sc.min(line_len), line_len))
+        } else if line == el {
+            Some((0, ec.min(line_len)))
+        } else {
+            // Middle line: fully selected
+            Some((0, line_len))
+        }
+    }
+
+    /// Same start and end position.
+    pub fn is_empty(&self) -> bool {
+        self.start_line == self.end_line && self.start_col == self.end_col
+    }
+}
+
+/// Convert pixel coordinates to a (line, col) text position in the preview.
+pub fn pixel_to_text_position(
+    click_x: f32,
+    click_y: f32,
+    scroll_offset: f32,
+    cell_width: f32,
+    cell_height: f32,
+    gutter_width: f32,
+    total_lines: usize,
+) -> (usize, usize) {
+    let line = ((click_y + scroll_offset) / cell_height).floor() as usize;
+    let line = if total_lines == 0 { 0 } else { line.min(total_lines - 1) };
+    let col = ((click_x - gutter_width).max(0.0) / cell_width).floor() as usize;
+    (line, col)
+}
+
 /// State for the preview panel's scroll and word-wrap toggle.
 #[derive(Debug, Clone)]
 pub struct PreviewViewState {
     pub scroll_offset: f32,
     pub word_wrap: bool,
+    pub selection: Option<TextSelection>,
+    pub mouse_down: bool,
 }
 
 impl PreviewViewState {
@@ -150,6 +255,8 @@ impl PreviewViewState {
         Self {
             scroll_offset: 0.0,
             word_wrap: false,
+            selection: None,
+            mouse_down: false,
         }
     }
 
@@ -158,6 +265,66 @@ impl PreviewViewState {
         let total_height = total_lines as f32 * PREVIEW_ROW_HEIGHT;
         let max_offset = (total_height - viewport_height).max(0.0);
         self.scroll_offset = (self.scroll_offset + delta).clamp(0.0, max_offset);
+    }
+
+    /// Start a new selection at the given line and column.
+    pub fn handle_mouse_down(&mut self, line: usize, col: usize) {
+        self.mouse_down = true;
+        self.selection = Some(TextSelection {
+            start_line: line,
+            start_col: col,
+            end_line: line,
+            end_col: col,
+        });
+    }
+
+    /// Extend the current selection to the given line and column.
+    pub fn handle_mouse_drag(&mut self, line: usize, col: usize) {
+        if self.mouse_down {
+            if let Some(ref mut sel) = self.selection {
+                sel.end_line = line;
+                sel.end_col = col;
+            }
+        }
+    }
+
+    /// Stop dragging (selection persists).
+    pub fn handle_mouse_up(&mut self) {
+        self.mouse_down = false;
+    }
+
+    /// Clear selection and stop dragging.
+    pub fn clear_selection(&mut self) {
+        self.selection = None;
+        self.mouse_down = false;
+    }
+
+    /// Copy the selected text from lines, if any non-empty selection exists.
+    pub fn copy_selection(&self, lines: &[String]) -> Option<String> {
+        self.selection.as_ref().and_then(|sel| {
+            if sel.is_empty() {
+                None
+            } else {
+                Some(sel.extract_text(lines))
+            }
+        })
+    }
+
+    /// Select all text in the preview.
+    pub fn select_all(&mut self, lines: &[String]) {
+        if lines.is_empty() {
+            self.selection = None;
+            return;
+        }
+        let last_line = lines.len() - 1;
+        let last_col = lines[last_line].len();
+        self.selection = Some(TextSelection {
+            start_line: 0,
+            start_col: 0,
+            end_line: last_line,
+            end_col: last_col,
+        });
+        self.mouse_down = false;
     }
 }
 
@@ -815,5 +982,209 @@ mod tests {
         assert!(state.word_wrap);
         state.word_wrap = false;
         assert!(!state.word_wrap);
+    }
+
+    // --- Text selection ---
+
+    #[test]
+    fn test_text_selection_extract_single_line() {
+        let sel = TextSelection { start_line: 0, start_col: 5, end_line: 0, end_col: 10 };
+        let lines = vec!["Hello, World!".to_string()];
+        assert_eq!(sel.extract_text(&lines), ", Wor");
+    }
+
+    #[test]
+    fn test_text_selection_extract_multi_line() {
+        let sel = TextSelection { start_line: 0, start_col: 5, end_line: 2, end_col: 3 };
+        let lines = vec!["Hello, World!".into(), "Line two".into(), "Line three".into()];
+        assert_eq!(sel.extract_text(&lines), ", World!\nLine two\nLin");
+    }
+
+    #[test]
+    fn test_text_selection_normalized_forward() {
+        let sel = TextSelection { start_line: 0, start_col: 5, end_line: 2, end_col: 3 };
+        assert_eq!(sel.normalized(), (0, 5, 2, 3));
+    }
+
+    #[test]
+    fn test_text_selection_normalized_backward() {
+        let sel = TextSelection { start_line: 2, start_col: 3, end_line: 0, end_col: 5 };
+        assert_eq!(sel.normalized(), (0, 5, 2, 3));
+    }
+
+    #[test]
+    fn test_text_selection_contains_line() {
+        let sel = TextSelection { start_line: 2, start_col: 0, end_line: 5, end_col: 10 };
+        assert!(!sel.contains_line(1));
+        assert!(sel.contains_line(2));
+        assert!(sel.contains_line(3));
+        assert!(sel.contains_line(5));
+        assert!(!sel.contains_line(6));
+    }
+
+    #[test]
+    fn test_text_selection_line_range_middle() {
+        let sel = TextSelection { start_line: 1, start_col: 5, end_line: 3, end_col: 8 };
+        // Middle line (line 2) is fully selected
+        assert_eq!(sel.line_selection_range(2, 20), Some((0, 20)));
+    }
+
+    #[test]
+    fn test_text_selection_line_range_start_line() {
+        let sel = TextSelection { start_line: 1, start_col: 5, end_line: 3, end_col: 8 };
+        assert_eq!(sel.line_selection_range(1, 20), Some((5, 20)));
+    }
+
+    #[test]
+    fn test_text_selection_line_range_end_line() {
+        let sel = TextSelection { start_line: 1, start_col: 5, end_line: 3, end_col: 8 };
+        assert_eq!(sel.line_selection_range(3, 20), Some((0, 8)));
+    }
+
+    #[test]
+    fn test_text_selection_line_range_single_line() {
+        let sel = TextSelection { start_line: 2, start_col: 5, end_line: 2, end_col: 10 };
+        assert_eq!(sel.line_selection_range(2, 20), Some((5, 10)));
+    }
+
+    #[test]
+    fn test_text_selection_is_empty() {
+        let sel = TextSelection { start_line: 2, start_col: 5, end_line: 2, end_col: 5 };
+        assert!(sel.is_empty());
+        let sel2 = TextSelection { start_line: 2, start_col: 5, end_line: 2, end_col: 6 };
+        assert!(!sel2.is_empty());
+    }
+
+    #[test]
+    fn test_pixel_to_text_position_basic() {
+        let (line, col) = pixel_to_text_position(
+            100.0, 45.0, // click position
+            0.0,         // no scroll
+            8.0, 20.0,   // cell_width, cell_height
+            40.0,        // gutter_width
+            100,         // total_lines
+        );
+        assert_eq!(line, 2);  // 45.0 / 20.0 = 2.25 -> 2
+        assert_eq!(col, 7);   // (100.0 - 40.0) / 8.0 = 7.5 -> 7
+    }
+
+    #[test]
+    fn test_pixel_to_text_position_with_scroll() {
+        let (line, _) = pixel_to_text_position(
+            50.0, 10.0,
+            40.0,        // scrolled down 2 lines
+            8.0, 20.0,
+            40.0,
+            100,
+        );
+        assert_eq!(line, 2);  // (10.0 + 40.0) / 20.0 = 2.5 -> 2
+    }
+
+    #[test]
+    fn test_pixel_to_text_position_clamps() {
+        let (line, col) = pixel_to_text_position(
+            5.0, 9999.0,  // far below, in gutter
+            0.0,
+            8.0, 20.0,
+            40.0,
+            10,            // only 10 lines
+        );
+        assert_eq!(line, 9);  // clamped to total_lines - 1
+        assert_eq!(col, 0);   // click_x < gutter_width -> 0
+    }
+
+    #[test]
+    fn test_preview_mouse_down_starts_selection() {
+        let mut view = PreviewViewState::new();
+        view.handle_mouse_down(5, 10);
+        assert!(view.mouse_down);
+        assert_eq!(view.selection, Some(TextSelection { start_line: 5, start_col: 10, end_line: 5, end_col: 10 }));
+    }
+
+    #[test]
+    fn test_preview_mouse_drag_extends_selection() {
+        let mut view = PreviewViewState::new();
+        view.handle_mouse_down(5, 10);
+        view.handle_mouse_drag(7, 3);
+        assert_eq!(view.selection.as_ref().unwrap().end_line, 7);
+        assert_eq!(view.selection.as_ref().unwrap().end_col, 3);
+    }
+
+    #[test]
+    fn test_preview_mouse_up_stops_dragging() {
+        let mut view = PreviewViewState::new();
+        view.handle_mouse_down(5, 10);
+        view.handle_mouse_up();
+        assert!(!view.mouse_down);
+        assert!(view.selection.is_some()); // selection persists
+    }
+
+    #[test]
+    fn test_copy_selection_returns_text() {
+        let mut view = PreviewViewState::new();
+        view.handle_mouse_down(0, 0);
+        view.handle_mouse_drag(0, 5);
+        view.handle_mouse_up();
+        let lines = vec!["Hello, World!".to_string()];
+        assert_eq!(view.copy_selection(&lines), Some("Hello".to_string()));
+    }
+
+    #[test]
+    fn test_copy_empty_selection_returns_none() {
+        let view = PreviewViewState::new();
+        let lines = vec!["Hello".to_string()];
+        assert_eq!(view.copy_selection(&lines), None);
+    }
+
+    #[test]
+    fn test_clear_selection() {
+        let mut view = PreviewViewState::new();
+        view.handle_mouse_down(0, 0);
+        view.handle_mouse_drag(5, 10);
+        view.clear_selection();
+        assert!(view.selection.is_none());
+        assert!(!view.mouse_down);
+    }
+
+    #[test]
+    fn test_select_all() {
+        let mut view = PreviewViewState::new();
+        let lines = vec![
+            "First line".to_string(),
+            "Second line".to_string(),
+            "Third line".to_string(),
+        ];
+        view.select_all(&lines);
+        assert_eq!(
+            view.selection,
+            Some(TextSelection {
+                start_line: 0,
+                start_col: 0,
+                end_line: 2,
+                end_col: 10, // "Third line".len()
+            })
+        );
+        assert!(!view.mouse_down);
+        assert_eq!(view.copy_selection(&lines), Some("First line\nSecond line\nThird line".to_string()));
+    }
+
+    #[test]
+    fn test_select_all_empty_lines() {
+        let mut view = PreviewViewState::new();
+        let lines: Vec<String> = Vec::new();
+        view.select_all(&lines);
+        assert!(view.selection.is_none());
+    }
+
+    #[test]
+    fn test_selection_cleared_on_new_preview() {
+        let mut view = PreviewViewState::new();
+        view.handle_mouse_down(0, 0);
+        view.handle_mouse_drag(5, 10);
+        assert!(view.selection.is_some());
+        // Simulating what load_preview does: reset to new()
+        view = PreviewViewState::new();
+        assert!(view.selection.is_none());
+        assert!(!view.mouse_down);
     }
 }
