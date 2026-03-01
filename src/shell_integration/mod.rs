@@ -33,6 +33,8 @@ pub enum ShellEvent {
     CurrentDirectory(String),
     /// OSC 0 or OSC 2 title change.
     Title(String),
+    /// Kitty Graphics Protocol APC sequence payload (control_data;base64_data).
+    KittyGraphics(Vec<u8>),
 }
 
 /// Record of a completed command with timing information.
@@ -134,6 +136,9 @@ impl ShellState {
                 self.title = Some(title.clone());
                 self.title_is_explicit = true;
             }
+            ShellEvent::KittyGraphics(_) => {
+                // Handled by the terminal/window layer, not ShellState
+            }
         }
     }
 
@@ -189,21 +194,47 @@ pub fn extract_shell_events(bytes: &[u8]) -> Vec<ShellEvent> {
     let mut events = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
-        // Look for ESC ] (OSC start)
-        if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b']' {
-            // Find the OSC terminator: BEL (0x07) or ST (ESC \)
-            let osc_start = i + 2;
-            if let Some((payload, end)) = find_osc_payload(bytes, osc_start) {
-                if let Some(event) = parse_osc_payload(payload) {
-                    events.push(event);
+        if bytes[i] == 0x1b && i + 1 < bytes.len() {
+            if bytes[i + 1] == b']' {
+                // OSC start: ESC ]
+                let osc_start = i + 2;
+                if let Some((payload, end)) = find_osc_payload(bytes, osc_start) {
+                    if let Some(event) = parse_osc_payload(payload) {
+                        events.push(event);
+                    }
+                    i = end;
+                    continue;
                 }
-                i = end;
-                continue;
+            } else if bytes[i + 1] == b'_' {
+                // APC start: ESC _
+                let apc_start = i + 2;
+                if let Some((payload, end)) = find_apc_payload(bytes, apc_start) {
+                    // Only extract Kitty Graphics (starts with 'G')
+                    if !payload.is_empty() && payload[0] == b'G' {
+                        events.push(ShellEvent::KittyGraphics(payload[1..].to_vec()));
+                    }
+                    i = end;
+                    continue;
+                }
             }
         }
         i += 1;
     }
     events
+}
+
+/// Find the payload and end position of an APC sequence starting at `start`.
+/// APC terminates with ST (ESC \). Returns (raw payload bytes, position_after_terminator).
+fn find_apc_payload(bytes: &[u8], start: usize) -> Option<(&[u8], usize)> {
+    let mut i = start;
+    while i < bytes.len() {
+        if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
+            // ST terminator (ESC \)
+            return Some((&bytes[start..i], i + 2));
+        }
+        i += 1;
+    }
+    None
 }
 
 /// Find the payload and end position of an OSC sequence starting at `start`.
@@ -1060,6 +1091,135 @@ mod tests {
         assert!(
             fish.contains("VELOTERM_SHELL_INTEGRATION"),
             "fish: missing double-source guard"
+        );
+    }
+
+    // ── APC Kitty Graphics extraction ────────────────────────────
+
+    #[test]
+    fn extract_kitty_graphics_simple() {
+        let bytes = b"\x1b_Gi=1,s=1,v=1,f=24;YWJj\x1b\\";
+        let events = extract_shell_events(bytes);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ShellEvent::KittyGraphics(_))),
+            "should extract kitty graphics event"
+        );
+    }
+
+    #[test]
+    fn extract_kitty_graphics_with_surrounding_text() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"hello ");
+        bytes.extend_from_slice(b"\x1b_Gi=1,f=100;QUFB\x1b\\");
+        bytes.extend_from_slice(b" world");
+        let events = extract_shell_events(&bytes);
+        let gfx_events: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, ShellEvent::KittyGraphics(_)))
+            .collect();
+        assert_eq!(gfx_events.len(), 1);
+    }
+
+    #[test]
+    fn extract_kitty_graphics_multiple_in_stream() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"\x1b_Gi=1,m=1;QUFB\x1b\\");
+        bytes.extend_from_slice(b"\x1b_Gm=0;QkJC\x1b\\");
+        let events = extract_shell_events(&bytes);
+        let gfx_events: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, ShellEvent::KittyGraphics(_)))
+            .collect();
+        assert_eq!(gfx_events.len(), 2);
+    }
+
+    #[test]
+    fn extract_kitty_graphics_preserves_payload() {
+        let bytes = b"\x1b_Gi=42,f=24,s=2,v=2;/wAA/wD/AP8=\x1b\\";
+        let events = extract_shell_events(bytes);
+        if let Some(ShellEvent::KittyGraphics(payload)) = events.first() {
+            let s = String::from_utf8_lossy(payload);
+            assert!(s.contains("i=42"), "payload should contain control data");
+            assert!(
+                s.contains("/wAA/wD/AP8="),
+                "payload should contain base64 data"
+            );
+        } else {
+            panic!("expected KittyGraphics event");
+        }
+    }
+
+    #[test]
+    fn extract_ignores_non_graphics_apc() {
+        // APC without 'G' prefix should be ignored
+        let bytes = b"\x1b_Xsomething\x1b\\";
+        let events = extract_shell_events(bytes);
+        assert!(events
+            .iter()
+            .all(|e| !matches!(e, ShellEvent::KittyGraphics(_))));
+    }
+
+    #[test]
+    fn extract_incomplete_apc_not_extracted() {
+        // APC without terminator — should not extract partial sequence
+        let bytes = b"\x1b_Gi=1,f=24;YWJj";
+        let events = extract_shell_events(bytes);
+        assert!(events
+            .iter()
+            .all(|e| !matches!(e, ShellEvent::KittyGraphics(_))));
+    }
+
+    #[test]
+    fn extract_kitty_graphics_coexists_with_osc7() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"\x1b]7;file://localhost/home/user\x07");
+        bytes.extend_from_slice(b"\x1b_Gi=1,f=24,s=1,v=1;YWJj\x1b\\");
+        let events = extract_shell_events(&bytes);
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, ShellEvent::CurrentDirectory(_))));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, ShellEvent::KittyGraphics(_))));
+    }
+
+    #[test]
+    fn extract_apc_split_across_two_feeds() {
+        // APC sequence split across two PTY reads — first half has no ST
+        let part1 = b"\x1b_Gi=1,f=24,s=1,v=1;YW";
+        // Part 1 alone should NOT produce a graphics event (incomplete)
+        let events1 = extract_shell_events(part1);
+        assert!(
+            events1
+                .iter()
+                .all(|e| !matches!(e, ShellEvent::KittyGraphics(_))),
+            "incomplete APC should not produce event"
+        );
+        // Concatenated should produce the event
+        let mut full = Vec::new();
+        full.extend_from_slice(part1);
+        full.extend_from_slice(b"Jj\x1b\\");
+        let events_full = extract_shell_events(&full);
+        assert!(
+            events_full
+                .iter()
+                .any(|e| matches!(e, ShellEvent::KittyGraphics(_))),
+            "complete APC should produce event"
+        );
+    }
+
+    #[test]
+    fn extract_apc_with_embedded_newlines() {
+        // Base64 payloads can be split across lines
+        let bytes = b"\x1b_Gi=1,f=24,s=1,v=1;YW\nJj\x1b\\";
+        let events = extract_shell_events(bytes);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ShellEvent::KittyGraphics(_))),
+            "APC with embedded newlines should still be extracted"
         );
     }
 }
