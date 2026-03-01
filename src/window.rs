@@ -261,8 +261,8 @@ impl App {
     /// Spawn a PTY + Terminal for a new pane, using the given grid dimensions.
     fn spawn_pane(&mut self, pane_id: PaneId, cols: u16, rows: u16) {
         let scrollback = self.app_config.scrollback.lines as usize;
-        let shell = crate::pty::default_shell();
-        match crate::pty::PtySession::new(&shell, cols, rows) {
+        let shell = crate::pty::resolve_shell(&self.app_config.shell);
+        match crate::pty::PtySession::new_with_cwd(&shell, cols, rows, None, Some(&self.app_config.shell)) {
             Ok(pty) => {
                 log::info!(
                     "PTY spawned for pane {:?}: {shell} ({cols}x{rows})",
@@ -286,8 +286,8 @@ impl App {
     /// Spawn a PTY + Terminal for a new pane with an optional working directory.
     fn spawn_pane_with_cwd(&mut self, pane_id: PaneId, cols: u16, rows: u16, cwd: Option<&str>) {
         let scrollback = self.app_config.scrollback.lines as usize;
-        let shell = crate::pty::default_shell();
-        match crate::pty::PtySession::new_with_cwd(&shell, cols, rows, cwd) {
+        let shell = crate::pty::resolve_shell(&self.app_config.shell);
+        match crate::pty::PtySession::new_with_cwd(&shell, cols, rows, cwd, Some(&self.app_config.shell)) {
             Ok(pty) => {
                 log::info!(
                     "PTY spawned for pane {:?}: {shell} ({cols}x{rows}) cwd={:?}",

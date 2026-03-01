@@ -12,6 +12,20 @@ use std::collections::HashMap;
 const SOURCE_CODE_PRO_TTF: &[u8] =
     include_bytes!("../../assets/fonts/SourceCodePro-Medium.ttf");
 
+/// JetBrains Mono Nerd Font — includes powerline + devicons + p10k glyphs.
+const JETBRAINS_MONO_NF_TTF: &[u8] =
+    include_bytes!("../../assets/fonts/JetBrainsMonoNerdFont-Regular.ttf");
+
+/// Select the bundled font TTF data based on the configured font family.
+/// Defaults to JetBrains Mono Nerd Font unless Source Code Pro is explicitly requested.
+fn select_bundled_font(family: &str) -> &'static [u8] {
+    if family.to_lowercase().contains("source code") {
+        SOURCE_CODE_PRO_TTF
+    } else {
+        JETBRAINS_MONO_NF_TTF
+    }
+}
+
 /// Extra pixels per side added to each atlas slot to prevent glyph clipping.
 /// Descenders, ascenders, and anti-aliased fringes need room beyond the cell boundary.
 pub(crate) const GLYPH_PADDING: u32 = 2;
@@ -94,6 +108,20 @@ const EXTRA_CHARS: &[char] = &[
     // Powerline symbols (used by oh-my-zsh, starship, etc.)
     '\u{E0A0}', '\u{E0A1}', '\u{E0A2}', // Branch, Line number, Padlock
     '\u{E0B0}', '\u{E0B1}', '\u{E0B2}', '\u{E0B3}', // Arrow fills
+    // Extended Powerline (E0B4-E0D4) — p10k separators
+    '\u{E0B4}', '\u{E0B5}', '\u{E0B6}', '\u{E0B7}',
+    '\u{E0B8}', '\u{E0B9}', '\u{E0BA}', '\u{E0BB}',
+    '\u{E0BC}', '\u{E0BD}', '\u{E0BE}', '\u{E0BF}',
+    '\u{E0C0}', '\u{E0C4}', '\u{E0C6}', '\u{E0C8}',
+    '\u{E0CC}', '\u{E0CE}', '\u{E0D0}', '\u{E0D2}', '\u{E0D4}',
+    // Common p10k Nerd Font icons
+    '\u{F015}', '\u{F023}', '\u{F07B}', '\u{F07C}', // home, lock, folder, folder-open
+    '\u{F071}', '\u{F115}', '\u{F126}', '\u{F179}', // warning, folder-outline, branch, apple
+    '\u{F17C}', '\u{F1D3}', '\u{F252}', '\u{F0E7}', // linux, git, hourglass, bolt
+    // Devicons subset (language icons)
+    '\u{E702}', '\u{E718}', '\u{E729}', '\u{E739}', // ruby, rust, git-commit, git
+    '\u{E73C}', '\u{E781}', '\u{E791}', '\u{E7A8}', // python, go, js, ts
+    '\u{E7BA}',                                        // docker
     // Braille pattern endpoints (used by plotting tools)
     '\u{2800}', '\u{28FF}',
 ];
@@ -103,7 +131,6 @@ impl GlyphAtlas {
     ///
     /// On macOS, uses CoreText for native-quality rendering (RGBA atlas).
     /// On other platforms, uses cosmic-text/swash (R8 grayscale atlas).
-    #[allow(unused_variables)] // font_family only used on non-macOS
     pub fn new(
         font_size: f32,
         scale_factor: f32,
@@ -112,7 +139,7 @@ impl GlyphAtlas {
     ) -> Self {
         #[cfg(target_os = "macos")]
         {
-            Self::new_coretext(font_size, scale_factor, line_height_multiplier)
+            Self::new_coretext(font_size, scale_factor, font_family, line_height_multiplier)
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -126,12 +153,14 @@ impl GlyphAtlas {
     fn new_coretext(
         font_size: f32,
         scale_factor: f32,
+        font_family: &str,
         line_height_multiplier: f32,
     ) -> Self {
         use crate::renderer::coretext_rasterizer::CoreTextRasterizer;
 
         let scaled_size = font_size * scale_factor;
-        let rasterizer = CoreTextRasterizer::new(SOURCE_CODE_PRO_TTF, scaled_size);
+        let font_data = select_bundled_font(font_family);
+        let rasterizer = CoreTextRasterizer::new(font_data, scaled_size);
 
         let cell_width = rasterizer.advance_width('M') as f32;
         let font_metrics_height = (rasterizer.ascent() + rasterizer.descent()) as f32;
@@ -244,9 +273,10 @@ impl GlyphAtlas {
         let line_height = (scaled_size * line_height_multiplier).ceil();
 
         let mut font_system = FontSystem::new();
+        let font_data = select_bundled_font(font_family);
         font_system
             .db_mut()
-            .load_font_data(SOURCE_CODE_PRO_TTF.to_vec());
+            .load_font_data(font_data.to_vec());
 
         let mut swash_cache = SwashCache::new();
         let metrics = Metrics::new(scaled_size, line_height);
@@ -1027,6 +1057,108 @@ mod tests {
             "Expected at least {} glyphs, got {}",
             95 + 22 + 32,
             atlas.glyphs.len()
+        );
+    }
+
+    // ── Font selection tests ────────────────────────────────────
+
+    #[test]
+    fn select_bundled_font_default_is_nerd_font() {
+        let data = select_bundled_font("JetBrains Mono");
+        assert_eq!(data.len(), JETBRAINS_MONO_NF_TTF.len());
+    }
+
+    #[test]
+    fn select_bundled_font_source_code_pro() {
+        let data = select_bundled_font("Source Code Pro");
+        assert_eq!(data.len(), SOURCE_CODE_PRO_TTF.len());
+    }
+
+    #[test]
+    fn select_bundled_font_unknown_gets_nerd_font() {
+        let data = select_bundled_font("SomeRandomFont");
+        assert_eq!(data.len(), JETBRAINS_MONO_NF_TTF.len());
+    }
+
+    #[test]
+    fn atlas_nerd_font_creates_successfully() {
+        let atlas = GlyphAtlas::new(13.0, 2.0, "JetBrains Mono", 1.2);
+        assert!(atlas.atlas_width > 0);
+        assert!(atlas.glyph_info('A').is_some());
+    }
+
+    #[test]
+    fn atlas_source_code_pro_still_works() {
+        let atlas = GlyphAtlas::new(13.0, 2.0, "Source Code Pro", 1.2);
+        assert!(atlas.cell_width > 0.0);
+        assert!(atlas.glyph_info('A').is_some());
+    }
+
+    // ── Extended powerline + Nerd Font icon tests ────────────────
+
+    #[test]
+    fn atlas_extended_powerline_present() {
+        let atlas = create_test_atlas();
+        for &cp in &[0xE0B4u32, 0xE0B6, 0xE0B8, 0xE0BC, 0xE0C0, 0xE0D4] {
+            let ch = char::from_u32(cp).unwrap();
+            assert!(
+                atlas.glyph_info(ch).is_some(),
+                "missing extended powerline U+{:04X}",
+                cp
+            );
+        }
+    }
+
+    #[test]
+    fn atlas_nerd_font_icons_present() {
+        let atlas = create_test_atlas();
+        for &cp in &[0xF015u32, 0xF023, 0xF07B, 0xF07C, 0xF071, 0xF126, 0xF179] {
+            let ch = char::from_u32(cp).unwrap();
+            assert!(
+                atlas.glyph_info(ch).is_some(),
+                "missing nerd font icon U+{:04X}",
+                cp
+            );
+        }
+    }
+
+    #[test]
+    fn atlas_devicons_present() {
+        let atlas = create_test_atlas();
+        for &cp in &[0xE702u32, 0xE718, 0xE739, 0xE73C, 0xE791, 0xE7BA] {
+            let ch = char::from_u32(cp).unwrap();
+            assert!(
+                atlas.glyph_info(ch).is_some(),
+                "missing devicon U+{:04X}",
+                cp
+            );
+        }
+    }
+
+    #[test]
+    fn nerd_font_icon_has_pixels() {
+        // Branch icon (E0A0) in JetBrains Mono NF should have actual glyph data
+        let atlas = create_test_atlas();
+        let ch = '\u{E0A0}';
+        let info = atlas.glyph_info(ch).unwrap();
+        let [u, v, uw, vh] = info.uv;
+        let x0 = (u * atlas.atlas_width as f32) as u32;
+        let y0 = (v * atlas.atlas_height as f32) as u32;
+        let x1 = ((u + uw) * atlas.atlas_width as f32) as u32;
+        let y1 = ((v + vh) * atlas.atlas_height as f32) as u32;
+        let bpp = atlas.bytes_per_pixel;
+        let nonzero = (y0..y1)
+            .flat_map(|y| (x0..x1).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let base = ((y * atlas.atlas_width + x) * bpp) as usize;
+                atlas.atlas_data[base..base + bpp as usize]
+                    .iter()
+                    .any(|&b| b > 0)
+            })
+            .count();
+        assert!(
+            nonzero > 0,
+            "Nerd Font branch icon (E0A0) should have visible pixels"
         );
     }
 

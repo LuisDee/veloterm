@@ -103,6 +103,14 @@ pub struct ShellConfig {
     pub notification_threshold_secs: u64,
     /// Enable visual bell (brief flash on BEL character).
     pub bell_enabled: bool,
+    /// Shell program path. None = $SHELL, then /bin/zsh.
+    pub program: Option<String>,
+    /// Extra arguments to pass to the shell (e.g. ["--login"]).
+    pub args: Vec<String>,
+    /// Custom environment variables for the shell.
+    pub env: HashMap<String, String>,
+    /// Suppress starship prompt initialization in VeloTerm shells.
+    pub disable_starship: bool,
 }
 
 impl Default for ShellConfig {
@@ -111,6 +119,10 @@ impl Default for ShellConfig {
             integration_enabled: true,
             notification_threshold_secs: 10,
             bell_enabled: true,
+            program: None,
+            args: vec![],
+            env: HashMap::new(),
+            disable_starship: true,
         }
     }
 }
@@ -220,7 +232,7 @@ struct RawFontConfig {
 impl Default for RawFontConfig {
     fn default() -> Self {
         Self {
-            family: "Source Code Pro".to_string(),
+            family: "JetBrains Mono".to_string(),
             size: 13.0,
             line_height: 1.2,
             ui_family: "Inter".to_string(),
@@ -330,6 +342,12 @@ struct RawShellConfig {
     integration_enabled: bool,
     notification_threshold_secs: u64,
     bell_enabled: bool,
+    program: Option<String>,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    env: HashMap<String, String>,
+    disable_starship: bool,
 }
 
 impl Default for RawShellConfig {
@@ -338,6 +356,10 @@ impl Default for RawShellConfig {
             integration_enabled: true,
             notification_threshold_secs: 10,
             bell_enabled: true,
+            program: None,
+            args: vec![],
+            env: HashMap::new(),
+            disable_starship: true,
         }
     }
 }
@@ -402,7 +424,7 @@ impl Default for RawSidebarConfig {
 impl Default for FontConfig {
     fn default() -> Self {
         Self {
-            family: "Source Code Pro".to_string(),
+            family: "JetBrains Mono".to_string(),
             size: 13.0,
             line_height: 1.2,
             ui_family: "Inter".to_string(),
@@ -510,6 +532,10 @@ impl Config {
                 integration_enabled: raw.shell.integration_enabled,
                 notification_threshold_secs: raw.shell.notification_threshold_secs,
                 bell_enabled: raw.shell.bell_enabled,
+                program: raw.shell.program,
+                args: raw.shell.args,
+                env: raw.shell.env,
+                disable_starship: raw.shell.disable_starship,
             },
             vi_mode: ViModeConfig {
                 enabled: raw.vi_mode.enabled,
@@ -618,8 +644,9 @@ impl Config {
 # Place this file at ~/.config/veloterm/veloterm.toml
 
 [font]
-# Terminal content font family (with fallback: Source Code Pro -> SF Mono -> Menlo -> system)
-family = "Source Code Pro"
+# Terminal content font family. JetBrains Mono (default) includes Nerd Font glyphs for p10k.
+# Use "Source Code Pro" for the original font without Nerd Font icons.
+family = "JetBrains Mono"
 # Font size in points
 size = 13.0
 # Line-height multiplier (1.2 = 120% of font size)
@@ -663,6 +690,12 @@ integration_enabled = true
 notification_threshold_secs = 10
 # Enable visual bell (brief flash on BEL character)
 bell_enabled = true
+# Shell program (default: $SHELL, then /bin/zsh)
+# program = "/bin/zsh"
+# Extra shell arguments
+# args = ["--login"]
+# Disable starship prompt in VeloTerm shells (avoids conflict with p10k)
+disable_starship = true
 
 [vi_mode]
 # Enable vi-mode for keyboard-driven scrollback navigation
@@ -749,7 +782,7 @@ mod tests {
     #[test]
     fn default_font_family() {
         let config = Config::default();
-        assert_eq!(config.font.family, "Source Code Pro");
+        assert_eq!(config.font.family, "JetBrains Mono");
     }
 
     #[test]
@@ -867,7 +900,7 @@ size = 14.0
 "#;
         let config = Config::from_toml(toml).unwrap();
         assert_eq!(config.font.size, 14.0);
-        assert_eq!(config.font.family, "Source Code Pro");
+        assert_eq!(config.font.family, "JetBrains Mono");
         assert_eq!(config.font.line_height, 1.2);
         assert_eq!(config.colors.theme, "midnight");
         assert_eq!(config.cursor.style, "block");
@@ -881,7 +914,7 @@ size = 14.0
     fn parse_empty_toml_uses_all_defaults() {
         let config = Config::from_toml("").unwrap();
         assert_eq!(config.font.size, 13.0);
-        assert_eq!(config.font.family, "Source Code Pro");
+        assert_eq!(config.font.family, "JetBrains Mono");
         assert_eq!(config.font.line_height, 1.2);
         assert_eq!(config.colors.theme, "midnight");
         assert_eq!(config.padding.top, 16.0);
@@ -959,6 +992,75 @@ bell_enabled = false
         b.shell.notification_threshold_secs = 30;
         let delta = a.diff(&b);
         assert!(delta.shell_changed);
+    }
+
+    // ── Shell program/args/env/disable_starship config tests ──────
+
+    #[test]
+    fn default_shell_program_is_none() {
+        let config = Config::default();
+        assert!(config.shell.program.is_none());
+    }
+
+    #[test]
+    fn default_disable_starship_is_true() {
+        let config = Config::default();
+        assert!(config.shell.disable_starship);
+    }
+
+    #[test]
+    fn default_shell_args_empty() {
+        let config = Config::default();
+        assert!(config.shell.args.is_empty());
+    }
+
+    #[test]
+    fn default_shell_env_empty() {
+        let config = Config::default();
+        assert!(config.shell.env.is_empty());
+    }
+
+    #[test]
+    fn parse_shell_program() {
+        let toml = r#"
+[shell]
+program = "/usr/local/bin/fish"
+"#;
+        let config = Config::from_toml(toml).unwrap();
+        assert_eq!(config.shell.program, Some("/usr/local/bin/fish".to_string()));
+    }
+
+    #[test]
+    fn parse_shell_args() {
+        let toml = r#"
+[shell]
+args = ["--login", "--interactive"]
+"#;
+        let config = Config::from_toml(toml).unwrap();
+        assert_eq!(config.shell.args, vec!["--login", "--interactive"]);
+    }
+
+    #[test]
+    fn parse_shell_env() {
+        let toml = r#"
+[shell]
+[shell.env]
+FOO = "bar"
+BAZ = "qux"
+"#;
+        let config = Config::from_toml(toml).unwrap();
+        assert_eq!(config.shell.env.get("FOO").unwrap(), "bar");
+        assert_eq!(config.shell.env.get("BAZ").unwrap(), "qux");
+    }
+
+    #[test]
+    fn parse_shell_disable_starship_false() {
+        let toml = r#"
+[shell]
+disable_starship = false
+"#;
+        let config = Config::from_toml(toml).unwrap();
+        assert!(!config.shell.disable_starship);
     }
 
     // ── Vi-mode config tests ──────────────────────────────────────

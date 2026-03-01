@@ -118,6 +118,45 @@ pub fn default_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
 }
 
+/// Resolve the shell program from config (priority: config.program > $SHELL > /bin/zsh).
+pub fn resolve_shell(config: &crate::config::types::ShellConfig) -> String {
+    if let Some(ref program) = config.program {
+        return program.clone();
+    }
+    std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
+}
+
+/// Starship suppression snippet for zsh: defines a shadow function before .zshrc,
+/// removes it after sourcing, so `eval "$(starship init zsh)"` is a no-op.
+const ZSH_STARSHIP_SUPPRESS: &str = r#"
+# Suppress starship if configured
+if [[ "$VELOTERM_DISABLE_STARSHIP" == "1" ]]; then
+    starship() { command echo ""; }
+fi
+"#;
+
+const ZSH_STARSHIP_UNSUPPRESS: &str = r#"
+# Remove starship shadow after init
+if [[ "$VELOTERM_DISABLE_STARSHIP" == "1" ]]; then
+    unfunction starship 2>/dev/null
+fi
+"#;
+
+/// Starship suppression snippet for bash.
+const BASH_STARSHIP_SUPPRESS: &str = r#"
+# Suppress starship if configured
+if [[ "$VELOTERM_DISABLE_STARSHIP" == "1" ]]; then
+    starship() { command echo ""; }
+fi
+"#;
+
+const BASH_STARSHIP_UNSUPPRESS: &str = r#"
+# Remove starship shadow after init
+if [[ "$VELOTERM_DISABLE_STARSHIP" == "1" ]]; then
+    unset -f starship 2>/dev/null
+fi
+"#;
+
 /// Set up shell integration by modifying the CommandBuilder before spawn.
 ///
 /// For bash: creates a wrapper rcfile that sources `~/.bashrc` then our
@@ -137,7 +176,9 @@ fn prepare_shell_integration(shell: &str, cmd: &mut CommandBuilder) {
             let integration = include_str!("../../shell/bash-integration.sh");
             let wrapper = format!(
                 "# VeloTerm bash integration wrapper\n\
+                 {BASH_STARSHIP_SUPPRESS}\n\
                  [ -f ~/.bashrc ] && source ~/.bashrc\n\
+                 {BASH_STARSHIP_UNSUPPRESS}\n\
                  {integration}\n"
             );
             let path = "/tmp/veloterm-bashrc.sh";
@@ -157,10 +198,12 @@ fn prepare_shell_integration(shell: &str, cmd: &mut CommandBuilder) {
                      [ -f \"$HOME/.zshenv\" ] && source \"$HOME/.zshenv\"\n";
                 let _ = std::fs::write(format!("{zdotdir}/.zshenv"), zshenv);
 
-                // .zshrc: source user's .zshrc then our integration
+                // .zshrc: starship shadow → source user's .zshrc → remove shadow → our integration
                 let zshrc = format!(
                     "# VeloTerm zsh wrapper\n\
+                     {ZSH_STARSHIP_SUPPRESS}\n\
                      [ -f \"$HOME/.zshrc\" ] && source \"$HOME/.zshrc\"\n\
+                     {ZSH_STARSHIP_UNSUPPRESS}\n\
                      {integration}\n"
                 );
                 let _ = std::fs::write(format!("{zdotdir}/.zshrc"), &zshrc);
@@ -199,15 +242,16 @@ impl PtySession {
 
     /// Spawn a new PTY session with the given shell and size.
     pub fn new(shell: &str, cols: u16, rows: u16) -> Result<Self, PtyError> {
-        Self::new_with_cwd(shell, cols, rows, None)
+        Self::new_with_cwd(shell, cols, rows, None, None)
     }
 
-    /// Spawn a new PTY session with the given shell, size, and optional CWD.
+    /// Spawn a new PTY session with the given shell, size, optional CWD, and optional config.
     pub fn new_with_cwd(
         shell: &str,
         cols: u16,
         rows: u16,
         cwd: Option<&str>,
+        shell_config: Option<&crate::config::types::ShellConfig>,
     ) -> Result<Self, PtyError> {
         let pty_system = portable_pty::native_pty_system();
 
@@ -230,13 +274,30 @@ impl PtySession {
         // Remove RUST_LOG so it doesn't leak into the user's shell and cause
         // debug output from other Rust tools (fnm, ripgrep, etc.)
         cmd.env_remove("RUST_LOG");
+
+        // Apply shell config: args, env, starship suppression
+        if let Some(config) = shell_config {
+            for arg in &config.args {
+                cmd.arg(arg);
+            }
+            for (key, val) in &config.env {
+                cmd.env(key, val);
+            }
+            if config.disable_starship {
+                cmd.env("VELOTERM_DISABLE_STARSHIP", "1");
+            }
+        }
+
         if let Some(dir) = cwd {
             cmd.cwd(dir);
         }
 
         // Inject shell integration (CWD tracking, prompt markers) before spawn.
         // Uses --rcfile for bash, ZDOTDIR for zsh — invisible to user.
-        prepare_shell_integration(shell, &mut cmd);
+        let integration_enabled = shell_config.map_or(true, |c| c.integration_enabled);
+        if integration_enabled {
+            prepare_shell_integration(shell, &mut cmd);
+        }
 
         let child = pair
             .slave
@@ -568,6 +629,72 @@ mod tests {
         // plain sh has no integration — should not panic
         let mut cmd = CommandBuilder::new("/bin/sh");
         prepare_shell_integration("/bin/sh", &mut cmd);
+    }
+
+    // ── Shell config resolution ──────────────────────────────────
+
+    #[test]
+    fn resolve_shell_config_override() {
+        let mut config = crate::config::types::ShellConfig::default();
+        config.program = Some("/usr/local/bin/fish".to_string());
+        assert_eq!(resolve_shell(&config), "/usr/local/bin/fish");
+    }
+
+    #[test]
+    fn resolve_shell_env_fallback() {
+        let config = crate::config::types::ShellConfig::default();
+        let shell = resolve_shell(&config);
+        // Should use $SHELL if set, otherwise /bin/zsh
+        assert!(!shell.is_empty());
+    }
+
+    #[test]
+    fn resolve_shell_zsh_default_when_no_env() {
+        // We can't unset SHELL in the current process safely, but we can verify
+        // the function handles the case where program is None
+        let config = crate::config::types::ShellConfig::default();
+        let shell = resolve_shell(&config);
+        // Either $SHELL or /bin/zsh — both valid
+        assert!(shell.starts_with('/'));
+    }
+
+    #[test]
+    fn zsh_wrapper_contains_starship_suppression() {
+        let mut cmd = CommandBuilder::new("/bin/zsh");
+        prepare_shell_integration("/bin/zsh", &mut cmd);
+        let zdotdir = "/tmp/veloterm-zdotdir";
+        let zshrc = std::fs::read_to_string(format!("{zdotdir}/.zshrc")).unwrap();
+        assert!(
+            zshrc.contains("VELOTERM_DISABLE_STARSHIP"),
+            "zsh wrapper should contain starship suppression check"
+        );
+        assert!(
+            zshrc.contains("unfunction starship"),
+            "zsh wrapper should remove starship shadow after init"
+        );
+    }
+
+    #[test]
+    fn bash_wrapper_contains_starship_suppression() {
+        let mut cmd = CommandBuilder::new("/bin/bash");
+        prepare_shell_integration("/bin/bash", &mut cmd);
+        let path = "/tmp/veloterm-bashrc.sh";
+        let contents = std::fs::read_to_string(path).unwrap();
+        assert!(
+            contents.contains("VELOTERM_DISABLE_STARSHIP"),
+            "bash wrapper should contain starship suppression check"
+        );
+        assert!(
+            contents.contains("unset -f starship"),
+            "bash wrapper should remove starship shadow after init"
+        );
+    }
+
+    #[test]
+    fn pty_session_with_shell_config() {
+        let config = crate::config::types::ShellConfig::default();
+        let session = PtySession::new_with_cwd("/bin/sh", 80, 24, None, Some(&config));
+        assert!(session.is_ok(), "PtySession with shell config should succeed");
     }
 
     #[test]
