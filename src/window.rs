@@ -497,9 +497,13 @@ impl App {
                 return std::path::PathBuf::from(cwd);
             }
         }
-        std::env::var("HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        // Prefer the process working directory (set by .app wrapper via `cd`)
+        // over $HOME, since $HOME is unlikely to be inside a git repo.
+        std::env::current_dir().unwrap_or_else(|_| {
+            std::env::var("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        })
     }
 
     /// Build file browser row data for iced rendering.
