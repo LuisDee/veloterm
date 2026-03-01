@@ -216,12 +216,7 @@ Example:
         };
     }
     try {
-        typeText(state.pid, params.text);
-        if (params.press_enter) {
-            // Brief delay between text and Enter
-            await new Promise((r) => setTimeout(r, 100));
-            pressKey(state.pid, "enter");
-        }
+        typeText(state.pid, params.text, params.press_enter);
         return {
             content: [
                 {
