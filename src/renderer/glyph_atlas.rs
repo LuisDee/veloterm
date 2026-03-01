@@ -69,6 +69,20 @@ const EXTRA_CHARS: &[char] = &[
     '\u{25C0}', // ◀ BLACK LEFT-POINTING TRIANGLE
     '\u{25D0}', // ◐ CIRCLE WITH LEFT HALF BLACK (theme icon)
     '\u{2713}', // ✓ CHECK MARK
+    // Block Elements (U+2580-U+259F) — used by Claude Code mascot, TUI apps
+    '\u{2580}', '\u{2581}', '\u{2582}', '\u{2583}', // ▀▁▂▃
+    '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}', // ▄▅▆▇
+    '\u{2588}', '\u{2589}', '\u{258A}', '\u{258B}', // █▉▊▋
+    '\u{258C}', '\u{258D}', '\u{258E}', '\u{258F}', // ▌▍▎▏
+    '\u{2590}', '\u{2591}', '\u{2592}', '\u{2593}', // ▐░▒▓
+    '\u{2594}', '\u{2595}', '\u{2596}', '\u{2597}', // ▔▕▖▗
+    '\u{2598}', '\u{2599}', '\u{259A}', '\u{259B}', // ▘▙▚▛
+    '\u{259C}', '\u{259D}', '\u{259E}', '\u{259F}', // ▜▝▞▟
+    // Powerline symbols (used by oh-my-zsh, starship, etc.)
+    '\u{E0A0}', '\u{E0A1}', '\u{E0A2}', // Branch, Line number, Padlock
+    '\u{E0B0}', '\u{E0B1}', '\u{E0B2}', '\u{E0B3}', // Arrow fills
+    // Braille pattern endpoints (used by plotting tools)
+    '\u{2800}', '\u{28FF}',
 ];
 
 impl GlyphAtlas {
@@ -795,6 +809,129 @@ mod tests {
             "2x scale ({}) should produce wider cells than 1x ({})",
             atlas_2x.cell_width,
             atlas_1x.cell_width
+        );
+    }
+
+    // ── Block element coverage ──────────────────────────────────
+
+    #[test]
+    fn atlas_has_all_block_elements() {
+        let atlas = create_test_atlas();
+        for cp in 0x2580u32..=0x259Fu32 {
+            let ch = char::from_u32(cp).unwrap();
+            assert!(
+                atlas.glyph_info(ch).is_some(),
+                "missing block element U+{:04X} '{}'",
+                cp,
+                ch
+            );
+        }
+    }
+
+    #[test]
+    fn atlas_full_block_has_nonzero_pixels() {
+        // █ (U+2588) should have substantial pixel coverage
+        let atlas = create_test_atlas();
+        let info = atlas.glyph_info('\u{2588}').unwrap();
+        let [u, v, uw, vh] = info.uv;
+        let x0 = (u * atlas.atlas_width as f32) as u32;
+        let y0 = (v * atlas.atlas_height as f32) as u32;
+        let x1 = ((u + uw) * atlas.atlas_width as f32) as u32;
+        let y1 = ((v + vh) * atlas.atlas_height as f32) as u32;
+        let bpp = atlas.bytes_per_pixel;
+        let total_pixels = (x1 - x0) * (y1 - y0);
+        let nonzero = (y0..y1)
+            .flat_map(|y| (x0..x1).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let base = ((y * atlas.atlas_width + x) * bpp) as usize;
+                atlas.atlas_data[base..base + bpp as usize]
+                    .iter()
+                    .any(|&b| b > 0)
+            })
+            .count();
+        // Font-rendered block should fill a significant portion (>40%) of cell
+        // Exact coverage depends on font metrics; key thing is it's not empty
+        assert!(
+            nonzero as f32 / total_pixels as f32 > 0.4,
+            "Full block should fill significant portion of cell: {}/{} ({:.0}%)",
+            nonzero,
+            total_pixels,
+            nonzero as f32 / total_pixels as f32 * 100.0
+        );
+    }
+
+    #[test]
+    fn atlas_block_elements_have_visible_pixels() {
+        // Key block elements used by Claude mascot must have non-zero pixels
+        let atlas = create_test_atlas();
+        let bpp = atlas.bytes_per_pixel;
+        for ch in [
+            '\u{2580}', '\u{2584}', '\u{2588}', '\u{258C}', '\u{2590}', '\u{259B}',
+            '\u{259C}',
+        ] {
+            let info = atlas.glyph_info(ch).unwrap();
+            let [u, v, uw, vh] = info.uv;
+            let x0 = (u * atlas.atlas_width as f32) as u32;
+            let y0 = (v * atlas.atlas_height as f32) as u32;
+            let x1 = ((u + uw) * atlas.atlas_width as f32) as u32;
+            let y1 = ((v + vh) * atlas.atlas_height as f32) as u32;
+            let nonzero = (y0..y1)
+                .flat_map(|y| (x0..x1).map(move |x| (x, y)))
+                .filter(|&(x, y)| {
+                    let base = ((y * atlas.atlas_width + x) * bpp) as usize;
+                    atlas.atlas_data[base..base + bpp as usize]
+                        .iter()
+                        .any(|&b| b > 0)
+                })
+                .count();
+            assert!(
+                nonzero > 0,
+                "Block element U+{:04X} '{}' should have visible pixels",
+                ch as u32,
+                ch
+            );
+        }
+    }
+
+    #[test]
+    fn atlas_powerline_symbols_present() {
+        let atlas = create_test_atlas();
+        for &cp in &[0xE0A0u32, 0xE0B0, 0xE0B2] {
+            let ch = char::from_u32(cp).unwrap();
+            assert!(
+                atlas.glyph_info(ch).is_some(),
+                "missing powerline U+{:04X}",
+                cp
+            );
+        }
+    }
+
+    #[test]
+    fn atlas_block_elements_uvs_within_bounds() {
+        let atlas = create_test_atlas();
+        for cp in 0x2580u32..=0x259Fu32 {
+            let ch = char::from_u32(cp).unwrap();
+            if let Some(info) = atlas.glyph_info(ch) {
+                let [u, v, w, h] = info.uv;
+                assert!(
+                    u >= 0.0 && v >= 0.0 && u + w <= 1.0 + 1e-6 && v + h <= 1.0 + 1e-6,
+                    "UV out of bounds for U+{:04X}: {:?}",
+                    cp,
+                    info.uv
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn atlas_total_glyph_count_with_block_elements() {
+        let atlas = create_test_atlas();
+        // 95 ASCII + EXTRA_CHARS (22 original + 32 block elements + 7 powerline + 2 braille)
+        assert!(
+            atlas.glyphs.len() >= 95 + 22 + 32,
+            "Expected at least {} glyphs, got {}",
+            95 + 22 + 32,
+            atlas.glyphs.len()
         );
     }
 }
