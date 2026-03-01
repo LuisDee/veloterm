@@ -6,6 +6,7 @@ pub mod glyph_atlas;
 pub mod gpu;
 pub mod grid_renderer;
 pub mod iced_layer;
+pub mod image_renderer;
 
 use crate::config::theme::TerminalTheme;
 use crate::pane::{PaneId, Rect as PaneRect};
