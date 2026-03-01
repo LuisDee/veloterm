@@ -118,6 +118,68 @@ pub fn default_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
 }
 
+/// Set up shell integration by modifying the CommandBuilder before spawn.
+///
+/// For bash: creates a wrapper rcfile that sources `~/.bashrc` then our
+/// integration script, and uses `--rcfile` to load it. This is invisible.
+///
+/// For zsh: creates a temp ZDOTDIR with `.zshenv` and `.zshrc` that source
+/// the user's originals then append our integration. Also invisible.
+///
+/// For fish: writes integration to a temp file and uses `--init-command`.
+///
+/// For unknown shells: does nothing (no-op).
+fn prepare_shell_integration(shell: &str, cmd: &mut CommandBuilder) {
+    let shell_name = basename_from_path(shell);
+
+    match shell_name {
+        "bash" => {
+            let integration = include_str!("../../shell/bash-integration.sh");
+            let wrapper = format!(
+                "# VeloTerm bash integration wrapper\n\
+                 [ -f ~/.bashrc ] && source ~/.bashrc\n\
+                 {integration}\n"
+            );
+            let path = "/tmp/veloterm-bashrc.sh";
+            if std::fs::write(path, &wrapper).is_ok() {
+                cmd.arg("--rcfile");
+                cmd.arg(path);
+            }
+        }
+        "zsh" => {
+            let integration = include_str!("../../shell/zsh-integration.sh");
+            let zdotdir = "/tmp/veloterm-zdotdir";
+            if std::fs::create_dir_all(zdotdir).is_ok() {
+                // .zshenv: restore ZDOTDIR so zsh finds user's other dotfiles,
+                // then source user's .zshenv
+                let zshenv = "# VeloTerm zsh wrapper\n\
+                     ZDOTDIR=\"$HOME\"\n\
+                     [ -f \"$HOME/.zshenv\" ] && source \"$HOME/.zshenv\"\n";
+                let _ = std::fs::write(format!("{zdotdir}/.zshenv"), zshenv);
+
+                // .zshrc: source user's .zshrc then our integration
+                let zshrc = format!(
+                    "# VeloTerm zsh wrapper\n\
+                     [ -f \"$HOME/.zshrc\" ] && source \"$HOME/.zshrc\"\n\
+                     {integration}\n"
+                );
+                let _ = std::fs::write(format!("{zdotdir}/.zshrc"), &zshrc);
+
+                cmd.env("ZDOTDIR", zdotdir);
+            }
+        }
+        "fish" => {
+            let integration = include_str!("../../shell/fish-integration.fish");
+            let path = "/tmp/veloterm-integration.fish";
+            if std::fs::write(path, integration).is_ok() {
+                cmd.arg("--init-command");
+                cmd.arg(format!("source {path}"));
+            }
+        }
+        _ => {} // No integration for other shells
+    }
+}
+
 /// Managed PTY session with a reader thread and writer handle.
 pub struct PtySession {
     /// Receive raw bytes from the PTY reader thread.
@@ -171,6 +233,11 @@ impl PtySession {
         if let Some(dir) = cwd {
             cmd.cwd(dir);
         }
+
+        // Inject shell integration (CWD tracking, prompt markers) before spawn.
+        // Uses --rcfile for bash, ZDOTDIR for zsh — invisible to user.
+        prepare_shell_integration(shell, &mut cmd);
+
         let child = pair
             .slave
             .spawn_command(cmd)
@@ -414,5 +481,113 @@ mod tests {
         // Idle shell has no children, so should be None
         // (or could be a shell startup process — just verify it doesn't panic)
         let _ = name;
+    }
+
+    // ── Shell integration preparation ──────────────────────────────
+
+    #[test]
+    fn prepare_bash_creates_rcfile() {
+        let mut cmd = CommandBuilder::new("/bin/bash");
+        prepare_shell_integration("/bin/bash", &mut cmd);
+        // The wrapper rcfile should exist and contain both .bashrc sourcing
+        // and our integration
+        let path = "/tmp/veloterm-bashrc.sh";
+        assert!(
+            std::path::Path::new(path).exists(),
+            "bash wrapper rcfile should be created"
+        );
+        let contents = std::fs::read_to_string(path).unwrap();
+        assert!(
+            contents.contains("source ~/.bashrc"),
+            "wrapper should source user's .bashrc"
+        );
+        assert!(
+            contents.contains("__veloterm_osc7"),
+            "wrapper should contain OSC 7 function"
+        );
+        assert!(
+            contents.contains("VELOTERM_SHELL_INTEGRATION"),
+            "wrapper should have guard variable"
+        );
+    }
+
+    #[test]
+    fn prepare_zsh_creates_zdotdir() {
+        let mut cmd = CommandBuilder::new("/bin/zsh");
+        prepare_shell_integration("/bin/zsh", &mut cmd);
+        let zdotdir = "/tmp/veloterm-zdotdir";
+        assert!(
+            std::path::Path::new(&format!("{zdotdir}/.zshenv")).exists(),
+            "zsh wrapper .zshenv should be created"
+        );
+        assert!(
+            std::path::Path::new(&format!("{zdotdir}/.zshrc")).exists(),
+            "zsh wrapper .zshrc should be created"
+        );
+        let zshrc = std::fs::read_to_string(format!("{zdotdir}/.zshrc")).unwrap();
+        assert!(
+            zshrc.contains("source \"$HOME/.zshrc\""),
+            "wrapper should source user's .zshrc"
+        );
+        assert!(
+            zshrc.contains("add-zsh-hook"),
+            "wrapper should contain zsh integration"
+        );
+        let zshenv = std::fs::read_to_string(format!("{zdotdir}/.zshenv")).unwrap();
+        assert!(
+            zshenv.contains("ZDOTDIR=\"$HOME\""),
+            ".zshenv should restore ZDOTDIR"
+        );
+    }
+
+    #[test]
+    fn prepare_fish_creates_integration_file() {
+        let mut cmd = CommandBuilder::new("/usr/local/bin/fish");
+        prepare_shell_integration("/usr/local/bin/fish", &mut cmd);
+        let path = "/tmp/veloterm-integration.fish";
+        assert!(
+            std::path::Path::new(path).exists(),
+            "fish integration file should be created"
+        );
+        let contents = std::fs::read_to_string(path).unwrap();
+        assert!(
+            contents.contains("__veloterm_emit_osc7"),
+            "fish integration should contain OSC 7 function"
+        );
+    }
+
+    #[test]
+    fn prepare_noop_for_unknown_shell() {
+        // Should not panic or create files for unknown shells
+        let mut cmd = CommandBuilder::new("/usr/bin/python3");
+        prepare_shell_integration("/usr/bin/python3", &mut cmd);
+    }
+
+    #[test]
+    fn prepare_noop_for_sh() {
+        // plain sh has no integration — should not panic
+        let mut cmd = CommandBuilder::new("/bin/sh");
+        prepare_shell_integration("/bin/sh", &mut cmd);
+    }
+
+    #[test]
+    fn bash_pty_emits_osc7_after_integration() {
+        // Spawn bash with integration and verify OSC 7 is emitted
+        let mut session = PtySession::new("/bin/bash", 80, 24).expect("spawn failed");
+        // Give bash time to start and source the rcfile
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+        // Trigger a new prompt to emit OSC 7
+        session.write(b"\n").expect("write failed");
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let mut all_output = Vec::new();
+        while let Ok(chunk) = session.reader_rx.try_recv() {
+            all_output.extend_from_slice(&chunk);
+        }
+        let output = String::from_utf8_lossy(&all_output);
+        assert!(
+            output.contains("\x1b]7;file://"),
+            "bash with integration should emit OSC 7, got: {:?}",
+            &output[..output.len().min(300)]
+        );
     }
 }
