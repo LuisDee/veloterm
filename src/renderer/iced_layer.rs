@@ -668,12 +668,8 @@ impl IcedLayer {
             .on_enter(UiMessage::SidebarBtnEnter)
             .on_exit(UiMessage::SidebarBtnExit);
 
-        // Centered: sparkle ✦ in accent_orange (14px) + "VeloTerm" in text_secondary (DM Sans 12.5px)
-        let sparkle = text("\u{2726}").size(14.0).color(accent).font(DM_SANS);
-        let brand_label = text("VeloTerm").size(12.5).color(text_secondary).font(DM_SANS);
-
-        let center_content = row![sparkle, brand_label]
-            .spacing(6.0 / scale)
+        // Center area (empty — brand removed for cleaner look)
+        let center_content = row![]
             .align_y(iced_core::Alignment::Center);
 
         // File Browser icon (folder)
