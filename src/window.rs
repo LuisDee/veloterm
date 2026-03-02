@@ -178,6 +178,9 @@ pub struct App {
     hovering_file_browser_icon: bool,
     /// Whether the Git Review toolbar icon is hovered.
     hovering_git_review_icon: bool,
+    /// Pending resize dimensions — coalesced across rapid resize events and
+    /// applied on the next redraw to avoid flooding shells with SIGWINCH.
+    pending_resize: Option<(u32, u32)>,
 }
 
 impl App {
@@ -240,6 +243,7 @@ impl App {
             fb_last_click: None,
             hovering_file_browser_icon: false,
             hovering_git_review_icon: false,
+            pending_resize: None,
         }
     }
 
@@ -1191,12 +1195,28 @@ impl App {
                     pane_id, cols, rows, renderer.cell_width(), renderer.cell_height(), rect.width, rect.height);
             }
             if let Some(state) = self.pane_states.get_mut(pane_id) {
-                // Always resize terminal grid for correct visual rendering
-                state.terminal.resize(cols as usize, rows as usize);
-                // Defer PTY resize during divider drag to avoid SIGWINCH flood
+                // Skip panes whose dimensions haven't changed (avoids double
+                // resize on split and unnecessary SIGWINCH on existing panes)
+                let old_cols = state.terminal.columns();
+                let old_rows = state.terminal.rows();
+                if cols as usize == old_cols && rows as usize == old_rows {
+                    continue;
+                }
+
+                // Erase prompt region before resize to prevent garbled reflow.
+                // Only when a prompt is tracked and no command is actively running.
+                if !state.terminal.shell_state().is_command_running() {
+                    if let Some(prompt_line) = state.terminal.shell_state().last_prompt_line() {
+                        state.terminal.clear_lines_from(prompt_line);
+                    }
+                }
+
+                // Resize PTY first so SIGWINCH handlers see correct new dimensions
                 if !self.is_dragging_divider {
                     let _ = state.pty.resize(cols, rows);
                 }
+                // Then resize terminal grid to match
+                state.terminal.resize(cols as usize, rows as usize);
             }
         }
     }
@@ -2943,7 +2963,9 @@ impl ApplicationHandler<UserEvent> for App {
                     renderer.resize(size.width, size.height);
                     renderer.pane_damage_mut().force_full_damage_all();
                 }
-                self.resize_all_panes(size.width, size.height);
+                // Defer pane/PTY resize to next redraw so rapid resize events
+                // coalesce into a single SIGWINCH per pane.
+                self.pending_resize = Some((size.width, size.height));
                 self.update_interaction_layout(size.width, size.height);
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
@@ -2969,6 +2991,11 @@ impl ApplicationHandler<UserEvent> for App {
                         (s.width, s.height)
                     })
                     .unwrap_or((1280, 720));
+
+                // Apply deferred resize (coalesces rapid resize events)
+                if let Some((rw, rh)) = self.pending_resize.take() {
+                    self.resize_all_panes(rw, rh);
+                }
 
                 // Drain PTY output into terminals for all panes, update cursor positions
                 let theme_for_queries = self.renderer.as_ref().map(|r| *r.theme());

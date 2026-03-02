@@ -157,6 +157,16 @@ impl ShellState {
         self.command_history.back()
     }
 
+    /// Get the most recent prompt start line, if any.
+    pub fn last_prompt_line(&self) -> Option<usize> {
+        self.prompt_positions.back().copied()
+    }
+
+    /// Returns true if a command is currently running (between OSC 133;B and 133;D).
+    pub fn is_command_running(&self) -> bool {
+        self.command_start.is_some()
+    }
+
     /// Find the prompt position nearest above `current_line`.
     /// Returns None if no prompts are above current_line.
     pub fn previous_prompt(&self, current_line: usize) -> Option<usize> {

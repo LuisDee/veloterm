@@ -2,7 +2,7 @@
 
 pub mod grid_bridge;
 
-use alacritty_terminal::grid::{Dimensions, Scroll};
+use alacritty_terminal::grid::{Dimensions, GridCell, Scroll};
 use alacritty_terminal::index::{Column, Line, Point};
 use alacritty_terminal::term::Config;
 use alacritty_terminal::vte::ansi;
@@ -223,6 +223,23 @@ impl Terminal {
         self.term.scroll_display(Scroll::Bottom);
         if offset > 0 {
             self.term.scroll_display(Scroll::Delta(offset as i32));
+        }
+    }
+
+    /// Clear all screen lines from `start_line` to the cursor position (inclusive).
+    /// Used before resize to erase the prompt region and prevent garbled reflow.
+    /// `start_line` is a screen-relative row (0 = top of visible screen).
+    pub fn clear_lines_from(&mut self, start_line: usize) {
+        let screen_lines = self.term.grid().screen_lines();
+        let cols = self.term.grid().columns();
+        let (cursor_row, _) = self.cursor_position();
+        let end = cursor_row.min(screen_lines.saturating_sub(1));
+        let start = start_line.min(end);
+        for row in start..=end {
+            for col in 0..cols {
+                let point = Point::new(Line(row as i32), Column(col));
+                self.term.grid_mut()[point].reset(&Default::default());
+            }
         }
     }
 

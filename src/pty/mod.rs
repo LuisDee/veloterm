@@ -3,6 +3,7 @@
 use crossbeam_channel::{Receiver, Sender};
 use portable_pty::{CommandBuilder, MasterPty, PtySize};
 use std::io::{Read, Write};
+use std::sync::OnceLock;
 use std::thread;
 
 /// Errors that can occur during PTY operations.
@@ -227,17 +228,23 @@ fn prepare_shell_integration(shell: &str, cmd: &mut CommandBuilder) {
             }
         }
         "zsh" => {
-            let integration = include_str!("../../shell/zsh-integration.sh");
-            let zdotdir = "/tmp/veloterm-zdotdir";
-            if std::fs::create_dir_all(zdotdir).is_ok() {
+            // Write ZDOTDIR files once per process to avoid races when
+            // multiple panes spawn concurrently. Each VeloTerm process gets
+            // its own directory (keyed by PID) for isolation from other instances.
+            static ZSH_ZDOTDIR: OnceLock<Option<String>> = OnceLock::new();
+            let zdotdir = ZSH_ZDOTDIR.get_or_init(|| {
+                let integration = include_str!("../../shell/zsh-integration.sh");
+                let dir = format!("/tmp/veloterm-zdotdir-{}", std::process::id());
+                if std::fs::create_dir_all(&dir).is_err() {
+                    return None;
+                }
                 // .zshenv: install no-op SIGUSR1 handler immediately (before .zshrc/p10k),
                 // then restore ZDOTDIR so zsh finds user's other dotfiles.
-                // The real TRAPUSR1 in zsh-integration.sh replaces this once loaded.
                 let zshenv = "# VeloTerm zsh wrapper\n\
                      TRAPUSR1() { : }\n\
                      ZDOTDIR=\"$HOME\"\n\
                      [ -f \"$HOME/.zshenv\" ] && source \"$HOME/.zshenv\"\n";
-                let _ = std::fs::write(format!("{zdotdir}/.zshenv"), zshenv);
+                let _ = std::fs::write(format!("{dir}/.zshenv"), zshenv);
 
                 // .zshrc: starship shadow → source user's .zshrc → remove shadow → our integration
                 let zshrc = format!(
@@ -247,9 +254,11 @@ fn prepare_shell_integration(shell: &str, cmd: &mut CommandBuilder) {
                      {ZSH_STARSHIP_UNSUPPRESS}\n\
                      {integration}\n"
                 );
-                let _ = std::fs::write(format!("{zdotdir}/.zshrc"), &zshrc);
-
-                cmd.env("ZDOTDIR", zdotdir);
+                let _ = std::fs::write(format!("{dir}/.zshrc"), &zshrc);
+                Some(dir)
+            });
+            if let Some(dir) = zdotdir {
+                cmd.env("ZDOTDIR", dir);
             }
         }
         "fish" => {
