@@ -493,7 +493,8 @@ impl App {
         }
     }
 
-    /// Get the CWD from the active pane's shell state, falling back to HOME.
+    /// Get the CWD from the active pane's shell state, falling back to
+    /// VELOTERM_PROJECT_DIR, then process CWD, then HOME.
     fn active_pane_cwd(&self) -> std::path::PathBuf {
         let focused = self.tab_manager.active_tab().pane_tree.focused_pane_id();
         if let Some(state) = self.pane_states.get(&focused) {
@@ -501,8 +502,16 @@ impl App {
                 return std::path::PathBuf::from(cwd);
             }
         }
-        // Prefer the process working directory (set by .app wrapper via `cd`)
-        // over $HOME, since $HOME is unlikely to be inside a git repo.
+        // VELOTERM_PROJECT_DIR is set by the .app wrapper to the directory
+        // where run.sh was invoked. This is more useful than "/" which is
+        // the default CWD when launched via `open`.
+        if let Ok(dir) = std::env::var("VELOTERM_PROJECT_DIR") {
+            let p = std::path::PathBuf::from(&dir);
+            if p.is_dir() {
+                return p;
+            }
+        }
+        // Process CWD (set by .app wrapper `cd`), falling back to HOME.
         std::env::current_dir().unwrap_or_else(|_| {
             std::env::var("HOME")
                 .map(std::path::PathBuf::from)

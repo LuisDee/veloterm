@@ -231,14 +231,20 @@ where
         event: &Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
-        _renderer: &iced_wgpu::Renderer,
-        _clipboard: &mut dyn Clipboard,
+        renderer: &iced_wgpu::Renderer,
+        clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
-        _viewport: &Rectangle,
+        viewport: &Rectangle,
     ) {
         let state = tree.state.downcast_mut::<SplitPanelState>();
         let bounds = layout.bounds();
+        let children: Vec<_> = layout.children().collect();
+        if children.len() < 3 {
+            return;
+        }
 
+        // Handle divider-specific events first — if the divider captures
+        // the event we return early so children don't also process it.
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
@@ -259,6 +265,7 @@ where
                         state.last_click = Some(now);
                         state.dragging = true;
                         shell.capture_event();
+                        return;
                     }
                 }
             }
@@ -266,6 +273,7 @@ where
                 if state.dragging {
                     state.dragging = false;
                     shell.capture_event();
+                    return;
                 }
             }
             Event::Mouse(mouse::Event::CursorMoved { .. }) => {
@@ -282,10 +290,35 @@ where
                         }
                     }
                     shell.capture_event();
+                    return;
                 }
             }
             _ => {}
         }
+
+        // Forward events to left child (children[0] layout)
+        self.left.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            children[0],
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        );
+
+        // Forward events to right child (children[2] layout, tree index 1)
+        self.right.as_widget_mut().update(
+            &mut tree.children[1],
+            event,
+            children[2],
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        );
     }
 
     fn mouse_interaction(
@@ -293,8 +326,8 @@ where
         tree: &Tree,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
-        _viewport: &Rectangle,
-        _renderer: &iced_wgpu::Renderer,
+        viewport: &Rectangle,
+        renderer: &iced_wgpu::Renderer,
     ) -> mouse::Interaction {
         let state = tree.state.downcast_ref::<SplitPanelState>();
         let bounds = layout.bounds();
@@ -306,6 +339,31 @@ where
         if let Some(pos) = cursor.position_in(bounds) {
             if divider_hit_test(pos.x, bounds.width, self.ratio, self.divider_width) {
                 return mouse::Interaction::ResizingHorizontally;
+            }
+        }
+
+        // Delegate to children
+        let children: Vec<_> = layout.children().collect();
+        if children.len() >= 3 {
+            let left = self.left.as_widget().mouse_interaction(
+                &tree.children[0],
+                children[0],
+                cursor,
+                viewport,
+                renderer,
+            );
+            if left != mouse::Interaction::default() {
+                return left;
+            }
+            let right = self.right.as_widget().mouse_interaction(
+                &tree.children[1],
+                children[2],
+                cursor,
+                viewport,
+                renderer,
+            );
+            if right != mouse::Interaction::default() {
+                return right;
             }
         }
 

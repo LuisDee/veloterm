@@ -77,6 +77,7 @@ case "$OS" in
 export RUST_LOG="$RUST_LOG"
 export SHELL="\${SHELL:-/bin/zsh}"
 export VELOTERM_PROJECT_DIR="$PROJECT_DIR"
+cd "$PROJECT_DIR"
 exec "\$(dirname "\$0")/veloterm-bin" >> "$LOG_FILE" 2>&1
 WRAPPER
         chmod +x "$APP/Contents/MacOS/veloterm"
