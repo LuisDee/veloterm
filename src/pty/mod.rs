@@ -214,6 +214,7 @@ fn prepare_shell_integration(shell: &str, cmd: &mut CommandBuilder) {
             let integration = include_str!("../../shell/bash-integration.sh");
             let wrapper = format!(
                 "# VeloTerm bash integration wrapper\n\
+                 trap '' USR1\n\
                  {BASH_STARSHIP_SUPPRESS}\n\
                  [ -f ~/.bashrc ] && source ~/.bashrc\n\
                  {BASH_STARSHIP_UNSUPPRESS}\n\
@@ -229,9 +230,11 @@ fn prepare_shell_integration(shell: &str, cmd: &mut CommandBuilder) {
             let integration = include_str!("../../shell/zsh-integration.sh");
             let zdotdir = "/tmp/veloterm-zdotdir";
             if std::fs::create_dir_all(zdotdir).is_ok() {
-                // .zshenv: restore ZDOTDIR so zsh finds user's other dotfiles,
-                // then source user's .zshenv
+                // .zshenv: install no-op SIGUSR1 handler immediately (before .zshrc/p10k),
+                // then restore ZDOTDIR so zsh finds user's other dotfiles.
+                // The real TRAPUSR1 in zsh-integration.sh replaces this once loaded.
                 let zshenv = "# VeloTerm zsh wrapper\n\
+                     TRAPUSR1() { : }\n\
                      ZDOTDIR=\"$HOME\"\n\
                      [ -f \"$HOME/.zshenv\" ] && source \"$HOME/.zshenv\"\n";
                 let _ = std::fs::write(format!("{zdotdir}/.zshenv"), zshenv);
