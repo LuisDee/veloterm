@@ -262,7 +262,7 @@ impl App {
     fn spawn_pane(&mut self, pane_id: PaneId, cols: u16, rows: u16) {
         let scrollback = self.app_config.scrollback.lines as usize;
         let shell = crate::pty::resolve_shell(&self.app_config.shell);
-        match crate::pty::PtySession::new_with_cwd(&shell, cols, rows, None, Some(&self.app_config.shell)) {
+        match crate::pty::PtySession::new_with_cwd(&shell, cols, rows, None, Some(&self.app_config.shell), Some(&self.app_config.colors.theme)) {
             Ok(pty) => {
                 log::info!(
                     "PTY spawned for pane {:?}: {shell} ({cols}x{rows})",
@@ -287,7 +287,7 @@ impl App {
     fn spawn_pane_with_cwd(&mut self, pane_id: PaneId, cols: u16, rows: u16, cwd: Option<&str>) {
         let scrollback = self.app_config.scrollback.lines as usize;
         let shell = crate::pty::resolve_shell(&self.app_config.shell);
-        match crate::pty::PtySession::new_with_cwd(&shell, cols, rows, cwd, Some(&self.app_config.shell)) {
+        match crate::pty::PtySession::new_with_cwd(&shell, cols, rows, cwd, Some(&self.app_config.shell), Some(&self.app_config.colors.theme)) {
             Ok(pty) => {
                 log::info!(
                     "PTY spawned for pane {:?}: {shell} ({cols}x{rows}) cwd={:?}",
@@ -801,13 +801,24 @@ impl App {
 
         if delta.colors_changed {
             if let Some(renderer) = &mut self.renderer {
-                let _theme = TerminalTheme::from_name(&self.app_config.colors.theme)
+                let theme = TerminalTheme::from_name(&self.app_config.colors.theme)
                     .unwrap_or_else(TerminalTheme::warm_dark);
+                renderer.set_theme(theme);
                 renderer.pane_damage_mut().force_full_damage_all();
             }
+            // Update macOS title bar to match new theme
             if let Some(window) = &self.window {
+                let theme = self.renderer.as_ref().map(|r| r.theme()).unwrap_or(&crate::config::theme::DARK);
+                #[cfg(target_os = "macos")]
+                crate::platform::macos::set_titlebar_color(
+                    window,
+                    theme.bg_surface.r as f64,
+                    theme.bg_surface.g as f64,
+                    theme.bg_surface.b as f64,
+                );
                 window.request_redraw();
             }
+            self.signal_theme_change_to_shells();
         }
 
         if delta.cursor_changed {
@@ -1255,6 +1266,20 @@ impl App {
             .unwrap_or((1280, 720))
     }
 
+    /// Write theme name to /tmp/veloterm-theme and send SIGUSR1 to all shell processes
+    /// so p10k (and other tools) can re-read the theme and update their prompt.
+    fn signal_theme_change_to_shells(&self) {
+        let _ = std::fs::write("/tmp/veloterm-theme", &self.app_config.colors.theme);
+        for state in self.pane_states.values() {
+            if let Some(pid) = state.pty.child_pid() {
+                #[cfg(unix)]
+                unsafe {
+                    libc::kill(pid as i32, libc::SIGUSR1);
+                }
+            }
+        }
+    }
+
     /// Returns true if the "super" modifier is held (Cmd on macOS, Ctrl on Linux).
     fn is_link_modifier_held(&self) -> bool {
         if !self.app_config.links.enabled {
@@ -1578,6 +1603,7 @@ impl App {
                         r.pane_damage_mut().force_full_damage_all();
                     }
                     self.app_config.colors.theme = config_name.to_string();
+                    self.signal_theme_change_to_shells();
                 }
             }
         }
@@ -2405,20 +2431,16 @@ impl ApplicationHandler<UserEvent> for App {
 
                     // Check for clipboard commands (Cmd+C, Cmd+V, Cmd+A)
                     if crate::input::clipboard::is_copy_keybinding(&event.logical_key, self.modifiers) {
-                        let theme = self.renderer.as_ref().map(|r| r.theme()).unwrap_or(&crate::config::theme::DARK);
                         if let Some(state) = self.pane_states.get_mut(&focused_id) {
                             if let Some(ref sel) = state.mouse_selection.active_selection {
-                                let cells = crate::terminal::grid_bridge::extract_grid_cells(&state.terminal, theme);
-                                let cols = state.terminal.columns();
-                                let display_offset = state.terminal.display_offset();
                                 let text = match sel.selection_type {
                                     crate::input::selection::SelectionType::VisualBlock => {
-                                        crate::input::selection::selected_text_block(&cells, sel, cols, display_offset)
+                                        crate::terminal::grid_bridge::grid_selected_text_block(&state.terminal, sel)
                                     }
                                     crate::input::selection::SelectionType::Line => {
-                                        crate::input::selection::selected_text_lines(&cells, sel, cols, display_offset)
+                                        crate::terminal::grid_bridge::grid_selected_text_lines(&state.terminal, sel)
                                     }
-                                    _ => crate::input::selection::selected_text(&cells, sel, cols, display_offset),
+                                    _ => crate::terminal::grid_bridge::grid_selected_text(&state.terminal, sel),
                                 };
                                 if !text.is_empty() {
                                     if let Ok(mut clipboard) = arboard::Clipboard::new() {
@@ -2451,9 +2473,10 @@ impl ApplicationHandler<UserEvent> for App {
                         if let Some(state) = self.pane_states.get_mut(&focused_id) {
                             let rows = state.terminal.rows();
                             let cols = state.terminal.columns();
+                            let history = state.terminal.history_size() as i32;
                             state.mouse_selection.active_selection = Some(
                                 crate::input::selection::Selection {
-                                    start: (0, 0),
+                                    start: (-history, 0),
                                     end: (rows.saturating_sub(1) as i32, cols.saturating_sub(1)),
                                     selection_type: crate::input::selection::SelectionType::Range,
                                     start_side: crate::input::selection::Side::Left,
@@ -3559,6 +3582,7 @@ impl ApplicationHandler<UserEvent> for App {
                                         r.pane_damage_mut().force_full_damage_all();
                                     }
                                     self.app_config.colors.theme = name.clone();
+                                    self.signal_theme_change_to_shells();
                                 }
                                 self.theme_selector_open = false;
                             }

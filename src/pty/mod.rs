@@ -280,16 +280,18 @@ impl PtySession {
 
     /// Spawn a new PTY session with the given shell and size.
     pub fn new(shell: &str, cols: u16, rows: u16) -> Result<Self, PtyError> {
-        Self::new_with_cwd(shell, cols, rows, None, None)
+        Self::new_with_cwd(shell, cols, rows, None, None, None)
     }
 
-    /// Spawn a new PTY session with the given shell, size, optional CWD, and optional config.
+    /// Spawn a new PTY session with the given shell, size, optional CWD, optional config,
+    /// and optional theme name (exported as VELOTERM_THEME).
     pub fn new_with_cwd(
         shell: &str,
         cols: u16,
         rows: u16,
         cwd: Option<&str>,
         shell_config: Option<&crate::config::types::ShellConfig>,
+        theme_name: Option<&str>,
     ) -> Result<Self, PtyError> {
         let pty_system = portable_pty::native_pty_system();
 
@@ -312,6 +314,13 @@ impl PtySession {
         // Remove RUST_LOG so it doesn't leak into the user's shell and cause
         // debug output from other Rust tools (fnm, ripgrep, etc.)
         cmd.env_remove("RUST_LOG");
+
+        // Export theme name so p10k and other tools can adapt per-theme
+        if let Some(theme) = theme_name {
+            cmd.env("VELOTERM_THEME", theme);
+            // Write theme to well-known path so TRAPUSR1 can read it on reload
+            let _ = std::fs::write("/tmp/veloterm-theme", theme);
+        }
 
         // Apply shell config: args, env, starship suppression
         if let Some(config) = shell_config {
@@ -731,7 +740,7 @@ mod tests {
     #[test]
     fn pty_session_with_shell_config() {
         let config = crate::config::types::ShellConfig::default();
-        let session = PtySession::new_with_cwd("/bin/sh", 80, 24, None, Some(&config));
+        let session = PtySession::new_with_cwd("/bin/sh", 80, 24, None, Some(&config), None);
         assert!(session.is_ok(), "PtySession with shell config should succeed");
     }
 

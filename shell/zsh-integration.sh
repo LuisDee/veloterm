@@ -38,3 +38,15 @@ __veloterm_preexec() {
 autoload -Uz add-zsh-hook
 add-zsh-hook precmd __veloterm_precmd
 add-zsh-hook preexec __veloterm_preexec
+
+# Theme change signal handler — re-read VELOTERM_THEME and reload p10k on SIGUSR1
+TRAPUSR1() {
+    if [[ -f /tmp/veloterm-theme ]]; then
+        export VELOTERM_THEME="$(< /tmp/veloterm-theme)"
+    fi
+    [[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
+    if (( $+functions[p10k] )); then
+        p10k reload
+    fi
+    zle && zle reset-prompt 2>/dev/null
+}

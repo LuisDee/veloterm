@@ -343,24 +343,24 @@ pub const LIGHT: TerminalTheme = TerminalTheme {
     search_match:        rgb(255, 240, 200), // #FFF0C8 — yellow light match
     search_match_active: rgb(255, 217, 102), // #FFD966 — bright gold active match
 
-    // ANSI palette
+    // ANSI palette — remapped for Anthropic brand personality (orange dirs, teal git)
     ansi: [
-        rgb(26, 26, 25),      // 0  Black
-        rgb(184, 76, 63),     // 1  Red
-        rgb(93, 122, 66),     // 2  Green
-        rgb(154, 123, 46),    // 3  Yellow
-        rgb(74, 125, 168),    // 4  Blue
-        rgb(124, 94, 160),    // 5  Magenta
-        rgb(77, 138, 131),    // 6  Cyan
-        rgb(74, 72, 67),      // 7  White
-        rgb(138, 135, 126),   // 8  Bright Black
-        rgb(196, 91, 78),     // 9  Bright Red
-        rgb(109, 138, 80),    // 10 Bright Green
-        rgb(168, 136, 58),    // 11 Bright Yellow
-        rgb(90, 141, 184),    // 12 Bright Blue
-        rgb(140, 110, 176),   // 13 Bright Magenta
-        rgb(93, 154, 147),    // 14 Bright Cyan
-        rgb(26, 26, 25),      // 15 Bright White
+        rgb(26, 26, 25),       // 0  Black
+        rgb(184, 76, 63),      // 1  Red
+        rgb(15, 118, 110),     // 2  Green→TEAL        #0f766e — git-clean = Anthropic teal
+        rgb(146, 64, 14),      // 3  Yellow→BROWN      #92400e — warm brown
+        rgb(217, 119, 6),      // 4  Blue→ORANGE       #d97706 — directories = Anthropic orange
+        rgb(124, 94, 160),     // 5  Magenta
+        rgb(13, 148, 136),     // 6  Cyan→LIGHT TEAL   #0d9488
+        rgb(74, 72, 67),       // 7  White
+        rgb(138, 135, 126),    // 8  Bright Black
+        rgb(196, 91, 78),      // 9  Bright Red
+        rgb(20, 148, 138),     // 10 Bright Green→TEAL
+        rgb(161, 81, 22),      // 11 Bright Yellow→BROWN
+        rgb(234, 137, 20),     // 12 Bright Blue→ORANGE
+        rgb(140, 110, 176),    // 13 Bright Magenta
+        rgb(45, 168, 158),     // 14 Bright Cyan→TEAL
+        rgb(26, 26, 25),       // 15 Bright White
     ],
 };
 
@@ -459,21 +459,21 @@ pub const EMBER: TerminalTheme = TerminalTheme {
     search_match:        rgb(80, 65, 28),
     search_match_active: rgb(120, 95, 20),
 
-    // ANSI palette
+    // ANSI palette — remapped for fire personality (burnt orange dirs, rust git)
     ansi: [
         rgb(0x1a, 0x14, 0x12), // 0  Black
         rgb(0xc4, 0x5b, 0x5b), // 1  Red
-        rgb(0x8a, 0x9b, 0x68), // 2  Green
-        rgb(0xc9, 0xa8, 0x4c), // 3  Yellow
-        rgb(0x6a, 0x9b, 0xcc), // 4  Blue
-        rgb(0xc4, 0xa0, 0xd0), // 5  Magenta
-        rgb(0x7d, 0xaf, 0xa8), // 6  Cyan
+        rgb(0xd9, 0x77, 0x57), // 2  Green→RUST ORANGE   — git-clean = warm rust
+        rgb(0xc9, 0xa8, 0x4c), // 3  Yellow              — amber
+        rgb(0xc4, 0x7a, 0x30), // 4  Blue→BURNT ORANGE   — directories = burnt orange
+        rgb(0xc4, 0xa0, 0xd0), // 5  Magenta             — keep lavender for contrast
+        rgb(0x7d, 0xaf, 0xa8), // 6  Cyan                — keep teal for contrast
         rgb(0xa8, 0x90, 0x80), // 7  White
         rgb(0x4a, 0x3d, 0x34), // 8  Bright Black
         rgb(0xd9, 0x72, 0x6b), // 9  Bright Red
-        rgb(0x8f, 0xa8, 0x6d), // 10 Bright Green
+        rgb(0xe8, 0x8a, 0x68), // 10 Bright Green→ORANGE
         rgb(0xd4, 0xb9, 0x5e), // 11 Bright Yellow
-        rgb(0x82, 0xb0, 0xd9), // 12 Bright Blue
+        rgb(0xd9, 0x94, 0x48), // 12 Bright Blue→ORANGE
         rgb(0xd1, 0xb8, 0xee), // 13 Bright Magenta
         rgb(0x8f, 0xc2, 0xbb), // 14 Bright Cyan
         rgb(0xe0, 0xd8, 0xcc), // 15 Bright White
@@ -517,23 +517,23 @@ pub const DUSK: TerminalTheme = TerminalTheme {
     search_match:        rgb(100, 82, 35),
     search_match_active: rgb(145, 110, 25),
 
-    // ANSI palette
+    // ANSI palette — remapped for twilight personality (purple dirs, teal git)
     ansi: [
         rgb(0x2c, 0x2b, 0x28), // 0  Black
         rgb(0xc4, 0x5b, 0x5b), // 1  Red
-        rgb(0x78, 0x8c, 0x5d), // 2  Green
+        rgb(0x7d, 0xaf, 0xa8), // 2  Green→TEAL          — git-clean = teal
         rgb(0xc9, 0xa8, 0x4c), // 3  Yellow
-        rgb(0x6a, 0x9b, 0xcc), // 4  Blue
-        rgb(0xc4, 0xa7, 0xe7), // 5  Magenta
-        rgb(0x7d, 0xaf, 0xa8), // 6  Cyan
+        rgb(0xc4, 0xa7, 0xe7), // 4  Blue→PURPLE         — directories = soft purple
+        rgb(0x6a, 0x9b, 0xcc), // 5  Magenta→BLUE        — swap to blue
+        rgb(0x78, 0x8c, 0x5d), // 6  Cyan→GREEN          — swap to green
         rgb(0xb5, 0xb2, 0xa8), // 7  White
         rgb(0x5e, 0x5c, 0x55), // 8  Bright Black
         rgb(0xd9, 0x72, 0x6b), // 9  Bright Red
-        rgb(0x8f, 0xa8, 0x6d), // 10 Bright Green
+        rgb(0x8f, 0xc2, 0xbb), // 10 Bright Green→TEAL
         rgb(0xd4, 0xb9, 0x5e), // 11 Bright Yellow
-        rgb(0x82, 0xb0, 0xd9), // 12 Bright Blue
-        rgb(0xd1, 0xb8, 0xee), // 13 Bright Magenta
-        rgb(0x8f, 0xc2, 0xbb), // 14 Bright Cyan
+        rgb(0xd1, 0xb8, 0xee), // 12 Bright Blue→PURPLE
+        rgb(0x82, 0xb0, 0xd9), // 13 Bright Mag→BLUE
+        rgb(0x8f, 0xa8, 0x6d), // 14 Bright Cyan→GREEN
         rgb(0xec, 0xe9, 0xe0), // 15 Bright White
     ],
 };
@@ -575,24 +575,24 @@ pub const NEON_FORGE: TerminalTheme = TerminalTheme {
     search_match:        rgb(61, 74, 30),
     search_match_active: rgb(107, 122, 20),
 
-    // ANSI palette
+    // ANSI palette — remapped for neon personality (purple dirs, orange git, cyan untracked)
     ansi: [
-        rgb(21, 22, 30),       // 0  Black
-        rgb(247, 118, 142),    // 1  Red
-        rgb(158, 206, 106),    // 2  Green
-        rgb(224, 175, 104),    // 3  Yellow
-        rgb(122, 162, 247),    // 4  Blue
-        rgb(187, 154, 247),    // 5  Magenta
-        rgb(125, 207, 255),    // 6  Cyan
-        rgb(169, 177, 214),    // 7  White
-        rgb(65, 72, 104),      // 8  Bright Black
-        rgb(255, 154, 158),    // 9  Bright Red
-        rgb(185, 242, 124),    // 10 Bright Green
-        rgb(255, 214, 138),    // 11 Bright Yellow
-        rgb(154, 189, 255),    // 12 Bright Blue
-        rgb(208, 176, 255),    // 13 Bright Magenta
-        rgb(164, 228, 255),    // 14 Bright Cyan
-        rgb(192, 202, 245),    // 15 Bright White
+        rgb(21, 22, 30),       // 0  Black          #15161e
+        rgb(247, 118, 142),    // 1  Red             #f7768e — rose pink
+        rgb(255, 158, 100),    // 2  Green→ORANGE    #ff9e64 — git-clean = vivid orange
+        rgb(224, 175, 104),    // 3  Yellow          #e0af68 — warm amber
+        rgb(187, 154, 247),    // 4  Blue→PURPLE     #bb9af7 — directories = vivid purple
+        rgb(125, 207, 255),    // 5  Magenta→CYAN    #7dcfff — untracked = sky cyan
+        rgb(122, 162, 247),    // 6  Cyan→BLUE       #7aa2f7 — electric blue
+        rgb(169, 177, 214),    // 7  White           #a9b1d6
+        rgb(65, 72, 104),      // 8  Bright Black    #414868
+        rgb(255, 154, 158),    // 9  Bright Red      #ff9a9e
+        rgb(255, 199, 125),    // 10 Bright Green→ORANGE #ffc77d
+        rgb(255, 214, 138),    // 11 Bright Yellow   #ffd68a
+        rgb(208, 176, 255),    // 12 Bright Blue→PURPLE #d0b0ff
+        rgb(164, 228, 255),    // 13 Bright Mag→CYAN #a4e4ff
+        rgb(154, 189, 255),    // 14 Bright Cyan→BLUE #9abdff
+        rgb(192, 202, 245),    // 15 Bright White    #c0caf5
     ],
 };
 
