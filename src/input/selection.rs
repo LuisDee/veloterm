@@ -110,7 +110,7 @@ pub fn find_word_boundaries(
 /// Normalize selection so start is before end in reading order.
 /// Returns ((row, col), (row, col)) — purely positional, no Side adjustments.
 /// This ensures symmetric results regardless of drag direction.
-fn normalize(selection: &Selection) -> ((i32, usize), (i32, usize)) {
+pub fn normalize(selection: &Selection) -> ((i32, usize), (i32, usize)) {
     let (s, e) = (selection.start, selection.end);
     if s.0 < e.0 || (s.0 == e.0 && s.1 <= e.1) {
         (s, e)

@@ -207,6 +207,94 @@ pub fn extract_grid_cells(terminal: &super::Terminal, theme: &TerminalTheme) -> 
     cells
 }
 
+/// Extract selected text directly from the terminal grid (includes scrollback).
+/// Unlike `selected_text()` which reads from viewport-only cells,
+/// this reads from the full grid buffer so off-screen rows are included.
+pub fn grid_selected_text(terminal: &super::Terminal, selection: &crate::input::selection::Selection) -> String {
+    use crate::input::selection::normalize;
+
+    let term = terminal.inner();
+    let grid = term.grid();
+    let cols = grid.columns();
+    let history = grid.history_size() as i32;
+    let screen_lines = grid.screen_lines() as i32;
+    let (start, end) = normalize(selection);
+    let mut lines = Vec::new();
+
+    for abs_row in start.0..=end.0 {
+        if abs_row < -history || abs_row >= screen_lines {
+            continue;
+        }
+        let col_start = if abs_row == start.0 { start.1 } else { 0 };
+        let col_end = if abs_row == end.0 { end.1 } else { cols - 1 };
+
+        let mut line = String::new();
+        for col in col_start..=col_end.min(cols - 1) {
+            let point = Point::new(Line(abs_row), Column(col));
+            line.push(grid[point].c);
+        }
+        lines.push(line.trim_end().to_string());
+    }
+
+    lines.join("\n")
+}
+
+/// Extract selected text from a visual-block (rectangular) selection directly from the grid.
+pub fn grid_selected_text_block(terminal: &super::Terminal, selection: &crate::input::selection::Selection) -> String {
+    use crate::input::selection::normalize;
+
+    let term = terminal.inner();
+    let grid = term.grid();
+    let cols = grid.columns();
+    let history = grid.history_size() as i32;
+    let screen_lines = grid.screen_lines() as i32;
+    let (start, end) = normalize(selection);
+    let col_min = start.1.min(end.1);
+    let col_max = start.1.max(end.1);
+    let mut lines = Vec::new();
+
+    for abs_row in start.0..=end.0 {
+        if abs_row < -history || abs_row >= screen_lines {
+            continue;
+        }
+        let mut line = String::new();
+        for col in col_min..=col_max.min(cols - 1) {
+            let point = Point::new(Line(abs_row), Column(col));
+            line.push(grid[point].c);
+        }
+        lines.push(line.trim_end().to_string());
+    }
+
+    lines.join("\n")
+}
+
+/// Extract selected text from a line selection directly from the grid (full rows).
+pub fn grid_selected_text_lines(terminal: &super::Terminal, selection: &crate::input::selection::Selection) -> String {
+    use crate::input::selection::normalize;
+
+    let term = terminal.inner();
+    let grid = term.grid();
+    let cols = grid.columns();
+    let history = grid.history_size() as i32;
+    let screen_lines = grid.screen_lines() as i32;
+    let (start, end) = normalize(selection);
+    let mut lines = Vec::new();
+
+    for abs_row in start.0..=end.0 {
+        if abs_row < -history || abs_row >= screen_lines {
+            continue;
+        }
+        let mut line = String::new();
+        for col in 0..cols {
+            let point = Point::new(Line(abs_row), Column(col));
+            line.push(grid[point].c);
+        }
+        lines.push(line.trim_end().to_string());
+    }
+
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -624,5 +712,132 @@ mod tests {
         assert!(lines[0].starts_with("AAA"));
         assert!(lines[1].starts_with("BBB"));
         assert!(lines[2].starts_with("CCC"));
+    }
+
+    // ── Grid-direct text extraction (scrollback-aware) ─────────────
+
+    use crate::input::selection::{Selection, SelectionType, Side};
+
+    #[test]
+    fn grid_selected_text_viewport_only() {
+        let mut term = Terminal::new(20, 3, 100);
+        term.feed(b"hello world\r\nsecond line");
+        let sel = Selection {
+            start: (0, 0),
+            end: (0, 4),
+            selection_type: SelectionType::Range,
+            start_side: Side::Left,
+            end_side: Side::Right,
+        };
+        let text = grid_selected_text(&term, &sel);
+        assert_eq!(text, "hello");
+    }
+
+    #[test]
+    fn grid_selected_text_spans_scrollback() {
+        let mut term = Terminal::new(20, 3, 100);
+        // Write 6 lines to push content into scrollback.
+        // After: screen=[line 4, line 5, ""], history=[line 0, line 1, line 2, line 3]
+        // History size = 4, so rows -4..-1 are scrollback, rows 0..2 are screen.
+        for i in 0..6 {
+            term.feed(format!("line {}\r\n", i).as_bytes());
+        }
+        let history = term.history_size() as i32;
+        // Select from first scrollback row to first screen row
+        let sel = Selection {
+            start: (-history, 0),
+            end: (0, 5),
+            selection_type: SelectionType::Range,
+            start_side: Side::Left,
+            end_side: Side::Right,
+        };
+        let text = grid_selected_text(&term, &sel);
+        assert!(text.contains("line 0"), "should contain scrollback line 0, got: {text}");
+        assert!(text.contains("line 4"), "should contain screen line 4, got: {text}");
+    }
+
+    #[test]
+    fn grid_selected_text_entirely_in_scrollback() {
+        let mut term = Terminal::new(20, 3, 100);
+        for i in 0..6 {
+            term.feed(format!("line {}\r\n", i).as_bytes());
+        }
+        let history = term.history_size() as i32;
+        // Select only the two oldest scrollback rows
+        let sel = Selection {
+            start: (-history, 0),
+            end: (-history + 1, 5),
+            selection_type: SelectionType::Range,
+            start_side: Side::Left,
+            end_side: Side::Right,
+        };
+        let text = grid_selected_text(&term, &sel);
+        assert!(text.contains("line 0"), "should contain line 0, got: {text}");
+        assert!(text.contains("line 1"), "should contain line 1, got: {text}");
+        assert!(!text.contains("line 4"), "should NOT contain screen content");
+    }
+
+    #[test]
+    fn grid_selected_text_block_spans_scrollback() {
+        let mut term = Terminal::new(20, 3, 100);
+        for i in 0..6 {
+            term.feed(format!("line {}\r\n", i).as_bytes());
+        }
+        let history = term.history_size() as i32;
+        // Block selection cols 0-3 from oldest scrollback to first screen row
+        let sel = Selection {
+            start: (-history, 0),
+            end: (0, 3),
+            selection_type: SelectionType::VisualBlock,
+            start_side: Side::Left,
+            end_side: Side::Right,
+        };
+        let text = grid_selected_text_block(&term, &sel);
+        // Each line with content should have "line" (cols 0-3)
+        let text_lines: Vec<&str> = text.lines().collect();
+        assert_eq!(text_lines.len(), (history + 1) as usize);
+        for line in &text_lines {
+            assert_eq!(*line, "line", "each row cols 0-3 should be 'line', got: {line}");
+        }
+    }
+
+    #[test]
+    fn grid_selected_text_lines_spans_scrollback() {
+        let mut term = Terminal::new(20, 3, 100);
+        for i in 0..6 {
+            term.feed(format!("line {}\r\n", i).as_bytes());
+        }
+        let history = term.history_size() as i32;
+        // Line selection from oldest scrollback to first screen row
+        let sel = Selection {
+            start: (-history, 0),
+            end: (0, 19),
+            selection_type: SelectionType::Line,
+            start_side: Side::Left,
+            end_side: Side::Right,
+        };
+        let text = grid_selected_text_lines(&term, &sel);
+        assert!(text.contains("line 0"), "should contain scrollback line 0, got: {text}");
+        assert!(text.contains("line 4"), "should contain screen line 4, got: {text}");
+    }
+
+    #[test]
+    fn grid_selected_text_clamps_to_history() {
+        let mut term = Terminal::new(20, 3, 5);
+        // Feed 10 lines with max scrollback of 5
+        for i in 0..10 {
+            term.feed(format!("line {}\r\n", i).as_bytes());
+        }
+        // Try to select from row -100 (way beyond history)
+        let sel = Selection {
+            start: (-100, 0),
+            end: (2, 19),
+            selection_type: SelectionType::Range,
+            start_side: Side::Left,
+            end_side: Side::Right,
+        };
+        let text = grid_selected_text(&term, &sel);
+        // Should not panic, and should contain some text from valid rows
+        assert!(!text.is_empty(), "should have extracted some text");
     }
 }
